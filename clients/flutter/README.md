@@ -22,8 +22,11 @@ Layout:
   `ChangeNotifier` (the equivalent of the web client's `st` object).
 - `lib/board.dart` - classic 40-tile ring on an 11x11 grid, wrap fallback
   for modded board sizes.
-- `lib/main.dart` - login screen, game screen, per-phase action buttons,
-  tile owner menu, trade composer.
+- `lib/oidc.dart` - OIDC Authorization Code + PKCE login against the
+  identity provider (ADR-0009): system browser + loopback redirect; the
+  id_token stays in memory only.
+- `lib/main.dart` - login screen (guest name or account sign-in), game
+  screen, per-phase action buttons, tile owner menu, trade composer.
 
 Only dependency: `web_socket_channel`. State management is a single
 `ChangeNotifier` on purpose - the whole client state is one object pushed

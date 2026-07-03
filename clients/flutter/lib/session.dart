@@ -39,6 +39,12 @@ class GameSession extends ChangeNotifier {
     } catch (_) {}
   }
 
+  // ponytail: the issuer URL rides in the reconnect-token file under a
+  // reserved key (room codes are exactly 5 uppercase letters, no clash);
+  // split into a prefs file if more settings ever appear.
+  String get savedIssuer => _reconnectTokens['_issuer'] ?? '';
+  void saveIssuer(String url) => _saveToken('_issuer', url);
+
   int? seat;
   String? code;
   GameContent? content;

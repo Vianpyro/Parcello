@@ -85,6 +85,11 @@ Docker: `docker build -t parcello . && docker run -p 7878:7878 parcello`
 (mount a volume and add `--history data/parcello.db` for persistence), or
 pull the published image: `ghcr.io/vianpyro/parcello-server`.
 
+Accounts are optional and only exist for continuity/stats: guests can
+always play. The Flutter client has a "Sign in with account" button
+(OIDC + PKCE against your identity provider); the web client and CLI
+accept a pasted token.
+
 ## Releases
 
 Bumping the workspace `version` in `Cargo.toml` on `main` triggers

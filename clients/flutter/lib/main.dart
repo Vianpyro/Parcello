@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'board.dart';
+import 'oidc.dart';
 import 'session.dart';
 
 void main() => runApp(ParcelloApp(session: GameSession()));
@@ -50,6 +51,49 @@ class _LoginScreenState extends State<LoginScreen> {
   final _code = TextEditingController();
   final _mods = TextEditingController();
   final _token = TextEditingController();
+  String? _signedInAs;
+
+  /// OIDC login (ADR-0009): asks for the issuer URL, runs the browser
+  /// PKCE flow, and drops the id_token into the token field.
+  Future<void> _signIn() async {
+    final s = widget.s;
+    final issuer = TextEditingController(
+        text: s.savedIssuer.isEmpty ? 'https://' : s.savedIssuer);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sign in'),
+        content: TextField(
+          controller: issuer,
+          decoration: const InputDecoration(
+              labelText: 'Identity provider URL',
+              hintText: 'https://auth.example.com'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Open browser')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      s.saveIssuer(issuer.text.trim());
+      final token = await loginWithOidc(issuer.text.trim(), 'parcello');
+      setState(() {
+        _token.text = token;
+        _signedInAs = jwtDisplayName(token) ?? 'account';
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Sign-in failed: $e')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -98,6 +142,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   obscureText: true,
                   decoration: const InputDecoration(
                       labelText: 'Identity token (optional)'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: _signIn,
+                  child: Text(_signedInAs == null
+                      ? 'Sign in with account'
+                      : 'Signed in as $_signedInAs'),
                 ),
                 const SizedBox(height: 12),
                 FilledButton(

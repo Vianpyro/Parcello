@@ -154,9 +154,52 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "v${{ needs.version.outputs.version }}" parcello-client-v*
 
+  # Steam-ready all-in-one: client at the root, server + mods in server/.
+  # The linux variant also covers the Steam Deck (linux x64).
+  bundle:
+    name: all-in-one (${{ matrix.label }})
+    needs: [version, server, client]
+    if: needs.version.outputs.release == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+          - os: ubuntu-latest
+            label: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: assemble and upload (windows)
+        if: runner.os == 'Windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $V = "${{ needs.version.outputs.version }}"
+          gh release download "v$V" --pattern "parcello-server-v$V-windows-x64.zip" --pattern "parcello-client-v$V-windows-x64.zip"
+          Expand-Archive "parcello-client-v$V-windows-x64.zip" -DestinationPath allinone
+          Expand-Archive "parcello-server-v$V-windows-x64.zip" -DestinationPath tmp
+          Move-Item tmp/parcello allinone/server
+          Compress-Archive -Path allinone/* -DestinationPath "parcello-allinone-v$V-windows-x64.zip"
+          gh release upload "v$V" "parcello-allinone-v$V-windows-x64.zip"
+      - name: assemble and upload (linux)
+        if: runner.os == 'Linux'
+        # tar keeps the executable bits, which zip would lose.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          gh release download "v$V" --pattern "parcello-server-v$V-linux-x64.tar.gz" --pattern "parcello-client-v$V-linux-x64.tar.gz"
+          mkdir -p parcello/server
+          tar -xzf "parcello-client-v$V-linux-x64.tar.gz" -C parcello --strip-components=1
+          tar -xzf "parcello-server-v$V-linux-x64.tar.gz" -C parcello/server --strip-components=1
+          tar -czf "parcello-allinone-v$V-linux-x64.tar.gz" parcello
+          gh release upload "v$V" "parcello-allinone-v$V-linux-x64.tar.gz"
+
   publish:
     name: publish release
-    needs: [version, server, client]
+    needs: [version, server, client, bundle]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:

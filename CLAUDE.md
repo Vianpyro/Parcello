@@ -66,10 +66,14 @@ CI (`.github/workflows/ci.yml`): stable job runs `fmt --check`,
 Releases (`.github/workflows/release.yml`): bumping the workspace version
 in `Cargo.toml` on main tags `vX.Y.Z` and publishes a GitHub release with
 server+CLI binaries (linux x64/arm64, windows, macos arm64; `mods/`
-bundled), Flutter client bundles (windows/linux/macos), and a GHCR image
+bundled), Flutter client bundles (windows/linux/macos), all-in-one
+archives for windows and linux (client + server, Steam-depot-shaped; the
+linux one also fits the Steam Deck), and a GHCR image
 (`ghcr.io/<owner>/parcello-server`, amd64). Keep the pubspec version in
 step. The release goes live only after all binary jobs succeed
-(draft-then-publish); the docker job is independent.
+(draft-then-publish); the docker job is independent. Dependency licenses
+are all permissive (checked 2026-07 with cargo-license; keep it that way
+- commercial distribution is planned).
 
 ## Architecture map
 
@@ -190,10 +194,11 @@ opt-in (`--turn-timeout`, off by default).
 1. Flutter client polish (`clients/flutter` exists: full protocol, board,
    trades, tests; still needs real multiplayer playtesting and
    Android/mobile targets).
-2. Identity: verifier side DONE (`eddsa.rs`, ADR-0009). Remaining: deploy
-   the OIDC issuer (Rauthy recommended), then a login flow in the clients
-   (today the token is pasted manually); remove HS256 one release after
-   EdDSA sees real use.
+2. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
+   the Flutter client (`oidc.dart`: PKCE + system browser + loopback; web
+   and CLI paste the token manually). Remaining: deploy the Rauthy issuer.
+   HS256 removal is DEFERRED until LAN/WAN playtests have happened (owner
+   decision, 2026-07) - do not delete it before then.
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Unblocked since the MSRV moved
    to 1.96; pick a current Wasmtime.
