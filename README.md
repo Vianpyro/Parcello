@@ -141,8 +141,8 @@ Movement with Go salary, property purchase offers, trading (asynchronous
 offers of cash and/or house-free-group tiles between any solvent players,
 re-validated at acceptance so stale offers reject without side effects;
 blocked during auctions to preserve the auction's solvency invariant;
-capped at 4 open offers per proposer; offers are public in the client
-view), auctions on declined
+capped at 4 open offers per proposer; offers are private - only the two
+parties see them and their lifecycle events), auctions on declined
 purchases (round-robin left of the decliner, strict raises capped by cash,
 high bidder skipped until outbid, no bids leaves the tile unsold; disable
 with `rules.auction_on_decline = 0`), rent (full-group doubles
@@ -187,11 +187,11 @@ See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside
 0004 server-wide mod set (room `Starting` state collapses to a point);
 0005 rusqlite writer thread instead of SQLx behind `GameHistory`;
 0006 per-room mod sets at creation (amends 0004, `Starting` stays
-collapsed).
+collapsed); 0007 private trade offers via per-seat `ClientView`s.
 
 ## Roadmap
 
 Flutter client polish (a Windows-desktop client lives in `clients/flutter`,
 see its README); Global Identity Service (asymmetric JWT, JWKS); WASM
-(Wasmtime) mod plugins behind `ModPlugin`; private trade offers;
-reconnect tokens; richer history queries (stats) if needed.
+(Wasmtime) mod plugins behind `ModPlugin`; reconnect tokens; richer
+history queries (stats) if needed.

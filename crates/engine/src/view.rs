@@ -1,6 +1,8 @@
 //! Public projection of `GameState` pushed to clients. Deliberately excludes
 //! the PRNG seed and deck order: exposing either would make dice and card
-//! draws predictable. Cash is public, as in the reference game.
+//! draws predictable. Cash is public, as in the reference game; trade
+//! offers are visible only to their two parties (ADR-0007), so the session
+//! layer builds one view per seat with `for_seat`.
 
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +34,17 @@ pub struct PlayerView {
 }
 
 impl ClientView {
+    /// Projection for one seat: everything public plus only the trade
+    /// offers this seat proposed or received.
+    pub fn for_seat(state: &GameState, seat: usize) -> Self {
+        let mut view = Self::of(state);
+        view.pending_trades
+            .retain(|t| t.from == seat || t.to == seat);
+        view
+    }
+
+    /// Omniscient projection (every open offer). Test/replay tooling only:
+    /// the server must always send `for_seat` views.
     pub fn of(state: &GameState) -> Self {
         Self {
             phase: state.phase,

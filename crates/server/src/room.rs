@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parcello_engine::{
-    ClientView, CommandError, CommandKind, Engine, GamePhase, GameState, PlayerCommand, PlayerId,
-    TurnPhase,
+    ClientView, CommandError, CommandKind, Engine, Event, GamePhase, GameState, PlayerCommand,
+    PlayerId, TurnPhase,
 };
 use parcello_mods::ResolvedContent;
 use parcello_protocol::{SeatInfo, ServerMessage};
@@ -83,6 +83,18 @@ pub async fn create_room(
     };
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
+}
+
+/// Trade lifecycle events are private to their two parties (ADR-0007);
+/// everything else is public.
+fn event_visible_to(event: &Event, seat: usize) -> bool {
+    match *event {
+        Event::TradeProposed { from, to, .. }
+        | Event::TradeAccepted { from, to, .. }
+        | Event::TradeDeclined { from, to, .. }
+        | Event::TradeCancelled { from, to, .. } => seat == from || seat == to,
+        _ => true,
+    }
 }
 
 fn random_code() -> String {
@@ -214,7 +226,9 @@ impl Room {
 
         let view = match &self.phase {
             Phase::Lobby => None,
-            Phase::Active(state) | Phase::Finished(state) => Some(Box::new(ClientView::of(state))),
+            Phase::Active(state) | Phase::Finished(state) => {
+                Some(Box::new(ClientView::for_seat(state, seat_index)))
+            }
         };
         let joined = ServerMessage::Joined {
             code: self.code.clone(),
@@ -282,9 +296,13 @@ impl Room {
         );
         info!(room = %self.code, players = self.seats.len(), "game started");
 
-        let view = Box::new(ClientView::of(&state));
+        let msgs: Vec<ServerMessage> = (0..self.seats.len())
+            .map(|seat| ServerMessage::GameStarted {
+                view: Box::new(ClientView::for_seat(&state, seat)),
+            })
+            .collect();
         self.phase = Phase::Active(state);
-        self.broadcast(ServerMessage::GameStarted { view });
+        self.send_per_seat(msgs);
         true
     }
 
@@ -317,12 +335,23 @@ impl Room {
                     GamePhase::Finished { winner } => Some(winner),
                     GamePhase::Active => None,
                 };
-                let view = Box::new(ClientView::of(&next));
+                // One view + event feed per seat: trade offers and their
+                // lifecycle events reach only the two parties (ADR-0007).
+                let msgs: Vec<ServerMessage> = (0..self.seats.len())
+                    .map(|seat| ServerMessage::Update {
+                        events: events
+                            .iter()
+                            .filter(|e| event_visible_to(e, seat))
+                            .cloned()
+                            .collect(),
+                        view: Box::new(ClientView::for_seat(&next, seat)),
+                    })
+                    .collect();
                 self.phase = match finished_winner {
                     Some(_) => Phase::Finished(next),
                     None => Phase::Active(next),
                 };
-                self.broadcast(ServerMessage::Update { events, view });
+                self.send_per_seat(msgs);
                 if let Some(winner) = finished_winner {
                     let winner_id = self
                         .seats
@@ -370,6 +399,17 @@ impl Room {
         }
     }
 
+    /// Delivers `msgs[i]` to seat `i` (per-seat views, ADR-0007).
+    fn send_per_seat(&mut self, msgs: Vec<ServerMessage>) {
+        for (seat, msg) in msgs.into_iter().enumerate() {
+            if let Some(tx) = &self.seats[seat].tx {
+                if tx.send(msg).is_err() {
+                    self.seats[seat].tx = None;
+                }
+            }
+        }
+    }
+
     fn send_to(&mut self, player_id: &str, msg: ServerMessage) {
         let Some(i) = self.seat_of(player_id) else {
             warn!(room = %self.code, player = %player_id, "message for unknown seat");
@@ -404,6 +444,95 @@ mod tests {
     use crate::history::MemoryHistory;
     use parcello_engine::Event;
     use std::path::Path;
+
+    /// A third party must receive neither the trade event nor the offer in
+    /// its view (ADR-0007): per-seat routing through the real room task.
+    #[tokio::test]
+    async fn trade_offers_are_invisible_to_third_parties() {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
+        let code = create_room(&rooms, content, history, None)
+            .await
+            .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let mut client_rxs = Vec::new();
+        for name in ["alice", "bob", "carol"] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (reply, joined) = oneshot::channel();
+            room.send(RoomCmd::Join {
+                identity: Identity {
+                    player_id: format!("guest:{name}"),
+                    name: name.to_string(),
+                },
+                tx,
+                reply,
+            })
+            .await
+            .expect("room task alive");
+            joined.await.expect("reply sent").expect("join accepted");
+            client_rxs.push(rx);
+        }
+        room.send(RoomCmd::Start {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+        room.send(RoomCmd::Game {
+            player_id: "guest:alice".into(),
+            cmd: CommandKind::ProposeTrade {
+                to: "guest:bob".into(),
+                give_cash: 50,
+                give_tiles: vec![],
+                receive_cash: 0,
+                receive_tiles: vec![],
+            },
+        })
+        .await
+        .expect("room task alive");
+
+        // First Update after GameStarted is the accepted trade proposal.
+        let mut update_for = |seat: usize| {
+            let rx = &mut client_rxs[seat];
+            loop {
+                match rx.try_recv() {
+                    Ok(ServerMessage::Update { events, view }) => break (events, view),
+                    Ok(_) => continue,
+                    Err(_) => panic!("seat {seat} never received an Update"),
+                }
+            }
+        };
+        // Give the room task time to process both commands.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let (events, view) = update_for(1);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::TradeProposed { .. })),
+            "recipient must see the proposal"
+        );
+        assert_eq!(view.pending_trades.len(), 1);
+
+        let (events, view) = update_for(2);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::TradeProposed { .. })),
+            "third party must not see the trade event"
+        );
+        assert!(
+            view.pending_trades.is_empty(),
+            "third party must not see the offer"
+        );
+    }
 
     /// With a paused clock and zero player input, the room task must play
     /// canonical actions on its own once the per-turn deadline passes.

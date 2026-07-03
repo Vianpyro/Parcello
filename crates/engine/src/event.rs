@@ -59,11 +59,17 @@ pub enum Event {
         from: usize,
         to: usize,
     },
+    /// `from`/`to` let the session layer route trade lifecycle events to
+    /// the two parties only (ADR-0007: offers are private).
     TradeDeclined {
         trade: u32,
+        from: usize,
+        to: usize,
     },
     TradeCancelled {
         trade: u32,
+        from: usize,
+        to: usize,
     },
     AuctionStarted {
         tile: usize,

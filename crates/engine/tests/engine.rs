@@ -647,6 +647,40 @@ fn view_hides_rng_and_deck_order() {
 }
 
 #[test]
+fn seat_view_shows_only_own_trade_offers() {
+    // 3 players; p0 offers to p1. p2's view must not contain the offer,
+    // the omniscient view keeps it (ADR-0007).
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = engine.new_game(
+        vec![
+            ("p0".into(), "P0".into()),
+            ("p1".into(), "P1".into()),
+            ("p2".into(), "P2".into()),
+        ],
+        42,
+    );
+    st.tiles[2].owner = Some(0);
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::ProposeTrade {
+                to: "p1".into(),
+                give_cash: 0,
+                give_tiles: vec!["ave_a".into()],
+                receive_cash: 100,
+                receive_tiles: vec![],
+            },
+        ),
+    );
+    assert_eq!(ClientView::of(&st).pending_trades.len(), 1);
+    assert_eq!(ClientView::for_seat(&st, 0).pending_trades.len(), 1);
+    assert_eq!(ClientView::for_seat(&st, 1).pending_trades.len(), 1);
+    assert!(ClientView::for_seat(&st, 2).pending_trades.is_empty());
+}
+
+#[test]
 fn command_wire_format_is_stable() {
     let c = cmd(
         "p0",
@@ -1159,7 +1193,7 @@ fn stale_trade_rejects_without_mutation_and_can_be_declined() {
     );
     assert!(ev
         .iter()
-        .any(|e| matches!(e, Event::TradeDeclined { trade: 0 })));
+        .any(|e| matches!(e, Event::TradeDeclined { trade: 0, .. })));
     assert!(st.pending_trades.is_empty());
 }
 
@@ -1195,7 +1229,7 @@ fn trade_party_rules_and_cancellation() {
     );
     assert!(ev
         .iter()
-        .any(|e| matches!(e, Event::TradeCancelled { trade: 0 })));
+        .any(|e| matches!(e, Event::TradeCancelled { trade: 0, .. })));
     assert!(st.pending_trades.is_empty());
 }
 

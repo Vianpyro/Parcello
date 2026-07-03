@@ -358,8 +358,8 @@ impl Ctx {
                 self.player(*to),
                 self.player(*from)
             ),
-            Event::TradeDeclined { trade } => format!("trade #{trade} declined"),
-            Event::TradeCancelled { trade } => format!("trade #{trade} cancelled"),
+            Event::TradeDeclined { trade, .. } => format!("trade #{trade} declined"),
+            Event::TradeCancelled { trade, .. } => format!("trade #{trade} cancelled"),
             Event::AuctionStarted { tile } => {
                 format!("auction opened for {}", self.tile_name(*tile))
             }

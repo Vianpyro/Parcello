@@ -324,8 +324,12 @@ impl<'e> Exec<'e> {
         if self.st.pending_trades[idx].to != p {
             return Err(CommandError::NotTradeParty);
         }
-        self.st.pending_trades.remove(idx);
-        self.ev.push(Event::TradeDeclined { trade: id });
+        let offer = self.st.pending_trades.remove(idx);
+        self.ev.push(Event::TradeDeclined {
+            trade: id,
+            from: offer.from,
+            to: offer.to,
+        });
         Ok(())
     }
 
@@ -334,8 +338,12 @@ impl<'e> Exec<'e> {
         if self.st.pending_trades[idx].from != p {
             return Err(CommandError::NotTradeParty);
         }
-        self.st.pending_trades.remove(idx);
-        self.ev.push(Event::TradeCancelled { trade: id });
+        let offer = self.st.pending_trades.remove(idx);
+        self.ev.push(Event::TradeCancelled {
+            trade: id,
+            from: offer.from,
+            to: offer.to,
+        });
         Ok(())
     }
 

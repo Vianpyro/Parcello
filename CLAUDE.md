@@ -10,7 +10,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0006` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0007` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
@@ -38,8 +38,9 @@ Authoritative documents, in order of precedence:
   `same_seed_produces_identical_games` guards this; extend it when adding
   phases (it drives canonical actions derived from `TurnPhase`).
 - **`ClientView` must never expose** `GameState.rng` or deck order
-  (dice/cards would become predictable). Cash and trade offers are public
-  by design.
+  (dice/cards would become predictable). Cash is public by design; trade
+  offers are visible only to their two parties (ADR-0007) - the server
+  sends `ClientView::for_seat` views, never the omniscient `of`.
 - **Auction solvency invariant**: cash cannot change while
   `TurnPhase::Auction` is active. Bids are validated against cash at bid
   time, so the winner can always pay at settlement. This is WHY all four
@@ -53,7 +54,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 50 tests, all must pass
+cargo test  --workspace --locked          # 52 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -139,7 +140,8 @@ creditor (mortgages carry as-is; bank refurbishes); **trading**
 (asynchronous offers, any solvent player any time EXCEPT during auctions;
 exempt from turn check like Resign; re-validated at acceptance - stale
 offers reject without mutation; purged on bankruptcy; max 4 open per
-proposer; offers are public); resign; last-player-standing win.
+proposer; offers and their lifecycle events are private to the two
+parties, ADR-0007); resign; last-player-standing win.
 
 Deliberate simplifications (documented, do not "fix" without discussion):
 no immediate interest when mortgaged tiles change hands; jail cards are a
@@ -191,9 +193,7 @@ opt-in (`--turn-timeout`, off by default).
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Blocked on the MSRV 1.75 pin -
    re-check when the MSRV moves.
-4. Private trade offers (requires per-player `ClientView`s - today the
-   view is identical for all seats; this is a real protocol change).
-5. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
+4. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
    dashboards ever need it - see ADR-0005 first).
 
 When picking up any item: state assumptions briefly, write the ADR if it
