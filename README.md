@@ -80,8 +80,18 @@ that long; 0 = disabled, the default). Set `PARCELLO_JWT_SECRET` to accept
 HS256 tokens with `{sub, name, exp}` claims (ADR-0003).
 
 Docker: `docker build -t parcello . && docker run -p 7878:7878 parcello`
-(untested in the development sandbox; mount a volume and add
-`--history data/parcello.db` for persistence).
+(mount a volume and add `--history data/parcello.db` for persistence), or
+pull the published image: `ghcr.io/vianpyro/parcello-server`.
+
+## Releases
+
+Bumping the workspace `version` in `Cargo.toml` on `main` triggers
+`.github/workflows/release.yml`: it tags `vX.Y.Z`, builds the server + CLI
+for Linux and Windows (with the `mods/` directory bundled), builds the
+Flutter Windows client, attaches everything to an auto-generated GitHub
+release, and pushes the server image to GHCR (`vX.Y.Z` + `latest`). Keep
+`clients/flutter/pubspec.yaml`'s version in step - it stamps the client
+executable. Re-pushing without a bump is a no-op.
 
 ## Protocol (v0, JSON over WebSocket at `/ws`)
 

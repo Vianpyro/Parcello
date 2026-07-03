@@ -1,0 +1,154 @@
+name: Release
+
+# One release stream: the workspace version in Cargo.toml names the release
+# (tag vX.Y.Z). Bumping it on main creates the release and attaches every
+# artifact; keep clients/flutter/pubspec.yaml in step (it stamps the exe).
+# Re-pushing without a bump is a no-op: the tag already exists.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "clients/flutter/pubspec.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize runs: a draft release does not reserve its tag, so two quick
+# pushes could otherwise both pass the tag-exists check and double-draft.
+concurrency:
+  group: release
+
+jobs:
+  version:
+    name: detect version bump
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: check
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code origin "refs/tags/v$version" > /dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "tag v$version already exists; nothing to release"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Draft first; the publish job flips it live once all assets are up.
+      - name: create draft release
+        if: steps.check.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.check.outputs.version }}" \
+            --draft --generate-notes \
+            --title "Parcello v${{ steps.check.outputs.version }}" \
+            --target "$GITHUB_SHA"
+
+  server:
+    name: server + cli (${{ matrix.label }})
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: windows-latest
+            label: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p parcello-server -p parcello-cli
+      # The server reads ./mods at runtime: ship it inside the archive.
+      - name: package (linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/parcello
+          cp target/release/parcello-server target/release/parcello-cli dist/parcello/
+          cp -r mods dist/parcello/mods
+          cp README.md dist/parcello/
+          tar -C dist -czf "parcello-server-v${{ needs.version.outputs.version }}-${{ matrix.label }}.tar.gz" parcello
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force dist/parcello | Out-Null
+          Copy-Item target/release/parcello-server.exe, target/release/parcello-cli.exe dist/parcello/
+          Copy-Item -Recurse mods dist/parcello/mods
+          Copy-Item README.md dist/parcello/
+          Compress-Archive -Path dist/parcello -DestinationPath "parcello-server-v${{ needs.version.outputs.version }}-${{ matrix.label }}.zip"
+      - name: upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.version.outputs.version }}" parcello-server-v*
+
+  client:
+    name: flutter client (windows-x64)
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter build windows --release
+        working-directory: clients/flutter
+      - name: package
+        run: |
+          Compress-Archive -Path clients/flutter/build/windows/x64/runner/Release/* `
+            -DestinationPath "parcello-client-v${{ needs.version.outputs.version }}-windows-x64.zip"
+      - name: upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.version.outputs.version }}" parcello-client-v*
+
+  publish:
+    name: publish release
+    needs: [version, server, client]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v${{ needs.version.outputs.version }}" --draft=false
+
+  # Independent of the release assets: a failed image push never blocks
+  # the binary release.
+  docker:
+    name: docker image (ghcr)
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - id: image
+        # GHCR requires a lowercase repository path.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:v${{ needs.version.outputs.version }}
+            ${{ steps.image.outputs.name }}:latest

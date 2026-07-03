@@ -64,6 +64,13 @@ CI (`.github/workflows/ci.yml`): stable job runs `fmt --check`,
 `clippy --all-targets --locked -- -D warnings`, tests; msrv job builds on
 1.75 with `--locked`.
 
+Releases (`.github/workflows/release.yml`): bumping the workspace version
+in `Cargo.toml` on main tags `vX.Y.Z` and publishes a GitHub release with
+server+CLI binaries (linux/windows, `mods/` bundled), the Flutter Windows
+client zip, and a GHCR image (`ghcr.io/<owner>/parcello-server`). Keep the
+pubspec version in step. The release goes live only after all binary jobs
+succeed (draft-then-publish); the docker job is independent.
+
 ## Architecture map
 
 Workspace crates and their single responsibility (strict layering,
@@ -166,8 +173,8 @@ opt-in (`--turn-timeout`, off by default).
 - `clippy --all-targets -- -D warnings` and `cargo fmt` now pass locally
   (first run reformatted the tree and fixed one `unit_arg` lint). Keep them
   green; fix warnings rather than silencing them.
-- `Dockerfile` has never been built (no Docker in the sandbox). Multi-stage
-  rust:1.75-slim -> bookworm-slim; verify before publishing images.
+- `Dockerfile` builds and the image serves `/healthz` (verified locally,
+  Docker 28). Multi-stage rust:1.75-slim -> bookworm-slim.
 - `crates/server/web/index.html` has never rendered in a real browser.
   Protocol coverage was verified mechanically (all 32 Event variants and
   all 17 CommandKind tags match the enums), so remaining risk is

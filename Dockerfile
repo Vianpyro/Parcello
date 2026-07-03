@@ -1,4 +1,4 @@
-# Untested in this environment (no Docker available); standard multi-stage.
+# Standard multi-stage build; published to GHCR by .github/workflows/release.yml.
 FROM rust:1.75-slim AS build
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
