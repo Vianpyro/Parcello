@@ -57,6 +57,8 @@ pub enum CommandError {
     BidTooLow,
     #[error("player is not in jail")]
     NotInJail,
+    #[error("no get-out-of-jail card held")]
+    NoJailCard,
 }
 
 /// Content invariant violations, detected once at room creation.

@@ -92,6 +92,11 @@ pub struct Player {
     pub jail_turns: Option<u8>,
     /// Consecutive doubles this turn; 3 sends the player to jail.
     pub doubles_streak: u8,
+    /// Get-out-of-jail-free cards held. A count, not card identities: the
+    /// decks are immutable cyclic shuffles, so drawn cards never leave the
+    /// rotation (documented simplification).
+    #[serde(default)]
+    pub jail_cards: u8,
     pub bankrupt: bool,
 }
 
@@ -154,6 +159,7 @@ impl GameState {
                     position: 0,
                     jail_turns: None,
                     doubles_streak: 0,
+                    jail_cards: 0,
                     bankrupt: false,
                 })
                 .collect(),

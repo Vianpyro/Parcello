@@ -327,6 +327,91 @@ fn jail_third_failed_roll_forces_fine_and_moves() {
 }
 
 #[test]
+fn jail_card_is_held_then_spent_to_leave_jail() {
+    let card = CardDef {
+        id: "jail_free".into(),
+        text: "Get out of jail free.".into(),
+        effect: CardEffect::GetOutOfJail,
+    };
+    let engine = engine_with(card_board(vec![card]), &[(1, 2), (1, 2)]);
+    let st = two_players(&engine);
+
+    // Landing on chance banks the card instead of resolving an effect.
+    let (mut st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::JailCardReceived { player: 0 })));
+    assert_eq!(st.players[0].jail_cards, 1);
+    assert_eq!(st.turn, TurnPhase::AwaitEnd);
+
+    // Test shortcut: place p0 in jail with the turn back in hand.
+    st.players[0].position = 4;
+    st.players[0].jail_turns = Some(0);
+    st.turn = TurnPhase::AwaitRoll;
+
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::UseJailCard));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::JailCardUsed { player: 0 })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::LeftJail { player: 0 })));
+    assert_eq!(st.players[0].jail_cards, 0);
+    assert_eq!(st.players[0].jail_turns, None);
+    assert_eq!(st.players[0].cash, 1500, "the card costs nothing");
+    assert_eq!(st.turn, TurnPhase::AwaitRoll, "player still rolls normally");
+
+    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    assert_eq!(st.players[0].position, 2);
+}
+
+#[test]
+fn jail_card_rejections_never_mutate() {
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = two_players(&engine);
+
+    // Not in jail.
+    assert_eq!(
+        engine
+            .apply(&st, &cmd("p0", CommandKind::UseJailCard))
+            .unwrap_err(),
+        CommandError::NotInJail
+    );
+    // In jail without a card.
+    st.players[0].position = 5;
+    st.players[0].jail_turns = Some(0);
+    assert_eq!(
+        engine
+            .apply(&st, &cmd("p0", CommandKind::UseJailCard))
+            .unwrap_err(),
+        CommandError::NoJailCard
+    );
+    assert_eq!(st.players[0].jail_turns, Some(0));
+}
+
+#[test]
+fn jail_third_failed_roll_spends_card_instead_of_fine() {
+    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let mut st = two_players(&engine);
+    st.players[0].position = 5;
+    st.players[0].jail_turns = Some(2); // two failed escapes already
+    st.players[0].jail_cards = 1;
+
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::JailCardUsed { player: 0 })));
+    assert!(
+        !ev.iter().any(|e| matches!(e, Event::JailFinePaid { .. })),
+        "the card replaces the forced fine"
+    );
+    assert_eq!(st.players[0].jail_cards, 0);
+    assert_eq!(st.players[0].jail_turns, None);
+    assert_eq!(st.players[0].cash, 1500);
+    assert_eq!(st.players[0].position, 8);
+}
+
+#[test]
 fn jail_escape_with_doubles_moves_and_grants_no_extra_roll() {
     let engine = engine_with(plain_board(), &[(2, 2)]);
     let mut st = two_players(&engine);

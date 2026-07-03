@@ -53,7 +53,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 46 tests, all must pass
+cargo test  --workspace --locked          # 49 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -115,7 +115,10 @@ reject Build); build/sell with even rule; mortgage (price/2 out, +10%
 floored to redeem, house-free group required, mortgaged tiles pay nothing
 but count for ownership); taxes; cyclic seeded decks, card chains capped
 at depth 4; jail (doubles escape without bonus roll, fine, forced fine on
-3rd fail); doubles re-roll, 3 doubles -> jail; partial-payment bankruptcy
+3rd fail); get-out-of-jail-free cards (per-player count `jail_cards`,
+`UseJailCard` before rolling, auto-spent instead of the forced 3rd-roll
+fine; cards stay in the cyclic deck once drawn - a count, not tradeable
+objects); doubles re-roll, 3 doubles -> jail; partial-payment bankruptcy
 with even-aware liquidation (houses then auto-mortgages) and transfer to
 creditor (mortgages carry as-is; bank refurbishes); **trading**
 (asynchronous offers, any solvent player any time EXCEPT during auctions;
@@ -124,8 +127,9 @@ offers reject without mutation; purged on bankruptcy; max 4 open per
 proposer; offers are public); resign; last-player-standing win.
 
 Deliberate simplifications (documented, do not "fix" without discussion):
-no immediate interest when mortgaged tiles change hands; no get-out-of-jail
-cards; the AFK timer is opt-in (`--turn-timeout`, off by default).
+no immediate interest when mortgaged tiles change hands; jail cards are a
+count (not tradeable, never leave the deck rotation); the AFK timer is
+opt-in (`--turn-timeout`, off by default).
 
 ## Code conventions
 
@@ -157,8 +161,8 @@ cards; the AFK timer is opt-in (`--turn-timeout`, off by default).
 - `Dockerfile` has never been built (no Docker in the sandbox). Multi-stage
   rust:1.75-slim -> bookworm-slim; verify before publishing images.
 - `crates/server/web/index.html` has never rendered in a real browser.
-  Protocol coverage was verified mechanically (all 27 Event variants and
-  all 16 CommandKind tags match the enums), so remaining risk is
+  Protocol coverage was verified mechanically (all 32 Event variants and
+  all 17 CommandKind tags match the enums), so remaining risk is
   layout/UX. When adding an Event or CommandKind, update this file AND the
   CLI, and re-check field names against the enums.
 
@@ -168,15 +172,13 @@ cards; the AFK timer is opt-in (`--turn-timeout`, off by default).
    Dart; the web client is the reference implementation).
 2. Global Identity Service: asymmetric JWT + JWKS fetch as a new
    `IdentityVerifier`; deprecate the HS256 stopgap (ADR-0003).
-3. Get-out-of-jail-free as a holdable card (needs a `CardEffect` variant
-   plus per-player card inventory in `GameState` - protocol addition).
-4. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
+3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Check MSRV impact first.
-5. Per-room mod sets (reintroduces the room `Starting` state; ADR-0004
+4. Per-room mod sets (reintroduces the room `Starting` state; ADR-0004
    documents what collapses today).
-6. Private trade offers (requires per-player `ClientView`s - today the
+5. Private trade offers (requires per-player `ClientView`s - today the
    view is identical for all seats; this is a real protocol change).
-7. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
+6. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
    dashboards ever need it - see ADR-0005 first).
 
 When picking up any item: state assumptions briefly, write the ADR if it

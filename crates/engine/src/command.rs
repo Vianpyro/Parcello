@@ -71,6 +71,8 @@ pub enum CommandKind {
     },
     /// Pay the fine to leave jail, then roll normally.
     PayJailFine,
+    /// Spend a held get-out-of-jail-free card, then roll normally.
+    UseJailCard,
     EndTurn,
     /// Forfeit: assets return to the bank. Allowed at any time.
     Resign,

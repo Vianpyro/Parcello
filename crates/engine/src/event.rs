@@ -135,6 +135,15 @@ pub enum Event {
         player: usize,
         amount: i64,
     },
+    /// A get-out-of-jail-free card entered the player's hand.
+    JailCardReceived {
+        player: usize,
+    },
+    /// A held card was spent to leave jail (voluntarily or on the third
+    /// failed escape roll, where it replaces the forced fine).
+    JailCardUsed {
+        player: usize,
+    },
     LeftJail {
         player: usize,
     },

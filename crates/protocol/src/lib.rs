@@ -117,5 +117,14 @@ mod tests {
                 cmd: parcello_engine::CommandKind::Roll
             }
         ));
+
+        let cmd: ClientMessage =
+            serde_json::from_str(r#"{"type":"cmd","cmd":{"type":"use_jail_card"}}"#).unwrap();
+        assert!(matches!(
+            cmd,
+            ClientMessage::Cmd {
+                cmd: parcello_engine::CommandKind::UseJailCard
+            }
+        ));
     }
 }

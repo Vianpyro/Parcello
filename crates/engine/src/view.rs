@@ -25,6 +25,9 @@ pub struct PlayerView {
     pub cash: i64,
     pub position: usize,
     pub in_jail: bool,
+    /// Held get-out-of-jail-free cards (public, like cash).
+    #[serde(default)]
+    pub jail_cards: u8,
     pub bankrupt: bool,
 }
 
@@ -41,6 +44,7 @@ impl ClientView {
                     cash: p.cash,
                     position: p.position,
                     in_jail: p.jail_turns.is_some(),
+                    jail_cards: p.jail_cards,
                     bankrupt: p.bankrupt,
                 })
                 .collect(),

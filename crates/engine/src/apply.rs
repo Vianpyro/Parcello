@@ -85,6 +85,7 @@ pub(crate) fn apply(
         CommandKind::Mortgage { tile } => exec.mortgage(player, tile)?,
         CommandKind::Unmortgage { tile } => exec.unmortgage(player, tile)?,
         CommandKind::PayJailFine => exec.pay_jail_fine(player)?,
+        CommandKind::UseJailCard => exec.use_jail_card(player)?,
         CommandKind::EndTurn => exec.end_turn(player)?,
         CommandKind::Resign => exec.resign(player)?,
     }
@@ -152,15 +153,22 @@ impl<'e> Exec<'e> {
             self.st.turn = TurnPhase::AwaitEnd;
             return;
         }
-        // Third failed escape: the fine is due, then the player moves.
-        let fine = self.content.rules.jail_fine;
-        self.ev.push(Event::JailFinePaid {
-            player: p,
-            amount: fine,
-        });
-        self.charge(p, None, fine);
-        if self.st.players[p].bankrupt {
-            return;
+        // Third failed escape: a held card is spent instead of the fine
+        // (strictly better for the player: cards have no other use), else
+        // the fine is due. Either way the player then moves.
+        if self.st.players[p].jail_cards > 0 {
+            self.st.players[p].jail_cards -= 1;
+            self.ev.push(Event::JailCardUsed { player: p });
+        } else {
+            let fine = self.content.rules.jail_fine;
+            self.ev.push(Event::JailFinePaid {
+                player: p,
+                amount: fine,
+            });
+            self.charge(p, None, fine);
+            if self.st.players[p].bankrupt {
+                return;
+            }
         }
         self.st.players[p].jail_turns = None;
         self.ev.push(Event::LeftJail { player: p });
@@ -700,6 +708,23 @@ impl<'e> Exec<'e> {
         Ok(())
     }
 
+    fn use_jail_card(&mut self, p: usize) -> Result<(), CommandError> {
+        if self.st.turn != TurnPhase::AwaitRoll {
+            return Err(CommandError::WrongPhase);
+        }
+        if self.st.players[p].jail_turns.is_none() {
+            return Err(CommandError::NotInJail);
+        }
+        if self.st.players[p].jail_cards == 0 {
+            return Err(CommandError::NoJailCard);
+        }
+        self.st.players[p].jail_cards -= 1;
+        self.st.players[p].jail_turns = None;
+        self.ev.push(Event::JailCardUsed { player: p });
+        self.ev.push(Event::LeftJail { player: p });
+        Ok(())
+    }
+
     fn end_turn(&mut self, p: usize) -> Result<(), CommandError> {
         if self.st.turn != TurnPhase::AwaitEnd {
             return Err(CommandError::WrongPhase);
@@ -931,6 +956,11 @@ impl<'e> Exec<'e> {
                 self.go_to_jail(p);
                 self.st.turn = TurnPhase::AwaitEnd;
             }
+            CardEffect::GetOutOfJail => {
+                self.st.players[p].jail_cards += 1;
+                self.ev.push(Event::JailCardReceived { player: p });
+                self.st.turn = TurnPhase::AwaitEnd;
+            }
             CardEffect::CollectFromEach { amount } => {
                 let others: Vec<usize> = self.st.alive_players().filter(|&o| o != p).collect();
                 for o in others {
@@ -1024,6 +1054,7 @@ impl<'e> Exec<'e> {
         player.bankrupt = true;
         player.jail_turns = None;
         player.doubles_streak = 0;
+        player.jail_cards = 0;
         self.ev.push(Event::PlayerBankrupt {
             player: p,
             creditor,

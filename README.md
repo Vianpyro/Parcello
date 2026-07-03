@@ -138,14 +138,19 @@ price out, plus 10% interest floored to redeem; mortgaged tiles collect
 nothing but still count for group ownership; a group must be house-free to
 mortgage), taxes, chance/community decks (cyclic, seeded shuffle, chained
 card moves capped at depth 4), jail (doubles escape, fine, forced fine on
-the third failed roll), doubles grant an extra roll and three consecutive
+the third failed roll), get-out-of-jail-free cards (held as a per-player
+count, spent voluntarily before rolling or automatically instead of the
+forced third-roll fine; the decks are immutable cyclic shuffles, so drawn
+cards never leave the rotation), doubles grant an extra roll and three consecutive
 doubles jail you, partial-payment bankruptcy with liquidation (houses at
 half cost first, then automatic mortgages, highest value first) and asset
 transfer to the creditor (mortgages carry over as-is; the bank refurbishes
 returned tiles), resignation, last-player-standing win.
 
 Deliberate V1 simplifications: no immediate interest charge when mortgaged
-tiles change hands (trades and bankruptcy transfer them as-is).
+tiles change hands (trades and bankruptcy transfer them as-is);
+get-out-of-jail cards are a count, not tradeable objects, and stay in the
+deck rotation once drawn.
 
 ## Known MVP limitations
 
@@ -168,5 +173,5 @@ See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside
 ## Roadmap
 
 Flutter client; Global Identity Service (asymmetric JWT, JWKS); WASM
-(Wasmtime) mod plugins behind `ModPlugin`; per-room mod sets; reconnect
-tokens; richer history queries (stats) if needed.
+(Wasmtime) mod plugins behind `ModPlugin`; per-room mod sets; private
+trade offers; reconnect tokens; richer history queries (stats) if needed.

@@ -338,7 +338,8 @@ function renderPlayers() {
   el.innerHTML = "";
   const rows = st.view
     ? st.view.players.map((p, i) => ({ i, name: p.name, cash: p.cash, dead: p.bankrupt,
-        extra: p.in_jail ? " [jail]" : "", connected: st.seats[i]?.connected ?? true }))
+        extra: (p.in_jail ? " [jail]" : "") + (p.jail_cards ? ` [${p.jail_cards} jail card${p.jail_cards > 1 ? "s" : ""}]` : ""),
+        connected: st.seats[i]?.connected ?? true }))
     : st.seats.map(s => ({ i: s.seat, name: s.name, cash: null, dead: false,
         extra: "", connected: s.connected }));
   rows.forEach(r => {
@@ -405,7 +406,11 @@ function renderActions() {
   if (!myTurn()) return;
   if (t.type === "await_roll") {
     btn("Roll", { type: "roll" });
-    if (v.players[st.seat].in_jail) btn("Pay fine", { type: "pay_jail_fine" }, "secondary");
+    if (v.players[st.seat].in_jail) {
+      btn("Pay fine", { type: "pay_jail_fine" }, "secondary");
+      if (v.players[st.seat].jail_cards > 0)
+        btn("Use jail card", { type: "use_jail_card" }, "secondary");
+    }
   } else if (t.type === "await_buy") {
     btn(`Buy ($${prop(t.tile).price})`, { type: "buy" });
     btn("Decline", { type: "decline" }, "secondary");
@@ -562,6 +567,8 @@ function describe(e) {
     case "property_unmortgaged": return `${P(e.player)} redeemed ${T(e.tile)} for $${e.cost}`;
     case "went_to_jail": return `${P(e.player)} went to jail`;
     case "jail_fine_paid": return `${P(e.player)} paid the $${e.amount} jail fine`;
+    case "jail_card_received": return `${P(e.player)} received a get-out-of-jail-free card`;
+    case "jail_card_used": return `${P(e.player)} used a get-out-of-jail-free card`;
     case "left_jail": return `${P(e.player)} left jail`;
     case "property_transferred":
       return e.to === null

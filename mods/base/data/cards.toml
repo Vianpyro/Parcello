@@ -73,6 +73,12 @@ text = "Elected chairman of the board: pay each player 25."
 type = "pay_each"
 amount = 25
 
+[[chance]]
+id = "ch_jail_free"
+text = "Get out of jail free. Keep this card until needed."
+[chance.effect]
+type = "get_out_of_jail"
+
 [[community]]
 id = "cm_advance_go"
 text = "Advance to Go and collect your salary."
@@ -142,3 +148,9 @@ id = "cm_go_to_jail"
 text = "Go directly to Jail. Do not pass Go."
 [community.effect]
 type = "go_to_jail"
+
+[[community]]
+id = "cm_jail_free"
+text = "Get out of jail free. Keep this card until needed."
+[community.effect]
+type = "get_out_of_jail"

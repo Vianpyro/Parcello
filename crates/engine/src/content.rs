@@ -88,6 +88,9 @@ pub enum CardEffect {
         steps: i8,
     },
     GoToJail,
+    /// Holdable: increments the drawer's `jail_cards` count instead of
+    /// resolving immediately. Spent via `CommandKind::UseJailCard`.
+    GetOutOfJail,
     CollectFromEach {
         amount: i64,
     },

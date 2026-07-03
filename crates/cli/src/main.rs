@@ -4,7 +4,7 @@
 //! Commands (stdin): start | roll | buy | no | bid <amount> | pass
 //! | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
 //! | offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
-//! | accept <id> | refuse <id> | cancel <id> | pay | end | resign | quit.
+//! | accept <id> | refuse <id> | cancel <id> | pay | card | end | resign | quit.
 
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("connected to {} as {}", args.url, args.name);
     println!(
-        "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | mortgage <t> | redeem <t> | pay | end | resign | quit"
+        "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
     );
     println!(
         "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
@@ -150,6 +150,7 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
             trade: id.parse().ok()?,
         },
         ("pay", None) => CommandKind::PayJailFine,
+        ("card", None) => CommandKind::UseJailCard,
         ("end", None) => CommandKind::EndTurn,
         ("resign", None) => CommandKind::Resign,
         _ => return None,
@@ -442,6 +443,13 @@ impl Ctx {
             Event::WentToJail { player } => format!("{} went to jail", self.player(*player)),
             Event::JailFinePaid { player, amount } => {
                 format!("{} paid the ${amount} jail fine", self.player(*player))
+            }
+            Event::JailCardReceived { player } => format!(
+                "{} received a get-out-of-jail-free card",
+                self.player(*player)
+            ),
+            Event::JailCardUsed { player } => {
+                format!("{} used a get-out-of-jail-free card", self.player(*player))
             }
             Event::LeftJail { player } => format!("{} left jail", self.player(*player)),
             Event::PropertyTransferred { tile, from, to } => match to {
