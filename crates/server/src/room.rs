@@ -29,6 +29,12 @@ pub const MAX_PLAYERS: usize = 6;
 /// A room with no connected seats for this long dissolves itself. Rejoin is
 /// impossible afterwards; the seed and command log make replays external.
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// A disconnected player's turn is auto-played after this grace even when
+/// `--turn-timeout` is off: someone who left must never stall the table.
+/// The grace lets a brief network blip recover (they keep their seat and
+/// its reconnect token, ADR-0008).
+// ponytail: fixed 30s; make it a flag only if operators ask to tune it.
+pub const DISCONNECTED_GRACE: Duration = Duration::from_secs(30);
 
 pub type Rooms = Arc<RwLock<HashMap<String, mpsc::Sender<RoomCmd>>>>;
 pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;
@@ -153,8 +159,9 @@ struct Room {
     seats: Vec<Seat>,
     phase: Phase,
     history: Arc<dyn GameHistory>,
-    /// `Some(d)`: after `d` without game progress the room plays the
-    /// canonical action for the acting player (AFK protection).
+    /// `Some(d)`: a connected but idle player's turn is auto-played after
+    /// `d` (AFK protection). Disconnected players are always skipped after
+    /// `DISCONNECTED_GRACE`, independent of this.
     turn_timeout: Option<Duration>,
 }
 
@@ -162,17 +169,20 @@ impl Room {
     async fn run(mut self, mut rx: mpsc::Receiver<RoomCmd>, rooms: Rooms) {
         info!(room = %self.code, "room created");
         let mut last_activity = tokio::time::Instant::now();
-        let mut turn_deadline = tokio::time::Instant::now();
+        let mut last_progress = tokio::time::Instant::now();
         loop {
             let idle = tokio::time::sleep_until(last_activity + IDLE_TIMEOUT);
-            let afk_armed = self.turn_timeout.is_some() && matches!(self.phase, Phase::Active(_));
-            let afk = tokio::time::sleep_until(turn_deadline);
+            // Smart per-turn deadline, recomputed each loop so a mid-turn
+            // disconnect shortens it: disconnected acting seats are skipped
+            // after a short grace (always on); a connected but slow player
+            // gets the configured --turn-timeout, or unlimited time when off.
+            let deadline = self.afk_deadline();
+            let afk_armed = deadline.is_some();
+            let afk = tokio::time::sleep_until(last_progress + deadline.unwrap_or(IDLE_TIMEOUT));
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
                     last_activity = tokio::time::Instant::now();
-                    // ponytail: any accepted command resets the turn clock;
-                    // per-actor deadlines if trade-offer spam ever stalls games.
                     let advanced = match cmd {
                         RoomCmd::Join { identity, reconnect, tx, reply } => {
                             let result = self.handle_join(identity, reconnect, tx);
@@ -192,8 +202,9 @@ impl Room {
                             false
                         }
                     };
-                    if advanced && let Some(t) = self.turn_timeout {
-                        turn_deadline = tokio::time::Instant::now() + t;
+                    // Any accepted command resets the turn clock.
+                    if advanced {
+                        last_progress = tokio::time::Instant::now();
                     }
                 }
                 _ = afk, if afk_armed => {
@@ -202,8 +213,7 @@ impl Room {
                               "turn timeout, playing canonical action");
                         self.handle_game(&player, kind);
                     }
-                    turn_deadline = tokio::time::Instant::now()
-                        + self.turn_timeout.expect("armed implies Some");
+                    last_progress = tokio::time::Instant::now();
                 }
                 _ = idle => {
                     if self.seats.iter().all(|s| s.tx.is_none()) {
@@ -218,6 +228,35 @@ impl Room {
         info!(room = %self.code, "room dissolved");
     }
 
+    /// Seat expected to act right now: the auction bidder, else the current
+    /// player. `None` outside an active game.
+    fn acting_seat(&self) -> Option<usize> {
+        let Phase::Active(st) = &self.phase else {
+            return None;
+        };
+        Some(match st.turn {
+            TurnPhase::Auction { turn, .. } => turn,
+            _ => st.current,
+        })
+    }
+
+    /// How long the acting seat may stall before its canonical action is
+    /// auto-played, or `None` for no limit. A disconnected seat (truly AFK)
+    /// is skipped after `DISCONNECTED_GRACE` whether or not `--turn-timeout`
+    /// is set; a connected but slow player only faces `--turn-timeout`.
+    fn afk_deadline(&self) -> Option<Duration> {
+        let seat = self.acting_seat()?;
+        let connected = self.seats.get(seat).is_some_and(|s| s.tx.is_some());
+        if connected {
+            self.turn_timeout
+        } else {
+            Some(
+                self.turn_timeout
+                    .map_or(DISCONNECTED_GRACE, |t| t.min(DISCONNECTED_GRACE)),
+            )
+        }
+    }
+
     /// The action the game is waiting for, per `TurnPhase` (the same mapping
     /// the deterministic-replay test uses). Never invalid for the returned
     /// player, so applying it always advances a stalled game.
@@ -225,11 +264,12 @@ impl Room {
         let Phase::Active(st) = &self.phase else {
             return None;
         };
-        let (seat, kind) = match st.turn {
-            TurnPhase::AwaitRoll => (st.current, CommandKind::Roll),
-            TurnPhase::AwaitBuy { .. } => (st.current, CommandKind::Decline),
-            TurnPhase::AwaitEnd => (st.current, CommandKind::EndTurn),
-            TurnPhase::Auction { turn, .. } => (turn, CommandKind::Pass),
+        let seat = self.acting_seat()?;
+        let kind = match st.turn {
+            TurnPhase::AwaitRoll => CommandKind::Roll,
+            TurnPhase::AwaitBuy { .. } => CommandKind::Decline,
+            TurnPhase::AwaitEnd => CommandKind::EndTurn,
+            TurnPhase::Auction { .. } => CommandKind::Pass,
         };
         Some((st.players[seat].id.clone(), kind))
     }
@@ -755,6 +795,79 @@ mod tests {
         assert!(
             view.pending_trades.is_empty(),
             "third party must not see the offer"
+        );
+    }
+
+    /// A disconnected player's turn is auto-played after the grace period
+    /// even with no `--turn-timeout` set, so an AFK player never stalls the
+    /// table. (We assert alice's roll is auto-played; whether her turn then
+    /// fully hands off depends on the game - an auction, say, legitimately
+    /// waits on the still-connected bob.)
+    #[tokio::test(start_paused = true)]
+    async fn disconnected_player_is_skipped_after_grace() {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
+        // No --turn-timeout: the smart grace alone must skip the AFK seat.
+        let code = create_room(&rooms, content, history, None)
+            .await
+            .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let mut client_rxs = Vec::new();
+        for name in ["alice", "bob"] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (reply, joined) = oneshot::channel();
+            room.send(RoomCmd::Join {
+                identity: Identity {
+                    player_id: format!("guest:{name}"),
+                    name: name.to_string(),
+                    spoofable: true,
+                },
+                reconnect: None,
+                tx,
+                reply,
+            })
+            .await
+            .expect("room task alive");
+            joined.await.expect("reply sent").expect("join accepted");
+            client_rxs.push(rx);
+        }
+        room.send(RoomCmd::Start {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+        // Alice (seat 0) is the acting player and drops off.
+        room.send(RoomCmd::Disconnect {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+
+        // With no turn timeout, the grace alone must auto-play alice's roll;
+        // bob sees it without sending anything.
+        let auto_rolled = tokio::time::timeout(Duration::from_secs(300), async {
+            while let Some(msg) = client_rxs[1].recv().await {
+                if let ServerMessage::Update { events, .. } = msg
+                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("an update must arrive before the mock-clock timeout");
+        assert!(
+            auto_rolled,
+            "the disconnected player's turn must be auto-played after the grace"
         );
     }
 

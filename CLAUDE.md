@@ -52,7 +52,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 62 tests, all must pass
+cargo test  --workspace --locked          # 63 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -101,10 +101,13 @@ architecture doc section 5; dependencies point downward only):
   by identity, last connection wins, but spoofable (guest) seats require
   the per-seat reconnect token issued in `Joined` (ADR-0008); rooms with
   zero connected seats
-  dissolve after `IDLE_TIMEOUT` = 30 min; optional per-turn AFK timer
-  `--turn-timeout <secs>` auto-plays the canonical action
-  Roll/Decline/Pass/EndTurn for the acting seat, 0 = off default; any
-  accepted command resets the clock; post-game survey `feedback` message:
+  dissolve after `IDLE_TIMEOUT` = 30 min; smart per-turn AFK timer
+  (`afk_deadline`, recomputed each loop so a mid-turn disconnect shortens
+  it): a disconnected acting seat is auto-played the canonical action
+  Roll/Decline/Pass/EndTurn after `DISCONNECTED_GRACE` = 30s always, a
+  connected-but-idle seat only when `--turn-timeout <secs>` is set (0 = off
+  default); any accepted command resets the clock; post-game survey
+  `feedback` message:
   Finished phase only, once per seat, rating 1-5 + comment capped at 500
   chars, stored via `GameHistory::record_feedback` - the client UI must
   stay non-blocking, side card not modal), `auth.rs` + `eddsa.rs`

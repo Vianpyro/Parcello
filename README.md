@@ -85,8 +85,9 @@ Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 (repeatable, ordered; later mods override earlier ones per key),
 `--insecure-guest`, `--history <file.db>` (SQLite game logs; omit for
 in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
-canonical action - roll/decline/pass/end turn - for a player who stalls
-that long; 0 = disabled, the default), `--identity-url <jwks-url>`
+canonical action - roll/decline/pass/end turn - for a *connected* player
+who stalls that long; 0 = disabled, the default - a *disconnected* player
+is always skipped after a 30s grace regardless), `--identity-url <jwks-url>`
 (repeatable; accept EdDSA identity tokens from an OIDC provider such as
 Rauthy, ADR-0009) with optional `--identity-audience <client-id>`.
 `PARCELLO_JWT_SECRET` (HS256, ADR-0003) still works but is deprecated.
@@ -268,8 +269,10 @@ deck rotation once drawn.
   `(seed, ordered accepted commands)`, i.e. complete deterministic replays.
 - A guest who loses their reconnect token cannot re-take their seat until
   the room dissolves.
-- The AFK timer (`--turn-timeout`) is off by default; without it a stalled
-  player blocks the game until the room idles out.
+- A disconnected player's turn is auto-played after a 30s grace so an AFK
+  player never stalls the table (they keep their seat and can rejoin). The
+  `--turn-timeout` flag extends this to connected-but-idle players; it is
+  off by default, so a present but slow player is never forced.
 
 ## Deviations from the architecture doc
 
