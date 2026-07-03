@@ -4,17 +4,17 @@
 //! authenticates once, then relays commands to the room task. All game logic
 //! lives behind the room boundary.
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
-use futures_util::stream::StreamExt;
 use futures_util::SinkExt;
+use futures_util::stream::StreamExt;
 use parcello_protocol::{AuthPayload, ClientMessage, ServerMessage};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
 
-use crate::room::{create_room, ClientTx, RoomCmd};
 use crate::AppState;
+use crate::room::{ClientTx, RoomCmd, create_room};
 
 pub async fn ws_handler(ws: WebSocketUpgrade, State(app): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, app))

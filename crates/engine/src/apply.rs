@@ -656,7 +656,7 @@ impl<'e> Exec<'e> {
         }
         let principal = prop.price / 2;
         let cost = principal + principal / 10; // 10% interest, floored
-                                               // Voluntary payment never forces liquidation: reject if unaffordable.
+        // Voluntary payment never forces liquidation: reject if unaffordable.
         if self.st.players[p].cash < cost {
             return Err(CommandError::InsufficientFunds);
         }

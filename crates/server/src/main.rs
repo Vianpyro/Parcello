@@ -11,9 +11,9 @@ mod ws;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::response::Html;
 use axum::routing::get;
-use axum::Router;
 use clap::Parser;
 use parcello_mods::ResolvedContent;
 use tracing::{info, warn};

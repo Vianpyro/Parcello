@@ -18,7 +18,7 @@ use parcello_engine::{
 };
 use parcello_mods::ResolvedContent;
 use parcello_protocol::{SeatInfo, ServerMessage};
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::{error, info, warn};
 
 use crate::auth::Identity;
@@ -180,10 +180,8 @@ impl Room {
                         RoomCmd::Start { player_id } => self.handle_start(&player_id),
                         RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
                     };
-                    if advanced {
-                        if let Some(t) = self.turn_timeout {
-                            turn_deadline = tokio::time::Instant::now() + t;
-                        }
+                    if advanced && let Some(t) = self.turn_timeout {
+                        turn_deadline = tokio::time::Instant::now() + t;
                     }
                 }
                 _ = afk, if afk_armed => {
@@ -431,10 +429,10 @@ impl Room {
 
     fn broadcast(&mut self, msg: ServerMessage) {
         for seat in &mut self.seats {
-            if let Some(tx) = &seat.tx {
-                if tx.send(msg.clone()).is_err() {
-                    seat.tx = None; // Connection gone; seat stays for rejoin.
-                }
+            if let Some(tx) = &seat.tx
+                && tx.send(msg.clone()).is_err()
+            {
+                seat.tx = None; // Connection gone; seat stays for rejoin.
             }
         }
     }
@@ -442,10 +440,10 @@ impl Room {
     /// Delivers `msgs[i]` to seat `i` (per-seat views, ADR-0007).
     fn send_per_seat(&mut self, msgs: Vec<ServerMessage>) {
         for (seat, msg) in msgs.into_iter().enumerate() {
-            if let Some(tx) = &self.seats[seat].tx {
-                if tx.send(msg).is_err() {
-                    self.seats[seat].tx = None;
-                }
+            if let Some(tx) = &self.seats[seat].tx
+                && tx.send(msg).is_err()
+            {
+                self.seats[seat].tx = None;
             }
         }
     }
@@ -679,10 +677,10 @@ mod tests {
 
         let auto_rolled = tokio::time::timeout(Duration::from_secs(300), async {
             while let Some(msg) = client_rxs[1].recv().await {
-                if let ServerMessage::Update { events, .. } = msg {
-                    if events.iter().any(|e| matches!(e, Event::DiceRolled { .. })) {
-                        return true;
-                    }
+                if let ServerMessage::Update { events, .. } = msg
+                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                {
+                    return true;
                 }
             }
             false

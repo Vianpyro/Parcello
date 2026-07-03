@@ -161,9 +161,10 @@ fn buy_then_pay_rent() {
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
     assert_eq!(st.turn, TurnPhase::AwaitBuy { tile: 3 });
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::PurchaseOffered { tile: 3, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::PurchaseOffered { tile: 3, .. }))
+    );
 
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Buy));
     assert_eq!(st.tiles[3].owner, Some(0));
@@ -264,15 +265,17 @@ fn three_doubles_send_to_jail() {
             amount: 200
         }
     )));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::TaxPaid { amount: 100, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::TaxPaid { amount: 100, .. }))
+    );
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll)); // third double
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::WentToJail { player: 0 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::WentToJail { player: 0 }))
+    );
     assert_eq!(st.players[0].position, 5);
     assert_eq!(st.players[0].jail_turns, Some(0));
 
@@ -289,9 +292,10 @@ fn jail_pay_fine_then_roll() {
     st.players[0].jail_turns = Some(0);
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::PayJailFine));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. }))
+    );
     assert_eq!(st.players[0].jail_turns, None);
     assert_eq!(st.players[0].cash, 1450);
     assert_eq!(st.turn, TurnPhase::AwaitRoll);
@@ -318,9 +322,10 @@ fn jail_third_failed_roll_forces_fine_and_moves() {
     }
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. }))
+    );
     assert_eq!(st.players[0].jail_turns, None);
     assert_eq!(st.players[0].position, 8);
     assert_eq!(st.players[0].cash, 1450);
@@ -338,9 +343,10 @@ fn jail_card_is_held_then_spent_to_leave_jail() {
 
     // Landing on chance banks the card instead of resolving an effect.
     let (mut st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::JailCardReceived { player: 0 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::JailCardReceived { player: 0 }))
+    );
     assert_eq!(st.players[0].jail_cards, 1);
     assert_eq!(st.turn, TurnPhase::AwaitEnd);
 
@@ -350,12 +356,14 @@ fn jail_card_is_held_then_spent_to_leave_jail() {
     st.turn = TurnPhase::AwaitRoll;
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::UseJailCard));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::JailCardUsed { player: 0 })));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::LeftJail { player: 0 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::JailCardUsed { player: 0 }))
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::LeftJail { player: 0 }))
+    );
     assert_eq!(st.players[0].jail_cards, 0);
     assert_eq!(st.players[0].jail_turns, None);
     assert_eq!(st.players[0].cash, 1500, "the card costs nothing");
@@ -398,9 +406,10 @@ fn jail_third_failed_roll_spends_card_instead_of_fine() {
     st.players[0].jail_cards = 1;
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::JailCardUsed { player: 0 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::JailCardUsed { player: 0 }))
+    );
     assert!(
         !ev.iter().any(|e| matches!(e, Event::JailFinePaid { .. })),
         "the card replaces the forced fine"
@@ -419,9 +428,10 @@ fn jail_escape_with_doubles_moves_and_grants_no_extra_roll() {
     st.players[0].jail_turns = Some(0);
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::LeftJail { player: 0 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::LeftJail { player: 0 }))
+    );
     // 5 + 4 wraps to Go: salary applies.
     assert_eq!(st.players[0].position, 0);
     assert_eq!(st.players[0].cash, 1700);
@@ -447,9 +457,10 @@ fn unpayable_rent_bankrupts_and_ends_the_game() {
             creditor: Some(0)
         }
     )));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::GameEnded { winner: 0 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::GameEnded { winner: 0 }))
+    );
     assert!(st.players[1].bankrupt);
     assert_eq!(
         st.players[0].cash, 1505,
@@ -584,9 +595,10 @@ fn resign_transfers_assets_to_bank_and_can_end_game() {
     assert_eq!(st.current, 0);
 
     let (st, ev) = step(&engine, &st, cmd("p2", CommandKind::Resign));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::GameEnded { winner: 0 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::GameEnded { winner: 0 }))
+    );
     assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
 }
 
@@ -926,9 +938,10 @@ fn declined_purchase_goes_to_auction_and_highest_bid_wins() {
     // p0 lands on ave_a (tile 2) and declines: auction opens, p1 speaks first.
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Decline));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::AuctionStarted { tile: 2 })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::AuctionStarted { tile: 2 }))
+    );
     assert!(matches!(
         st.turn,
         TurnPhase::Auction {
@@ -1101,9 +1114,10 @@ fn accepted_trade_swaps_tiles_and_cash_out_of_turn() {
         &st,
         cmd("p0", CommandKind::AcceptTrade { trade: 0 }),
     );
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::TradeAccepted { trade: 0, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::TradeAccepted { trade: 0, .. }))
+    );
     assert_eq!(st.tiles[2].owner, Some(1));
     assert_eq!(st.tiles[6].owner, Some(0));
     assert_eq!(st.players[0].cash, 1600);
@@ -1191,9 +1205,10 @@ fn stale_trade_rejects_without_mutation_and_can_be_declined() {
         &st,
         cmd("p1", CommandKind::DeclineTrade { trade: 0 }),
     );
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::TradeDeclined { trade: 0, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::TradeDeclined { trade: 0, .. }))
+    );
     assert!(st.pending_trades.is_empty());
 }
 
@@ -1227,9 +1242,10 @@ fn trade_party_rules_and_cancellation() {
         &st,
         cmd("p0", CommandKind::CancelTrade { trade: 0 }),
     );
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::TradeCancelled { trade: 0, .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::TradeCancelled { trade: 0, .. }))
+    );
     assert!(st.pending_trades.is_empty());
 }
 

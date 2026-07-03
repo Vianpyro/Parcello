@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{mpsc, Mutex};
+use std::sync::{Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -129,10 +129,10 @@ impl SqliteHistory {
     }
 
     fn send(&self, rec: Rec) {
-        if let Some(tx) = &self.tx {
-            if tx.send(rec).is_err() {
-                warn!("history writer thread is gone; record dropped");
-            }
+        if let Some(tx) = &self.tx
+            && tx.send(rec).is_err()
+        {
+            warn!("history writer thread is gone; record dropped");
         }
     }
 }

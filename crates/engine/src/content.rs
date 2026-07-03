@@ -186,13 +186,13 @@ impl GameContent {
             }
         }
         for c in self.chance.iter().chain(self.community.iter()) {
-            if let CardEffect::MoveTo { tile, .. } = &c.effect {
-                if !self.board.iter().any(|t| &t.id == tile) {
-                    return Err(ContentError::CardTargetsUnknownTile {
-                        card: c.id.clone(),
-                        tile: tile.clone(),
-                    });
-                }
+            if let CardEffect::MoveTo { tile, .. } = &c.effect
+                && !self.board.iter().any(|t| &t.id == tile)
+            {
+                return Err(ContentError::CardTargetsUnknownTile {
+                    card: c.id.clone(),
+                    tile: tile.clone(),
+                });
             }
         }
         Ok(())

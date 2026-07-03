@@ -10,7 +10,7 @@ mod plugin;
 mod raw;
 mod registry;
 
-pub use loader::{resolve, ResolvedContent};
+pub use loader::{ResolvedContent, resolve};
 pub use manifest::{ModInfo, ModManifest};
 pub use plugin::{ModPlugin, TomlModPlugin};
 pub use registry::RegistryBuilder;

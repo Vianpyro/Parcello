@@ -5,8 +5,8 @@
 //! verification over HTTP) slots in without touching room or transport code.
 //! MVP modes: HS256 shared-secret tokens and/or explicit insecure guests.
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
@@ -208,30 +208,33 @@ mod tests {
             "other",
             &format!(r#"{{"sub":"a","name":"A","exp":{}}}"#, far_future()),
         );
-        assert!(v
-            .verify(&AuthPayload {
+        assert!(
+            v.verify(&AuthPayload {
                 token: Some(wrong_key),
                 guest_name: None,
                 reconnect: None,
             })
-            .is_err());
+            .is_err()
+        );
 
         let expired = sign("s3cret", r#"{"sub":"a","name":"A","exp":1}"#);
-        assert!(v
-            .verify(&AuthPayload {
+        assert!(
+            v.verify(&AuthPayload {
                 token: Some(expired),
                 guest_name: None,
                 reconnect: None,
             })
-            .is_err());
+            .is_err()
+        );
 
-        assert!(v
-            .verify(&AuthPayload {
+        assert!(
+            v.verify(&AuthPayload {
                 token: Some(good + "x"),
                 guest_name: None,
                 reconnect: None,
             })
-            .is_err());
+            .is_err()
+        );
     }
 
     #[test]
@@ -246,21 +249,24 @@ mod tests {
             .unwrap();
         assert_eq!(id.player_id, "guest:vian_42");
 
-        assert!(open
-            .verify(&AuthPayload {
+        assert!(
+            open.verify(&AuthPayload {
                 token: None,
                 guest_name: Some("bad name!".into()),
                 reconnect: None,
             })
-            .is_err());
+            .is_err()
+        );
 
         let closed = CompositeVerifier::new(None, false);
-        assert!(closed
-            .verify(&AuthPayload {
-                token: None,
-                guest_name: Some("Vian".into()),
-                reconnect: None,
-            })
-            .is_err());
+        assert!(
+            closed
+                .verify(&AuthPayload {
+                    token: None,
+                    guest_name: Some("Vian".into()),
+                    reconnect: None,
+                })
+                .is_err()
+        );
     }
 }

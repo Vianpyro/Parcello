@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use tracing::warn;
 
-use crate::manifest::{parse_version, ModManifest};
+use crate::manifest::{ModManifest, parse_version};
 use crate::raw::{CardsFile, PropertiesFile, RulesFile};
 use crate::{ModError, RegistryBuilder};
 

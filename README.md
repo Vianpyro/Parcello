@@ -87,9 +87,10 @@ pull the published image: `ghcr.io/vianpyro/parcello-server`.
 
 Bumping the workspace `version` in `Cargo.toml` on `main` triggers
 `.github/workflows/release.yml`: it tags `vX.Y.Z`, builds the server + CLI
-for Linux and Windows (with the `mods/` directory bundled), builds the
-Flutter Windows client, attaches everything to an auto-generated GitHub
-release, and pushes the server image to GHCR (`vX.Y.Z` + `latest`). Keep
+for Linux (x64 + arm64), Windows, and macOS (arm64) with the `mods/`
+directory bundled, builds the Flutter client for Windows, Linux, and
+macOS, attaches everything to an auto-generated GitHub release, and
+pushes the server image to GHCR (`vX.Y.Z` + `latest`, linux/amd64). Keep
 `clients/flutter/pubspec.yaml`'s version in step - it stamps the client
 executable. Re-pushing without a bump is a no-op.
 
@@ -192,7 +193,9 @@ See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside
 0005 rusqlite writer thread instead of SQLx behind `GameHistory`;
 0006 per-room mod sets at creation (amends 0004, `Starting` stays
 collapsed); 0007 private trade offers via per-seat `ClientView`s;
-0008 per-seat reconnect tokens (guest seat hijack protection).
+0008 per-seat reconnect tokens (guest seat hijack protection);
+0009 Identity Service design (EdDSA JWT + JWKS, self-hosted and
+redundant, accounts always optional).
 
 ## Roadmap
 

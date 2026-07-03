@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use parcello_engine::{CardEffect, RentModel, TileKind};
-use parcello_mods::{resolve, ModError};
+use parcello_mods::{ModError, resolve};
 
 fn write_mod(root: &Path, id: &str, files: &[(&str, &str)]) {
     let dir = root.join(id);

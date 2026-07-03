@@ -10,7 +10,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0008` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0009` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
@@ -65,10 +65,11 @@ CI (`.github/workflows/ci.yml`): stable job runs `fmt --check`,
 
 Releases (`.github/workflows/release.yml`): bumping the workspace version
 in `Cargo.toml` on main tags `vX.Y.Z` and publishes a GitHub release with
-server+CLI binaries (linux/windows, `mods/` bundled), the Flutter Windows
-client zip, and a GHCR image (`ghcr.io/<owner>/parcello-server`). Keep the
-pubspec version in step. The release goes live only after all binary jobs
-succeed (draft-then-publish); the docker job is independent.
+server+CLI binaries (linux x64/arm64, windows, macos arm64; `mods/`
+bundled), Flutter client bundles (windows/linux/macos), and a GHCR image
+(`ghcr.io/<owner>/parcello-server`, amd64). Keep the pubspec version in
+step. The release goes live only after all binary jobs succeed
+(draft-then-publish); the docker job is independent.
 
 ## Architecture map
 
@@ -188,8 +189,10 @@ opt-in (`--turn-timeout`, off by default).
 1. Flutter client polish (`clients/flutter` exists: full protocol, board,
    trades, tests; still needs real multiplayer playtesting and
    Android/mobile targets).
-2. Global Identity Service: asymmetric JWT + JWKS fetch as a new
-   `IdentityVerifier`; deprecate the HS256 stopgap (ADR-0003).
+2. Global Identity Service: design fixed by ADR-0009 (self-hosted EdDSA
+   issuer + JWKS, accounts always optional). Game-server side: implement
+   the `EdDsaVerifier` (JWKS fetch/cache + Ed25519); the issuer lives in
+   its own repo. Deprecates the HS256 stopgap (ADR-0003).
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Unblocked since the MSRV moved
    to 1.96; pick a current Wasmtime.
