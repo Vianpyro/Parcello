@@ -172,6 +172,7 @@ See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside
 
 ## Roadmap
 
-Flutter client; Global Identity Service (asymmetric JWT, JWKS); WASM
+Flutter client polish (a Windows-desktop client lives in `clients/flutter`,
+see its README); Global Identity Service (asymmetric JWT, JWKS); WASM
 (Wasmtime) mod plugins behind `ModPlugin`; per-room mod sets; private
 trade offers; reconnect tokens; richer history queries (stats) if needed.

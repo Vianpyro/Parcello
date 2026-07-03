@@ -101,6 +101,11 @@ architecture doc section 5; dependencies point downward only):
   binary is the whole deployment).
 - `crates/cli` - terminal test harness; keep it in sync with new commands
   (it is the cheapest end-to-end protocol check).
+- `clients/flutter` - Flutter client (Windows desktop first; Dart, not part
+  of the cargo workspace). Mirrors the web client feature-for-feature; see
+  its README. Requires the Flutter SDK (`flutter analyze && flutter test`).
+  When adding an Event or CommandKind, update it too (protocol.dart +
+  main.dart), same drill as `web/index.html` and the CLI.
 
 Mod set is resolved once per server at boot (ADR-0004), not per room.
 
@@ -168,8 +173,9 @@ opt-in (`--turn-timeout`, off by default).
 
 ## Roadmap (agreed next steps, roughly in order of value)
 
-1. Flutter client (separate repo/dir; mirror `parcello-protocol` shapes in
-   Dart; the web client is the reference implementation).
+1. Flutter client polish (`clients/flutter` exists: full protocol, board,
+   trades, tests; still needs real multiplayer playtesting and
+   Android/mobile targets).
 2. Global Identity Service: asymmetric JWT + JWKS fetch as a new
    `IdentityVerifier`; deprecate the HS256 stopgap (ADR-0003).
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
