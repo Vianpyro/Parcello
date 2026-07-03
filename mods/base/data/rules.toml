@@ -1,0 +1,10 @@
+# V1 rule hook points. Mods loaded after `base` override these per key
+# (last-loaded-wins). Unknown keys are ignored with a warning.
+
+[rules]
+starting_balance = 1500
+go_salary = 200
+jail_fine = 50
+max_houses_per_property = 5
+bankruptcy_threshold = 0
+auction_on_decline = 1

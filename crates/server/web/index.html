@@ -1,0 +1,587 @@
+<!doctype html>
+<!-- Parcello web client. Single file, no build step, served by the game
+     server itself (embedded via include_str!). Talks the same JSON/WS
+     protocol as parcello-cli; the server remains the only authority. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parcello</title>
+<style>
+  :root {
+    --bg: #1c1f26; --panel: #262b35; --line: #3a4150; --text: #e8e6e0;
+    --muted: #9aa3b2; --accent: #d8b45a; --board: #dfe7d8; --tilebg: #f4f7ef;
+    --danger: #c0564f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, sans-serif;
+  }
+  button {
+    background: var(--accent); border: 0; border-radius: 4px;
+    padding: 6px 12px; font-weight: 600; cursor: pointer; color: #221d0e;
+  }
+  button.secondary { background: var(--line); color: var(--text); }
+  button.danger { background: var(--danger); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  input, select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; padding: 6px 8px;
+  }
+  #login {
+    max-width: 360px; margin: 12vh auto; background: var(--panel);
+    padding: 24px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px;
+  }
+  #login h1 { margin: 0 0 4px; color: var(--accent); }
+  #app { display: none; grid-template-columns: minmax(560px, 1fr) 340px; gap: 12px; padding: 12px; }
+  /* Board: 11x11 grid, corners span 1 cell, classic counter-clockwise walk. */
+  #board {
+    display: grid; aspect-ratio: 1; max-height: calc(100vh - 24px);
+    grid-template: repeat(11, 1fr) / repeat(11, 1fr);
+    gap: 2px; background: var(--line); padding: 2px; border-radius: 6px;
+  }
+  .tile {
+    background: var(--tilebg); color: #222; border-radius: 2px;
+    display: flex; flex-direction: column; overflow: hidden;
+    font-size: 10px; position: relative; min-width: 0;
+  }
+  .tile.mine { outline: 2px solid #2f6f3e; cursor: pointer; }
+  .tile .band { height: 9px; flex: none; }
+  .tile .name { padding: 2px 3px; flex: 1; overflow: hidden; }
+  .tile .meta { padding: 0 3px 2px; color: #555; display: flex; gap: 3px; flex-wrap: wrap; }
+  .tile .houses { color: #2f6f3e; font-weight: 700; }
+  .tile .mort { color: var(--danger); font-weight: 700; }
+  .tile .owner { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 2px; }
+  .tile .pawns { position: absolute; bottom: 2px; left: 2px; display: flex; gap: 2px; }
+  .pawn { width: 10px; height: 10px; border-radius: 50%; border: 1px solid #0007; }
+  #center {
+    grid-area: 2 / 2 / 11 / 11; background: var(--board); border-radius: 4px;
+    color: #2a2a2a; display: flex; flex-direction: column; padding: 10px; gap: 8px; min-height: 0;
+  }
+  #center h2 { margin: 0; font-size: 20px; letter-spacing: 2px; }
+  #status { font-weight: 600; }
+  #actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #log {
+    flex: 1; overflow-y: auto; background: #fffdf6; border: 1px solid #c9c4ae;
+    border-radius: 4px; padding: 6px 8px; font-size: 12px; min-height: 0;
+  }
+  #log div { padding: 1px 0; border-bottom: 1px dotted #e2ddc8; }
+  #side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .card { background: var(--panel); border-radius: 8px; padding: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; color: var(--muted); }
+  .player { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .player .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .player.current { font-weight: 700; }
+  .player.me .nm::after { content: " (you)"; color: var(--muted); font-weight: 400; }
+  .player.dead { opacity: .4; text-decoration: line-through; }
+  .player .cash { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .offer { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; }
+  .offer .btns { margin-top: 4px; display: flex; gap: 6px; }
+  #tilemenu {
+    position: fixed; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px; display: none; flex-direction: column; gap: 6px; z-index: 10;
+  }
+  #trade { display: none; flex-direction: column; gap: 8px; }
+  #trade .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #trade .list { max-height: 120px; overflow-y: auto; font-size: 12px; }
+  dialog::backdrop { background: #0008; }
+  .muted { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Parcello</h1>
+  <input id="name" placeholder="Display name" maxlength="24" autocomplete="off">
+  <input id="code" placeholder="Room code (leave empty to create)" maxlength="5"
+         style="text-transform:uppercase" autocomplete="off">
+  <button id="go">Play</button>
+  <div id="loginmsg" class="muted"></div>
+</div>
+
+<div id="app">
+  <div id="board"></div>
+  <div id="side">
+    <div class="card">
+      <h3>Room <span id="roomcode"></span></h3>
+      <div id="players"></div>
+      <div id="lobbyctl" style="margin-top:8px; display:flex; gap:6px;">
+        <button id="start">Start game</button>
+      </div>
+    </div>
+    <div class="card" id="tradecard">
+      <h3>Trades</h3>
+      <div id="offers" class="muted">No open offers.</div>
+      <button id="newtrade" class="secondary" style="margin-top:8px">New offer</button>
+      <div id="trade">
+        <select id="tr_to"></select>
+        <div class="cols">
+          <div>
+            <div class="muted">You give</div>
+            <input id="tr_gc" type="number" min="0" value="0" style="width:100%">
+            <div id="tr_gt" class="list"></div>
+          </div>
+          <div>
+            <div class="muted">You want</div>
+            <input id="tr_rc" type="number" min="0" value="0" style="width:100%">
+            <div id="tr_rt" class="list"></div>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px">
+          <button id="tr_send">Propose</button>
+          <button id="tr_close" class="secondary">Close</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <button id="resign" class="danger">Resign</button>
+    </div>
+  </div>
+</div>
+
+<div id="tilemenu"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const PAWN_COLORS = ["#c0564f","#3d7dc0","#4d9e5a","#c8963f","#8a5fb3","#4fa3a8"];
+const GROUP_COLORS = {
+  brown:"#8a5a3b", lightblue:"#8fc7e8", pink:"#d76fa3", orange:"#e08a3c",
+  red:"#c0564f", yellow:"#e0c93c", green:"#4d9e5a", navy:"#3b5a8a",
+  transit:"#444", works:"#999",
+};
+
+// -- connection state ---------------------------------------------------------
+let ws = null;
+const st = { seat: null, code: null, content: null, view: null, seats: [] };
+
+function send(cmd) { ws?.send(JSON.stringify({ type: "cmd", cmd })); }
+function log(text) {
+  const el = document.createElement("div");
+  el.textContent = text;
+  $("#log")?.appendChild(el);
+  $("#log").scrollTop = $("#log").scrollHeight;
+}
+
+$("#go").onclick = () => {
+  const name = $("#name").value.trim();
+  const code = $("#code").value.trim().toUpperCase();
+  if (!name) { $("#loginmsg").textContent = "Name required."; return; }
+  localStorage.setItem("parcello_name", name);
+  connect(name, code);
+};
+$("#name").value = localStorage.getItem("parcello_name") || "";
+$("#code").value = (location.hash || "").replace("#", "");
+
+function connect(name, code) {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const auth = { guest_name: name };
+  ws.onopen = () => {
+    ws.send(JSON.stringify(code ? { type: "join", code, auth } : { type: "create", auth }));
+  };
+  ws.onmessage = e => handle(JSON.parse(e.data));
+  ws.onclose = () => {
+    $("#loginmsg").textContent = "Disconnected. Enter the room code to rejoin.";
+    if (st.code) $("#code").value = st.code;
+    $("#login").style.display = "flex";
+    $("#app").style.display = "none";
+  };
+}
+
+// -- server messages ----------------------------------------------------------
+function handle(msg) {
+  switch (msg.type) {
+    case "room_created":
+      st.code = msg.code;
+      location.hash = msg.code;
+      break;
+    case "joined":
+      st.code = msg.code;
+      st.seat = msg.seat;
+      st.content = msg.content.content;
+      st.seats = msg.players;
+      location.hash = msg.code;
+      $("#login").style.display = "none";
+      $("#app").style.display = "grid";
+      $("#roomcode").textContent = msg.code;
+      buildBoard();
+      if (msg.view) st.view = msg.view;
+      render();
+      log(`Joined room ${msg.code}. Mods: ${msg.content.mods.map(m => m.id).join(", ")}`);
+      break;
+    case "lobby":
+      st.seats = msg.players;
+      render();
+      break;
+    case "game_started":
+      st.view = msg.view;
+      log("Game started.");
+      render();
+      break;
+    case "update":
+      st.view = msg.view;
+      msg.events.forEach(ev => log(describe(ev)));
+      render();
+      break;
+    case "rejected":
+      log(`Rejected: ${msg.error.code}`);
+      break;
+    case "error":
+      if ($("#app").style.display !== "grid") $("#loginmsg").textContent = msg.message;
+      log(`Error: ${msg.message}`);
+      break;
+  }
+}
+
+// -- helpers over content/view --------------------------------------------------
+const board = () => st.content.board;
+const tileName = i => board()[i]?.name ?? `tile ${i}`;
+const playerName = i => st.view?.players[i]?.name ?? st.seats[i]?.name ?? `seat ${i}`;
+const prop = i => board()[i].kind.type === "property" ? board()[i].kind : null;
+const isHousesModel = i => (prop(i)?.rent_model ?? "houses") === "houses";
+const myTurn = () => st.view && st.view.current === st.seat;
+
+// -- board rendering ------------------------------------------------------------
+// Classic 40-tile walk: 0 bottom-right corner, counter-clockwise.
+function cellOf(i) {
+  if (i <= 10) return { r: 11, c: 11 - i };
+  if (i <= 20) return { r: 11 - (i - 10), c: 1 };
+  if (i <= 30) return { r: 1, c: i - 19 };
+  return { r: i - 29, c: 11 };
+}
+
+function buildBoard() {
+  const el = $("#board");
+  el.innerHTML = "";
+  const n = board().length;
+  const classic = n === 40;
+  board().forEach((t, i) => {
+    const d = document.createElement("div");
+    d.className = "tile";
+    d.id = `tile-${i}`;
+    if (classic) {
+      const { r, c } = cellOf(i);
+      d.style.gridArea = `${r} / ${c}`;
+    }
+    const p = prop(i);
+    const band = document.createElement("div");
+    band.className = "band";
+    band.style.background = p ? (GROUP_COLORS[p.group] ?? "#777") : "#b9c2b0";
+    d.appendChild(band);
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = t.name;
+    d.appendChild(name);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    if (p) meta.innerHTML = `<span>$${p.price}</span><span class="houses"></span><span class="mort"></span>`;
+    if (t.kind.type === "tax") meta.textContent = `pay $${t.kind.amount}`;
+    d.appendChild(meta);
+    const owner = document.createElement("div"); owner.className = "owner"; d.appendChild(owner);
+    const pawns = document.createElement("div"); pawns.className = "pawns"; d.appendChild(pawns);
+    d.onclick = e => tileMenu(i, e);
+    el.appendChild(d);
+  });
+  if (classic) {
+    const center = document.createElement("div");
+    center.id = "center";
+    center.innerHTML = `<h2>PARCELLO</h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
+    el.appendChild(center);
+  } else {
+    // Non-40 boards (mods): linear fallback, panel below.
+    el.style.display = "flex"; el.style.flexWrap = "wrap"; el.style.aspectRatio = "auto";
+    document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
+    const center = document.createElement("div");
+    center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
+    center.innerHTML = `<h2>PARCELLO</h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
+    el.appendChild(center);
+  }
+}
+
+function render() {
+  renderPlayers();
+  if (!st.view) {
+    setStatus(st.seats.length >= 2 ? "Ready — host can start." : "Waiting for players…");
+    renderActions();
+    return;
+  }
+  const v = st.view;
+  board().forEach((_, i) => {
+    const ts = v.tiles[i];
+    const el = $(`#tile-${i}`);
+    const ownerEl = el.querySelector(".owner");
+    ownerEl.style.background = ts.owner === null ? "transparent" : PAWN_COLORS[ts.owner % 6];
+    el.classList.toggle("mine", ts.owner === st.seat);
+    const h = el.querySelector(".houses");
+    if (h) h.textContent = ts.houses === 0 ? "" : ts.houses === 5 ? "HOTEL" : "\u25AA".repeat(ts.houses);
+    const m = el.querySelector(".mort");
+    if (m) m.textContent = ts.mortgaged ? "MORT." : "";
+    el.querySelector(".pawns").innerHTML = "";
+  });
+  v.players.forEach((p, i) => {
+    if (p.bankrupt) return;
+    const pawn = document.createElement("div");
+    pawn.className = "pawn";
+    pawn.style.background = PAWN_COLORS[i % 6];
+    pawn.title = p.name;
+    $(`#tile-${p.position} .pawns`)?.appendChild(pawn);
+  });
+  renderStatus();
+  renderActions();
+  renderOffers();
+}
+
+function renderPlayers() {
+  const el = $("#players");
+  el.innerHTML = "";
+  const rows = st.view
+    ? st.view.players.map((p, i) => ({ i, name: p.name, cash: p.cash, dead: p.bankrupt,
+        extra: p.in_jail ? " [jail]" : "", connected: st.seats[i]?.connected ?? true }))
+    : st.seats.map(s => ({ i: s.seat, name: s.name, cash: null, dead: false,
+        extra: "", connected: s.connected }));
+  rows.forEach(r => {
+    const d = document.createElement("div");
+    d.className = "player"
+      + (st.view && r.i === st.view.current ? " current" : "")
+      + (r.i === st.seat ? " me" : "")
+      + (r.dead ? " dead" : "");
+    d.innerHTML = `<div class="dot" style="background:${PAWN_COLORS[r.i % 6]}"></div>
+      <span class="nm">${escapeHtml(r.name)}${r.extra}${r.connected ? "" : " (offline)"}</span>
+      ${r.cash === null ? "" : `<span class="cash">$${r.cash}</span>`}`;
+    el.appendChild(d);
+  });
+  $("#lobbyctl").style.display = st.view ? "none" : "flex";
+  $("#start").disabled = st.seat !== 0 || st.seats.length < 2;
+}
+
+function setStatus(text) { const s = $("#status"); if (s) s.textContent = text; }
+
+function renderStatus() {
+  const v = st.view;
+  if (v.phase.type === "finished") {
+    setStatus(`Game over — ${playerName(v.phase.winner)} wins!`);
+    return;
+  }
+  const t = v.turn;
+  if (t.type === "auction") {
+    const high = t.high_bidder === null ? "no bids" : `$${t.high_bid} by ${playerName(t.high_bidder)}`;
+    setStatus(`Auction: ${tileName(t.tile)} (${high}) — ${playerName(t.turn)} to act`);
+  } else if (t.type === "await_buy") {
+    setStatus(`${playerName(v.current)} may buy ${tileName(t.tile)} for $${prop(t.tile).price}`);
+  } else {
+    setStatus(`${playerName(v.current)}'s turn`);
+  }
+}
+
+function renderActions() {
+  const el = $("#actions");
+  if (!el) return;
+  el.innerHTML = "";
+  const v = st.view;
+  if (!v || v.phase.type === "finished") return;
+  const btn = (label, cmd, cls) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = () => send(cmd);
+    el.appendChild(b);
+  };
+  const t = v.turn;
+  if (t.type === "auction") {
+    if (t.turn !== st.seat) return;
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.min = t.high_bid + 1; inp.value = t.high_bid + 1;
+    inp.style.width = "90px";
+    el.appendChild(inp);
+    const bid = document.createElement("button");
+    bid.textContent = "Bid";
+    bid.onclick = () => send({ type: "bid", amount: Number(inp.value) });
+    el.appendChild(bid);
+    btn("Pass", { type: "pass" }, "secondary");
+    return;
+  }
+  if (!myTurn()) return;
+  if (t.type === "await_roll") {
+    btn("Roll", { type: "roll" });
+    if (v.players[st.seat].in_jail) btn("Pay fine", { type: "pay_jail_fine" }, "secondary");
+  } else if (t.type === "await_buy") {
+    btn(`Buy ($${prop(t.tile).price})`, { type: "buy" });
+    btn("Decline", { type: "decline" }, "secondary");
+  } else if (t.type === "await_end") {
+    btn("End turn", { type: "end_turn" });
+  }
+  const hint = document.createElement("span");
+  hint.className = "muted";
+  hint.textContent = "Click your tiles to build / mortgage.";
+  el.appendChild(hint);
+}
+
+// -- tile context menu -----------------------------------------------------------
+function tileMenu(i, evt) {
+  const menu = $("#tilemenu");
+  menu.style.display = "none";
+  const v = st.view;
+  if (!v || v.tiles[i].owner !== st.seat) return;
+  const ts = v.tiles[i];
+  const id = board()[i].id;
+  menu.innerHTML = `<div class="muted">${escapeHtml(tileName(i))}</div>`;
+  const add = (label, cmd) => {
+    const b = document.createElement("button");
+    b.className = "secondary"; b.textContent = label;
+    b.onclick = () => { send(cmd); menu.style.display = "none"; };
+    menu.appendChild(b);
+  };
+  if (isHousesModel(i) && !ts.mortgaged) add("Build house", { type: "build", tile: id });
+  if (ts.houses > 0) add("Sell house", { type: "sell_house", tile: id });
+  if (!ts.mortgaged) add("Mortgage", { type: "mortgage", tile: id });
+  else add("Redeem mortgage", { type: "unmortgage", tile: id });
+  menu.style.display = "flex";
+  menu.style.left = Math.min(evt.clientX, innerWidth - 180) + "px";
+  menu.style.top = Math.min(evt.clientY, innerHeight - 160) + "px";
+  evt.stopPropagation();
+}
+document.addEventListener("click", () => { $("#tilemenu").style.display = "none"; });
+
+// -- trades -----------------------------------------------------------------------
+$("#newtrade").onclick = () => {
+  const v = st.view;
+  if (!v) return;
+  const sel = $("#tr_to");
+  sel.innerHTML = "";
+  v.players.forEach((p, i) => {
+    if (i === st.seat || p.bankrupt) return;
+    const o = document.createElement("option");
+    o.value = p.id; o.textContent = p.name;
+    sel.appendChild(o);
+  });
+  fillTradeTiles();
+  $("#trade").style.display = "flex";
+};
+$("#tr_to").onchange = fillTradeTiles;
+$("#tr_close").onclick = () => { $("#trade").style.display = "none"; };
+$("#tr_send").onclick = () => {
+  const pick = box => [...box.querySelectorAll("input:checked")].map(c => c.value);
+  send({
+    type: "propose_trade",
+    to: $("#tr_to").value,
+    give_cash: Number($("#tr_gc").value) || 0,
+    give_tiles: pick($("#tr_gt")),
+    receive_cash: Number($("#tr_rc").value) || 0,
+    receive_tiles: pick($("#tr_rt")),
+  });
+  $("#trade").style.display = "none";
+};
+
+function fillTradeTiles() {
+  const v = st.view;
+  const toSeat = v.players.findIndex(p => p.id === $("#tr_to").value);
+  const fill = (box, seat) => {
+    box.innerHTML = "";
+    board().forEach((t, i) => {
+      if (v.tiles[i].owner !== seat || !prop(i)) return;
+      const l = document.createElement("label");
+      l.style.display = "block";
+      l.innerHTML = `<input type="checkbox" value="${t.id}"> ${escapeHtml(t.name)}`
+        + (v.tiles[i].mortgaged ? " (M)" : "");
+      box.appendChild(l);
+    });
+  };
+  fill($("#tr_gt"), st.seat);
+  fill($("#tr_rt"), toSeat);
+}
+
+function renderOffers() {
+  const el = $("#offers");
+  const v = st.view;
+  const offers = v?.pending_trades ?? [];
+  if (!offers.length) { el.textContent = "No open offers."; el.className = "muted"; return; }
+  el.className = ""; el.innerHTML = "";
+  const side = (cash, tiles) => {
+    const parts = [];
+    if (cash) parts.push(`$${cash}`);
+    tiles.forEach(t => parts.push(tileName(t)));
+    return parts.join(" + ") || "nothing";
+  };
+  offers.forEach(o => {
+    const d = document.createElement("div");
+    d.className = "offer";
+    d.innerHTML = `<b>#${o.id}</b> ${escapeHtml(playerName(o.from))} gives
+      ${escapeHtml(side(o.give_cash, o.give_tiles))} for
+      ${escapeHtml(side(o.receive_cash, o.receive_tiles))}
+      <span class="muted">(to ${escapeHtml(playerName(o.to))})</span>`;
+    const btns = document.createElement("div");
+    btns.className = "btns";
+    const mk = (label, cmd, cls) => {
+      const b = document.createElement("button");
+      b.textContent = label; b.className = cls ?? "";
+      b.onclick = () => send(cmd);
+      btns.appendChild(b);
+    };
+    if (o.to === st.seat) {
+      mk("Accept", { type: "accept_trade", trade: o.id });
+      mk("Refuse", { type: "decline_trade", trade: o.id }, "secondary");
+    }
+    if (o.from === st.seat) mk("Cancel", { type: "cancel_trade", trade: o.id }, "secondary");
+    d.appendChild(btns);
+    el.appendChild(d);
+  });
+}
+
+// -- misc controls ------------------------------------------------------------------
+$("#start").onclick = () => ws?.send(JSON.stringify({ type: "start" }));
+$("#resign").onclick = () => { if (confirm("Resign from the game?")) send({ type: "resign" }); };
+
+// -- event log ------------------------------------------------------------------------
+function describe(e) {
+  const P = playerName, T = tileName;
+  switch (e.type) {
+    case "turn_started": return `--- ${P(e.player)}'s turn ---`;
+    case "dice_rolled": return `${P(e.player)} rolled ${e.d1}+${e.d2} = ${e.d1 + e.d2}`;
+    case "moved": return `${P(e.player)} moved to ${T(e.to)}${e.passed_go ? " (passed Go)" : ""}`;
+    case "salary_paid": return `${P(e.player)} collected $${e.amount} salary`;
+    case "purchase_offered": return `${T(e.tile)} is for sale: $${e.price}`;
+    case "property_purchased": return `${P(e.player)} bought ${T(e.tile)} for $${e.price}`;
+    case "purchase_declined": return `${P(e.player)} declined ${T(e.tile)}`;
+    case "auction_started": return `Auction opened for ${T(e.tile)}`;
+    case "bid_placed": return `${P(e.player)} bid $${e.amount}`;
+    case "auction_passed": return `${P(e.player)} passed`;
+    case "auction_ended":
+      return e.winner === null
+        ? `${T(e.tile)} stays unsold`
+        : `${P(e.winner)} won ${T(e.tile)} at $${e.amount}`;
+    case "rent_paid": return `${P(e.from)} paid $${e.amount} rent to ${P(e.to)} for ${T(e.tile)}`;
+    case "tax_paid": return `${P(e.player)} paid $${e.amount} tax`;
+    case "card_drawn": return `${P(e.player)} drew: ${e.text}`;
+    case "cash_adjusted":
+      return `${P(e.player)} ${e.delta >= 0 ? "received" : "paid"} $${Math.abs(e.delta)} (${e.reason})`;
+    case "house_built": return `${P(e.player)} built on ${T(e.tile)} (now ${e.houses})`;
+    case "house_sold": return `${P(e.player)} sold a house on ${T(e.tile)} (+$${e.refund})`;
+    case "property_mortgaged": return `${P(e.player)} mortgaged ${T(e.tile)} for $${e.value}`;
+    case "property_unmortgaged": return `${P(e.player)} redeemed ${T(e.tile)} for $${e.cost}`;
+    case "went_to_jail": return `${P(e.player)} went to jail`;
+    case "jail_fine_paid": return `${P(e.player)} paid the $${e.amount} jail fine`;
+    case "left_jail": return `${P(e.player)} left jail`;
+    case "property_transferred":
+      return e.to === null
+        ? `${T(e.tile)} returned to the bank`
+        : `${T(e.tile)} transferred to ${P(e.to)}`;
+    case "trade_proposed": return `${P(e.from)} proposed trade #${e.trade} to ${P(e.to)}`;
+    case "trade_accepted": return `${P(e.to)} accepted trade #${e.trade}`;
+    case "trade_declined": return `Trade #${e.trade} declined`;
+    case "trade_cancelled": return `Trade #${e.trade} cancelled`;
+    case "player_bankrupt": return `${P(e.player)} went bankrupt`;
+    case "player_resigned": return `${P(e.player)} resigned`;
+    case "game_ended": return `Game over — ${P(e.winner)} wins!`;
+    default: return JSON.stringify(e);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>

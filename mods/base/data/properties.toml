@@ -1,0 +1,317 @@
+# Base board: 40 tiles, classic layout. board[0] must be the Go tile.
+# Stations use the group-scaled rent model (rent by stations owned);
+# utilities use the dice-scaled model (dice total x table by works owned).
+
+[[tile]]
+id = "go"
+name = "Go"
+type = "go"
+
+[[tile]]
+id = "harbor_lane"
+name = "Harbor Lane"
+type = "property"
+group = "brown"
+price = 60
+house_cost = 50
+rents = [2, 10, 30, 90, 160, 250]
+
+[[tile]]
+id = "community_1"
+name = "Community Chest"
+type = "community"
+
+[[tile]]
+id = "dockside_row"
+name = "Dockside Row"
+type = "property"
+group = "brown"
+price = 60
+house_cost = 50
+rents = [4, 20, 60, 180, 320, 450]
+
+[[tile]]
+id = "income_tax"
+name = "Income Tax"
+type = "tax"
+amount = 200
+
+[[tile]]
+id = "north_station"
+name = "North Station"
+type = "property"
+group = "transit"
+price = 200
+rent_model = "group_scaled"
+rents = [25, 50, 100, 200, 200, 200]
+
+[[tile]]
+id = "willow_street"
+name = "Willow Street"
+type = "property"
+group = "lightblue"
+price = 100
+house_cost = 50
+rents = [6, 30, 90, 270, 400, 550]
+
+[[tile]]
+id = "chance_1"
+name = "Chance"
+type = "chance"
+
+[[tile]]
+id = "elm_avenue"
+name = "Elm Avenue"
+type = "property"
+group = "lightblue"
+price = 100
+house_cost = 50
+rents = [6, 30, 90, 270, 400, 550]
+
+[[tile]]
+id = "cedar_court"
+name = "Cedar Court"
+type = "property"
+group = "lightblue"
+price = 120
+house_cost = 50
+rents = [8, 40, 100, 300, 450, 600]
+
+[[tile]]
+id = "jail"
+name = "Jail"
+type = "jail"
+
+[[tile]]
+id = "rose_boulevard"
+name = "Rose Boulevard"
+type = "property"
+group = "pink"
+price = 140
+house_cost = 100
+rents = [10, 50, 150, 450, 625, 750]
+
+[[tile]]
+id = "power_plant"
+name = "Power Plant"
+type = "property"
+group = "works"
+price = 150
+rent_model = "dice_scaled"
+rents = [4, 10, 10, 10, 10, 10]
+
+[[tile]]
+id = "tulip_way"
+name = "Tulip Way"
+type = "property"
+group = "pink"
+price = 140
+house_cost = 100
+rents = [10, 50, 150, 450, 625, 750]
+
+[[tile]]
+id = "orchid_drive"
+name = "Orchid Drive"
+type = "property"
+group = "pink"
+price = 160
+house_cost = 100
+rents = [12, 60, 180, 500, 700, 900]
+
+[[tile]]
+id = "east_station"
+name = "East Station"
+type = "property"
+group = "transit"
+price = 200
+rent_model = "group_scaled"
+rents = [25, 50, 100, 200, 200, 200]
+
+[[tile]]
+id = "foundry_street"
+name = "Foundry Street"
+type = "property"
+group = "orange"
+price = 180
+house_cost = 100
+rents = [14, 70, 200, 550, 750, 950]
+
+[[tile]]
+id = "community_2"
+name = "Community Chest"
+type = "community"
+
+[[tile]]
+id = "market_square"
+name = "Market Square"
+type = "property"
+group = "orange"
+price = 180
+house_cost = 100
+rents = [14, 70, 200, 550, 750, 950]
+
+[[tile]]
+id = "guild_row"
+name = "Guild Row"
+type = "property"
+group = "orange"
+price = 200
+house_cost = 100
+rents = [16, 80, 220, 600, 800, 1000]
+
+[[tile]]
+id = "free_parking"
+name = "Free Parking"
+type = "free_parking"
+
+[[tile]]
+id = "ironworks_avenue"
+name = "Ironworks Avenue"
+type = "property"
+group = "red"
+price = 220
+house_cost = 150
+rents = [18, 90, 250, 700, 875, 1050]
+
+[[tile]]
+id = "chance_2"
+name = "Chance"
+type = "chance"
+
+[[tile]]
+id = "granite_street"
+name = "Granite Street"
+type = "property"
+group = "red"
+price = 220
+house_cost = 150
+rents = [18, 90, 250, 700, 875, 1050]
+
+[[tile]]
+id = "summit_road"
+name = "Summit Road"
+type = "property"
+group = "red"
+price = 240
+house_cost = 150
+rents = [20, 100, 300, 750, 925, 1100]
+
+[[tile]]
+id = "south_station"
+name = "South Station"
+type = "property"
+group = "transit"
+price = 200
+rent_model = "group_scaled"
+rents = [25, 50, 100, 200, 200, 200]
+
+[[tile]]
+id = "amber_avenue"
+name = "Amber Avenue"
+type = "property"
+group = "yellow"
+price = 260
+house_cost = 150
+rents = [22, 110, 330, 800, 975, 1150]
+
+[[tile]]
+id = "golden_lane"
+name = "Golden Lane"
+type = "property"
+group = "yellow"
+price = 260
+house_cost = 150
+rents = [22, 110, 330, 800, 975, 1150]
+
+[[tile]]
+id = "waterworks"
+name = "Waterworks"
+type = "property"
+group = "works"
+price = 150
+rent_model = "dice_scaled"
+rents = [4, 10, 10, 10, 10, 10]
+
+[[tile]]
+id = "meridian_way"
+name = "Meridian Way"
+type = "property"
+group = "yellow"
+price = 280
+house_cost = 150
+rents = [24, 120, 360, 850, 1025, 1200]
+
+[[tile]]
+id = "go_to_jail"
+name = "Go To Jail"
+type = "go_to_jail"
+
+[[tile]]
+id = "emerald_street"
+name = "Emerald Street"
+type = "property"
+group = "green"
+price = 300
+house_cost = 200
+rents = [26, 130, 390, 900, 1100, 1275]
+
+[[tile]]
+id = "cypress_avenue"
+name = "Cypress Avenue"
+type = "property"
+group = "green"
+price = 300
+house_cost = 200
+rents = [26, 130, 390, 900, 1100, 1275]
+
+[[tile]]
+id = "community_3"
+name = "Community Chest"
+type = "community"
+
+[[tile]]
+id = "highland_terrace"
+name = "Highland Terrace"
+type = "property"
+group = "green"
+price = 320
+house_cost = 200
+rents = [28, 150, 450, 1000, 1200, 1400]
+
+[[tile]]
+id = "west_station"
+name = "West Station"
+type = "property"
+group = "transit"
+price = 200
+rent_model = "group_scaled"
+rents = [25, 50, 100, 200, 200, 200]
+
+[[tile]]
+id = "chance_3"
+name = "Chance"
+type = "chance"
+
+[[tile]]
+id = "regent_plaza"
+name = "Regent Plaza"
+type = "property"
+group = "navy"
+price = 350
+house_cost = 200
+rents = [35, 175, 500, 1100, 1300, 1500]
+
+[[tile]]
+id = "luxury_tax"
+name = "Luxury Tax"
+type = "tax"
+amount = 100
+
+[[tile]]
+id = "crown_heights"
+name = "Crown Heights"
+type = "property"
+group = "navy"
+price = 400
+house_cost = 200
+rents = [50, 200, 600, 1400, 1700, 2000]

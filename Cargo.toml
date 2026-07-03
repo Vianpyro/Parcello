@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/engine",
+    "crates/mods",
+    "crates/protocol",
+    "crates/server",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Vianpyro/parcello"
+rust-version = "1.75"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "time", "signal"] }
