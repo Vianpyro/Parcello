@@ -114,7 +114,10 @@ architecture doc section 5; dependencies point downward only):
   ADR-0005), `web/index.html` (embedded via `include_str!` - the server
   binary is the whole deployment).
 - `crates/cli` - terminal test harness; keep it in sync with new commands
-  (it is the cheapest end-to-end protocol check).
+  (it is the cheapest end-to-end protocol check). `--bot` turns it into an
+  autopilot seat (`bot.rs`: pure `decide(content, view, seat)` heuristics
+  - buy/bid/build/jail-card, declines trades) so games can be playtested
+  without volunteers; soak it with 3 bots when touching turn flow.
 - `clients/flutter` - Flutter client (Windows desktop first; Dart, not part
   of the cargo workspace). Mirrors the web client feature-for-feature; see
   its README. Requires the Flutter SDK (`flutter analyze && flutter test`).

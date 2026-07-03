@@ -63,6 +63,10 @@ cargo run -p parcello-cli -- --name alice --create
 # Terminal 3: guest
 cargo run -p parcello-cli -- --name bob --join ABCDE
 
+# No players around? Fill seats with bots (simple autopilot: buy, bid,
+# build, jail cards; declines trades). Great for solo LAN/WAN testing.
+cargo run -p parcello-cli -- --name bot1 --join ABCDE --bot
+
 # In the host terminal:
 #   start
 # then per the prompts: roll | buy | no | bid <n> | pass | build <t>

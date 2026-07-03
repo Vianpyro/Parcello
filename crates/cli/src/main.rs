@@ -6,6 +6,8 @@
 //! | offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
 //! | accept <id> | refuse <id> | cancel <id> | pay | card | end | resign | quit.
 
+mod bot;
+
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use parcello_engine::{ClientView, CommandKind, DeckKind, Event, GamePhase, TileKind, TurnPhase};
@@ -46,6 +48,11 @@ struct Args {
     /// ownership when rejoining as a guest).
     #[arg(long)]
     reconnect: Option<String>,
+
+    /// Autopilot: play with simple heuristics (solo playtesting). Stdin
+    /// still works, e.g. to `start` the game from a bot host.
+    #[arg(long)]
+    bot: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -101,7 +108,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match frame? {
                     Message::Text(text) => {
                         let msg: ServerMessage = serde_json::from_str(&text)?;
+                        // Only view-bearing messages can require a new bot
+                        // decision; reacting to `Rejected` would loop.
+                        let fresh_view = matches!(
+                            &msg,
+                            ServerMessage::GameStarted { .. }
+                                | ServerMessage::Update { .. }
+                                | ServerMessage::Joined { view: Some(_), .. }
+                        );
                         ctx.render(msg);
+                        if args.bot && fresh_view
+                            && let (Some(content), Some(view), Some(me)) =
+                                (&ctx.content, &ctx.view, ctx.my_seat)
+                            && let Some(kind) = bot::decide(&content.content, view, me)
+                        {
+                            // Human pacing; also yields between bot moves.
+                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                            let cmd = ClientMessage::Cmd { cmd: kind };
+                            sink.send(Message::Text(serde_json::to_string(&cmd)?.into()))
+                                .await?;
+                        }
                     }
                     Message::Close(_) => break,
                     _ => {}
@@ -202,6 +228,8 @@ struct Ctx {
     /// Stable player ids by seat, for addressing trade offers.
     ids: Vec<String>,
     my_seat: Option<usize>,
+    /// Latest authoritative view; what the bot decides on.
+    view: Option<Box<ClientView>>,
 }
 
 impl Ctx {
@@ -228,18 +256,21 @@ impl Ctx {
                 if let Some(view) = view {
                     println!("* game in progress:");
                     self.print_view(&view);
+                    self.view = Some(view);
                 }
             }
             ServerMessage::Lobby { players } => self.print_lobby(&players),
             ServerMessage::GameStarted { view } => {
                 println!("* game started");
                 self.print_view(&view);
+                self.view = Some(view);
             }
             ServerMessage::Update { events, view } => {
                 for event in &events {
                     println!("  {}", self.describe(event));
                 }
                 self.print_view(&view);
+                self.view = Some(view);
             }
             ServerMessage::Rejected { error } => println!("! rejected: {error}"),
             ServerMessage::Error { message } => println!("! error: {message}"),

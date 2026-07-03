@@ -25,7 +25,7 @@ pub use error::{CommandError, ContentError};
 pub use event::{DeckKind, Event};
 pub use state::{GamePhase, GameState, Player, PlayerId, TileState, TradeOffer, TurnPhase};
 pub use strategy::{BankruptcyResolver, DicePolicy, RentCalculator};
-pub use view::ClientView;
+pub use view::{ClientView, PlayerView};
 
 use std::sync::Arc;
 
