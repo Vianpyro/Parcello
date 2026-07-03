@@ -29,7 +29,11 @@ pub fn resolve(mods_dir: &Path, mod_ids: &[String]) -> Result<ResolvedContent, M
             return Err(ModError::NotFound(root.display().to_string()));
         }
         let plugin = TomlModPlugin::open(&root)?;
-        info!(mod_id = plugin.id(), version = plugin.version(), "loading mod");
+        info!(
+            mod_id = plugin.id(),
+            version = plugin.version(),
+            "loading mod"
+        );
         plugin.on_load(&mut registries)?;
         mods.push(ModInfo::from(plugin.manifest()));
     }

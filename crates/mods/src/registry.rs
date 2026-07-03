@@ -48,7 +48,13 @@ impl RegistryBuilder {
 
     pub fn set_rule(&mut self, mod_id: &str, key: &str, value: i64) {
         if let Some(old) = self.rules.insert(key.to_string(), value) {
-            warn!(mod_id, key, old, new = value, "rule override (last-loaded-wins)");
+            warn!(
+                mod_id,
+                key,
+                old,
+                new = value,
+                "rule override (last-loaded-wins)"
+            );
         }
     }
 

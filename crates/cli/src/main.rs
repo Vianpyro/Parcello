@@ -56,7 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             auth,
         }
     };
-    sink.send(Message::Text(serde_json::to_string(&first)?)).await?;
+    sink.send(Message::Text(serde_json::to_string(&first)?))
+        .await?;
 
     println!("connected to {} as {}", args.url, args.name);
     println!(
@@ -109,23 +110,45 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
         ("roll", None) => CommandKind::Roll,
         ("buy", None) => CommandKind::Buy,
         ("no", None) => CommandKind::Decline,
-        ("bid", Some(n)) => CommandKind::Bid { amount: n.parse().ok()? },
+        ("bid", Some(n)) => CommandKind::Bid {
+            amount: n.parse().ok()?,
+        },
         ("pass", None) => CommandKind::Pass,
-        ("build", Some(tile)) => CommandKind::Build { tile: tile.to_string() },
-        ("sell", Some(tile)) => CommandKind::SellHouse { tile: tile.to_string() },
-        ("mortgage", Some(tile)) => CommandKind::Mortgage { tile: tile.to_string() },
-        ("redeem", Some(tile)) => CommandKind::Unmortgage { tile: tile.to_string() },
+        ("build", Some(tile)) => CommandKind::Build {
+            tile: tile.to_string(),
+        },
+        ("sell", Some(tile)) => CommandKind::SellHouse {
+            tile: tile.to_string(),
+        },
+        ("mortgage", Some(tile)) => CommandKind::Mortgage {
+            tile: tile.to_string(),
+        },
+        ("redeem", Some(tile)) => CommandKind::Unmortgage {
+            tile: tile.to_string(),
+        },
         ("offer", Some(seat)) => {
             let to = ctx.ids.get(seat.parse::<usize>().ok()?)?.clone();
             let give_cash = parts.next()?.parse().ok()?;
             let give_tiles = parse_tile_list(parts.next()?);
             let receive_cash = parts.next()?.parse().ok()?;
             let receive_tiles = parse_tile_list(parts.next()?);
-            CommandKind::ProposeTrade { to, give_cash, give_tiles, receive_cash, receive_tiles }
+            CommandKind::ProposeTrade {
+                to,
+                give_cash,
+                give_tiles,
+                receive_cash,
+                receive_tiles,
+            }
         }
-        ("accept", Some(id)) => CommandKind::AcceptTrade { trade: id.parse().ok()? },
-        ("refuse", Some(id)) => CommandKind::DeclineTrade { trade: id.parse().ok()? },
-        ("cancel", Some(id)) => CommandKind::CancelTrade { trade: id.parse().ok()? },
+        ("accept", Some(id)) => CommandKind::AcceptTrade {
+            trade: id.parse().ok()?,
+        },
+        ("refuse", Some(id)) => CommandKind::DeclineTrade {
+            trade: id.parse().ok()?,
+        },
+        ("cancel", Some(id)) => CommandKind::CancelTrade {
+            trade: id.parse().ok()?,
+        },
         ("pay", None) => CommandKind::PayJailFine,
         ("end", None) => CommandKind::EndTurn,
         ("resign", None) => CommandKind::Resign,
@@ -139,7 +162,10 @@ fn parse_tile_list(raw: &str) -> Vec<String> {
     if raw == "-" {
         return Vec::new();
     }
-    raw.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect()
+    raw.split(',')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Everything needed to print human-readable output: resolved content for
@@ -159,7 +185,13 @@ impl Ctx {
             ServerMessage::RoomCreated { code } => {
                 println!("* room created: {code} (share this code)");
             }
-            ServerMessage::Joined { code, seat, players, content, view } => {
+            ServerMessage::Joined {
+                code,
+                seat,
+                players,
+                content,
+                view,
+            } => {
                 self.my_seat = Some(seat);
                 self.content = Some(*content);
                 println!("* joined room {code} as seat {seat}");
@@ -237,18 +269,26 @@ impl Ctx {
             GamePhase::Active => {
                 let (actor, hint) = match &view.turn {
                     TurnPhase::AwaitRoll => (view.current, "roll".to_string()),
-                    TurnPhase::AwaitBuy { tile } => {
-                        (view.current, format!("buy | no ({})", self.tile_name(*tile)))
-                    }
-                    TurnPhase::AwaitEnd => {
-                        (view.current, "end (or build <tile_id>)".to_string())
-                    }
-                    TurnPhase::Auction { tile, high_bid, high_bidder, turn, .. } => {
+                    TurnPhase::AwaitBuy { tile } => (
+                        view.current,
+                        format!("buy | no ({})", self.tile_name(*tile)),
+                    ),
+                    TurnPhase::AwaitEnd => (view.current, "end (or build <tile_id>)".to_string()),
+                    TurnPhase::Auction {
+                        tile,
+                        high_bid,
+                        high_bidder,
+                        turn,
+                        ..
+                    } => {
                         let high = match high_bidder {
                             Some(b) => format!("${high_bid} by {}", self.player(*b)),
                             None => "no bids".to_string(),
                         };
-                        (*turn, format!("AUCTION {} ({high}): bid <n> | pass", self.tile_name(*tile)))
+                        (
+                            *turn,
+                            format!("AUCTION {} ({high}): bid <n> | pass", self.tile_name(*tile)),
+                        )
                     }
                 };
                 println!("  -> {} to act: {hint}", self.player(actor));
@@ -262,9 +302,18 @@ impl Ctx {
             Event::DiceRolled { player, d1, d2 } => {
                 format!("{} rolled {d1}+{d2} = {}", self.player(*player), d1 + d2)
             }
-            Event::Moved { player, to, passed_go, .. } => {
+            Event::Moved {
+                player,
+                to,
+                passed_go,
+                ..
+            } => {
                 let go = if *passed_go { " (passed Go)" } else { "" };
-                format!("{} moved to {}{go}", self.player(*player), self.tile_name(*to))
+                format!(
+                    "{} moved to {}{go}",
+                    self.player(*player),
+                    self.tile_name(*to)
+                )
             }
             Event::SalaryPaid { player, amount } => {
                 format!("{} collected ${amount} salary", self.player(*player))
@@ -272,11 +321,23 @@ impl Ctx {
             Event::PurchaseOffered { tile, price, .. } => {
                 format!("{} is for sale: ${price}", self.tile_name(*tile))
             }
-            Event::PropertyPurchased { player, tile, price } => {
-                format!("{} bought {} for ${price}", self.player(*player), self.tile_name(*tile))
+            Event::PropertyPurchased {
+                player,
+                tile,
+                price,
+            } => {
+                format!(
+                    "{} bought {} for ${price}",
+                    self.player(*player),
+                    self.tile_name(*tile)
+                )
             }
             Event::PurchaseDeclined { player, tile } => {
-                format!("{} declined {}", self.player(*player), self.tile_name(*tile))
+                format!(
+                    "{} declined {}",
+                    self.player(*player),
+                    self.tile_name(*tile)
+                )
             }
             Event::TradeProposed { trade, from, to } => format!(
                 "{} proposed trade #{trade} to {}",
@@ -297,7 +358,11 @@ impl Ctx {
                 format!("{} bid ${amount}", self.player(*player))
             }
             Event::AuctionPassed { player, .. } => format!("{} passed", self.player(*player)),
-            Event::AuctionEnded { tile, winner, amount } => match winner {
+            Event::AuctionEnded {
+                tile,
+                winner,
+                amount,
+            } => match winner {
                 Some(w) => format!(
                     "{} won the auction for {} at ${amount}",
                     self.player(*w),
@@ -305,7 +370,12 @@ impl Ctx {
                 ),
                 None => format!("{} stays unsold", self.tile_name(*tile)),
             },
-            Event::RentPaid { from, to, tile, amount } => format!(
+            Event::RentPaid {
+                from,
+                to,
+                tile,
+                amount,
+            } => format!(
                 "{} paid ${amount} rent to {} for {}",
                 self.player(*from),
                 self.player(*to),
@@ -314,28 +384,52 @@ impl Ctx {
             Event::TaxPaid { player, amount, .. } => {
                 format!("{} paid ${amount} tax", self.player(*player))
             }
-            Event::CardDrawn { player, deck, text, .. } => {
+            Event::CardDrawn {
+                player, deck, text, ..
+            } => {
                 let deck = match deck {
                     DeckKind::Chance => "chance",
                     DeckKind::Community => "community",
                 };
                 format!("{} drew a {deck} card: {text}", self.player(*player))
             }
-            Event::CashAdjusted { player, delta, reason } => {
+            Event::CashAdjusted {
+                player,
+                delta,
+                reason,
+            } => {
                 let verb = if *delta >= 0 { "received" } else { "paid" };
-                format!("{} {verb} ${} ({reason})", self.player(*player), delta.abs())
+                format!(
+                    "{} {verb} ${} ({reason})",
+                    self.player(*player),
+                    delta.abs()
+                )
             }
-            Event::HouseBuilt { player, tile, houses, cost } => format!(
+            Event::HouseBuilt {
+                player,
+                tile,
+                houses,
+                cost,
+            } => format!(
                 "{} built on {} (now {houses}) for ${cost}",
                 self.player(*player),
                 self.tile_name(*tile)
             ),
-            Event::HouseSold { player, tile, houses, refund } => format!(
+            Event::HouseSold {
+                player,
+                tile,
+                houses,
+                refund,
+            } => format!(
                 "{} sold a house on {} (now {houses}) for ${refund}",
                 self.player(*player),
                 self.tile_name(*tile)
             ),
-            Event::PropertyMortgaged { player, tile, value } => format!(
+            Event::PropertyMortgaged {
+                player,
+                tile,
+                value,
+            } => format!(
                 "{} mortgaged {} for ${value}",
                 self.player(*player),
                 self.tile_name(*tile)

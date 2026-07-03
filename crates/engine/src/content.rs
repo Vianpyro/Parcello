@@ -76,13 +76,24 @@ pub struct CardDef {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CardEffect {
     /// Positive: bank pays the player. Negative: player pays the bank.
-    Money { amount: i64 },
-    MoveTo { tile: String, collect_go: bool },
+    Money {
+        amount: i64,
+    },
+    MoveTo {
+        tile: String,
+        collect_go: bool,
+    },
     /// Relative move; negative steps move backward (no Go salary backward).
-    MoveBy { steps: i8 },
+    MoveBy {
+        steps: i8,
+    },
     GoToJail,
-    CollectFromEach { amount: i64 },
-    PayEach { amount: i64 },
+    CollectFromEach {
+        amount: i64,
+    },
+    PayEach {
+        amount: i64,
+    },
 }
 
 /// Named rule parameters, resolved from `RuleRegistry` keys (V1 hook points).
@@ -165,8 +176,7 @@ impl GameContent {
                 return Err(ContentError::DuplicateTileId(t.id.clone()));
             }
             if let TileKind::Property(p) = &t.kind {
-                let bad_house_cost =
-                    matches!(p.rent_model, RentModel::Houses) && p.house_cost <= 0;
+                let bad_house_cost = matches!(p.rent_model, RentModel::Houses) && p.house_cost <= 0;
                 if p.price <= 0 || bad_house_cost {
                     return Err(ContentError::InvalidProperty(t.id.clone()));
                 }

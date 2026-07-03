@@ -58,9 +58,12 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         let msg: ClientMessage = match serde_json::from_str(&text) {
             Ok(msg) => msg,
             Err(e) => {
-                send(&tx, ServerMessage::Error {
-                    message: format!("malformed message: {e}"),
-                });
+                send(
+                    &tx,
+                    ServerMessage::Error {
+                        message: format!("malformed message: {e}"),
+                    },
+                );
                 continue;
             }
         };
@@ -76,6 +79,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     &app.rooms,
                     app.content.clone(),
                     app.history.clone(),
+                    app.turn_timeout,
                 )
                 .await
                 {
@@ -102,18 +106,24 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 };
                 let room = app.rooms.read().await.get(&code.to_uppercase()).cloned();
                 let Some(room) = room else {
-                    send(&tx, ServerMessage::Error {
-                        message: format!("no room with code {code}"),
-                    });
+                    send(
+                        &tx,
+                        ServerMessage::Error {
+                            message: format!("no room with code {code}"),
+                        },
+                    );
                     continue;
                 };
                 session = try_join(room, identity, &tx).await;
             }
 
             (ClientMessage::Create { .. } | ClientMessage::Join { .. }, Some(_)) => {
-                send(&tx, ServerMessage::Error {
-                    message: "already in a room".into(),
-                });
+                send(
+                    &tx,
+                    ServerMessage::Error {
+                        message: "already in a room".into(),
+                    },
+                );
             }
 
             (ClientMessage::Start, Some(s)) => {
@@ -136,9 +146,12 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
             }
 
             (ClientMessage::Start | ClientMessage::Cmd { .. }, None) => {
-                send(&tx, ServerMessage::Error {
-                    message: "join a room first".into(),
-                });
+                send(
+                    &tx,
+                    ServerMessage::Error {
+                        message: "join a room first".into(),
+                    },
+                );
             }
         }
     }
@@ -186,9 +199,12 @@ async fn try_join(
         reply,
     };
     if room.send(join).await.is_err() {
-        send(tx, ServerMessage::Error {
-            message: "room no longer exists".into(),
-        });
+        send(
+            tx,
+            ServerMessage::Error {
+                message: "room no longer exists".into(),
+            },
+        );
         return None;
     }
     match on_reply.await {
@@ -198,9 +214,12 @@ async fn try_join(
             None
         }
         Err(_) => {
-            send(tx, ServerMessage::Error {
-                message: "room closed during join".into(),
-            });
+            send(
+                tx,
+                ServerMessage::Error {
+                    message: "room closed during join".into(),
+                },
+            );
             None
         }
     }

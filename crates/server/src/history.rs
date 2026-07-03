@@ -77,9 +77,22 @@ pub struct SqliteHistory {
 }
 
 enum Rec {
-    Start { room: String, players: String, seed: i64, at: i64 },
-    Cmd { room: String, json: String, at: i64 },
-    End { room: String, winner: Option<String>, at: i64 },
+    Start {
+        room: String,
+        players: String,
+        seed: i64,
+        at: i64,
+    },
+    Cmd {
+        room: String,
+        json: String,
+        at: i64,
+    },
+    End {
+        room: String,
+        winner: Option<String>,
+        at: i64,
+    },
 }
 
 impl SqliteHistory {
@@ -109,7 +122,10 @@ impl SqliteHistory {
             .name("parcello-history".into())
             .spawn(move || writer_loop(conn, rx))
             .expect("history thread spawns");
-        Ok(Self { tx: Some(tx), handle: Some(handle) })
+        Ok(Self {
+            tx: Some(tx),
+            handle: Some(handle),
+        })
     }
 
     fn send(&self, rec: Rec) {
@@ -136,7 +152,12 @@ fn writer_loop(conn: rusqlite::Connection, rx: mpsc::Receiver<Rec>) {
     let mut games: HashMap<String, (i64, i64)> = HashMap::new(); // room -> (game_id, next_seq)
     while let Ok(rec) = rx.recv() {
         let result = match rec {
-            Rec::Start { room, players, seed, at } => conn
+            Rec::Start {
+                room,
+                players,
+                seed,
+                at,
+            } => conn
                 .execute(
                     "INSERT INTO game (room, seed, players, started_at) VALUES (?1, ?2, ?3, ?4)",
                     rusqlite::params![room, seed, players, at],
@@ -197,7 +218,11 @@ impl GameHistory for SqliteHistory {
             warn!("unserializable command; dropped from history");
             return;
         };
-        self.send(Rec::Cmd { room: room.to_string(), json, at: now_unix() });
+        self.send(Rec::Cmd {
+            room: room.to_string(),
+            json,
+            at: now_unix(),
+        });
     }
 
     fn record_end(&self, room: &str, winner: Option<&str>) {
@@ -224,7 +249,10 @@ mod tests {
         for kind in [CommandKind::Roll, CommandKind::Buy, CommandKind::EndTurn] {
             history.record_command(
                 "ABCDE",
-                &PlayerCommand { player: "p0".into(), kind },
+                &PlayerCommand {
+                    player: "p0".into(),
+                    kind,
+                },
             );
         }
         history.record_end("ABCDE", Some("p0"));

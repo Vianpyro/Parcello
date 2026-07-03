@@ -24,14 +24,21 @@ pub struct AuthPayload {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     /// Create a room and join it as host (seat 0).
-    Create { auth: AuthPayload },
+    Create {
+        auth: AuthPayload,
+    },
     /// Join an existing room by code. Rejoining with the same identity
     /// reattaches to the original seat.
-    Join { code: String, auth: AuthPayload },
+    Join {
+        code: String,
+        auth: AuthPayload,
+    },
     /// Host only, from the Lobby: start the game.
     Start,
     /// In-game player command, relayed verbatim to the engine.
-    Cmd { cmd: CommandKind },
+    Cmd {
+        cmd: CommandKind,
+    },
     Ping,
 }
 

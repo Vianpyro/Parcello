@@ -128,7 +128,10 @@ impl BankruptcyResolver for StandardLiquidation {
                 })
                 .max_by_key(|&t| content.property(t).map(|p| p.house_cost).unwrap_or(0));
             let Some(tile) = candidate else { break };
-            let refund = content.property(tile).map(|p| p.house_cost / 2).unwrap_or(0);
+            let refund = content
+                .property(tile)
+                .map(|p| p.house_cost / 2)
+                .unwrap_or(0);
             state.tiles[tile].houses -= 1;
             state.players[debtor].cash += refund;
             events.push(Event::HouseSold {
@@ -163,13 +166,14 @@ impl BankruptcyResolver for StandardLiquidation {
             if state.players[debtor].cash >= needed {
                 break;
             }
-            let value = content
-                .property(tile)
-                .map(|p| p.price / 2)
-                .unwrap_or(0);
+            let value = content.property(tile).map(|p| p.price / 2).unwrap_or(0);
             state.tiles[tile].mortgaged = true;
             state.players[debtor].cash += value;
-            events.push(Event::PropertyMortgaged { player: debtor, tile, value });
+            events.push(Event::PropertyMortgaged {
+                player: debtor,
+                tile,
+                value,
+            });
         }
     }
 }

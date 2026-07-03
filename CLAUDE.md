@@ -53,7 +53,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 45 tests, all must pass
+cargo test  --workspace --locked          # 46 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -88,7 +88,10 @@ architecture doc section 5; dependencies point downward only):
   re-trusted from the wire), `room.rs` (one Tokio task per room; state
   machine Lobby -> Active -> Finished; host = seat 0; 2..=6 players; rejoin
   by identity, last connection wins; rooms with zero connected seats
-  dissolve after `IDLE_TIMEOUT` = 30 min), `auth.rs`
+  dissolve after `IDLE_TIMEOUT` = 30 min; optional per-turn AFK timer
+  `--turn-timeout <secs>` auto-plays the canonical action
+  Roll/Decline/Pass/EndTurn for the acting seat, 0 = off default; any
+  accepted command resets the clock), `auth.rs`
   (`IdentityVerifier` trait: insecure guests and/or HS256 JWT via
   hmac/sha2 - no `ring`; the real Identity Service later slots in behind
   the same trait, ADR-0003), `history.rs` (`GameHistory` port; in-memory
@@ -122,7 +125,7 @@ proposer; offers are public); resign; last-player-standing win.
 
 Deliberate simplifications (documented, do not "fix" without discussion):
 no immediate interest when mortgaged tiles change hands; no get-out-of-jail
-cards; no per-turn AFK timer.
+cards; the AFK timer is opt-in (`--turn-timeout`, off by default).
 
 ## Code conventions
 
@@ -148,9 +151,9 @@ cards; no per-turn AFK timer.
 
 ## Untested / rough surfaces (be careful, verify before relying)
 
-- `clippy` and `rustfmt` have NEVER run locally (dev sandbox had an apt
-  toolchain without them). First CI run may need mechanical fixes; that is
-  expected, fix warnings rather than silencing them.
+- `clippy --all-targets -- -D warnings` and `cargo fmt` now pass locally
+  (first run reformatted the tree and fixed one `unit_arg` lint). Keep them
+  green; fix warnings rather than silencing them.
 - `Dockerfile` has never been built (no Docker in the sandbox). Multi-stage
   rust:1.75-slim -> bookworm-slim; verify before publishing images.
 - `crates/server/web/index.html` has never rendered in a real browser.
@@ -165,17 +168,15 @@ cards; no per-turn AFK timer.
    Dart; the web client is the reference implementation).
 2. Global Identity Service: asymmetric JWT + JWKS fetch as a new
    `IdentityVerifier`; deprecate the HS256 stopgap (ADR-0003).
-3. Per-turn AFK timer in room tasks (auto canonical action: Roll/Decline/
-   Pass/EndTurn after N seconds) - keep it server-side, engine stays pure.
-4. Get-out-of-jail-free as a holdable card (needs a `CardEffect` variant
+3. Get-out-of-jail-free as a holdable card (needs a `CardEffect` variant
    plus per-player card inventory in `GameState` - protocol addition).
-5. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
+4. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Check MSRV impact first.
-6. Per-room mod sets (reintroduces the room `Starting` state; ADR-0004
+5. Per-room mod sets (reintroduces the room `Starting` state; ADR-0004
    documents what collapses today).
-7. Private trade offers (requires per-player `ClientView`s - today the
+6. Private trade offers (requires per-player `ClientView`s - today the
    view is identical for all seats; this is a real protocol change).
-8. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
+7. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
    dashboards ever need it - see ADR-0005 first).
 
 When picking up any item: state assumptions briefly, write the ADR if it

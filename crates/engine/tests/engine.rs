@@ -5,12 +5,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use parcello_engine::strategy::StandardRent;
 use parcello_engine::{
     CardDef, CardEffect, ClientView, CommandError, CommandKind, DicePolicy, Engine, Event,
     GameContent, GamePhase, GameState, PlayerCommand, PropertyDef, RentCalculator, RentModel,
     RuleParams, TileDef, TileKind, TurnPhase,
 };
-use parcello_engine::strategy::StandardRent;
 
 struct FixedDice(Mutex<VecDeque<(u8, u8)>>);
 
@@ -31,7 +31,11 @@ impl DicePolicy for FixedDice {
 }
 
 fn tile(id: &str, name: &str, kind: TileKind) -> TileDef {
-    TileDef { id: id.into(), name: name.into(), kind }
+    TileDef {
+        id: id.into(),
+        name: name.into(),
+        kind,
+    }
 }
 
 fn prop(group: &str, price: i64, house_cost: i64, rents: [i64; 6]) -> TileKind {
@@ -45,7 +49,13 @@ fn prop(group: &str, price: i64, house_cost: i64, rents: [i64; 6]) -> TileKind {
 }
 
 fn scaled_prop(group: &str, price: i64, rents: [i64; 6], rent_model: RentModel) -> TileKind {
-    TileKind::Property(PropertyDef { group: group.into(), price, house_cost: 0, rents, rent_model })
+    TileKind::Property(PropertyDef {
+        group: group.into(),
+        price,
+        house_cost: 0,
+        rents,
+        rent_model,
+    })
 }
 
 /// 0 go, 1 park, 2-3 transit pair (group-scaled), 4 works (dice-scaled), 5 jail.
@@ -57,12 +67,22 @@ fn transit_board() -> GameContent {
             tile(
                 "station_a",
                 "Station A",
-                scaled_prop("transit", 200, [25, 50, 100, 200, 0, 0], RentModel::GroupScaled),
+                scaled_prop(
+                    "transit",
+                    200,
+                    [25, 50, 100, 200, 0, 0],
+                    RentModel::GroupScaled,
+                ),
             ),
             tile(
                 "station_b",
                 "Station B",
-                scaled_prop("transit", 200, [25, 50, 100, 200, 0, 0], RentModel::GroupScaled),
+                scaled_prop(
+                    "transit",
+                    200,
+                    [25, 50, 100, 200, 0, 0],
+                    RentModel::GroupScaled,
+                ),
             ),
             tile(
                 "works_a",
@@ -84,11 +104,23 @@ fn plain_board() -> GameContent {
         board: vec![
             tile("go", "Go", TileKind::Go),
             tile("tax", "City Tax", TileKind::Tax { amount: 100 }),
-            tile("ave_a", "Ave A", prop("brown", 60, 50, [2, 10, 30, 90, 160, 250])),
-            tile("ave_b", "Ave B", prop("brown", 60, 50, [4, 20, 60, 180, 320, 450])),
+            tile(
+                "ave_a",
+                "Ave A",
+                prop("brown", 60, 50, [2, 10, 30, 90, 160, 250]),
+            ),
+            tile(
+                "ave_b",
+                "Ave B",
+                prop("brown", 60, 50, [4, 20, 60, 180, 320, 450]),
+            ),
             tile("park_1", "Park", TileKind::FreeParking),
             tile("jail", "Jail", TileKind::Jail),
-            tile("blvd", "Blvd", prop("navy", 100, 50, [10, 50, 150, 450, 625, 750])),
+            tile(
+                "blvd",
+                "Blvd",
+                prop("navy", 100, 50, [10, 50, 150, 450, 625, 750]),
+            ),
             tile("gtj", "Go To Jail", TileKind::GoToJail),
             tile("park_2", "Park", TileKind::FreeParking),
         ],
@@ -112,7 +144,10 @@ fn two_players(engine: &Engine) -> GameState {
 }
 
 fn cmd(player: &str, kind: CommandKind) -> PlayerCommand {
-    PlayerCommand { player: player.into(), kind }
+    PlayerCommand {
+        player: player.into(),
+        kind,
+    }
 }
 
 fn step(engine: &Engine, st: &GameState, c: PlayerCommand) -> (GameState, Vec<Event>) {
@@ -126,7 +161,9 @@ fn buy_then_pay_rent() {
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
     assert_eq!(st.turn, TurnPhase::AwaitBuy { tile: 3 });
-    assert!(ev.iter().any(|e| matches!(e, Event::PurchaseOffered { tile: 3, .. })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::PurchaseOffered { tile: 3, .. })));
 
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Buy));
     assert_eq!(st.tiles[3].owner, Some(0));
@@ -136,9 +173,15 @@ fn buy_then_pay_rent() {
     assert_eq!(st.current, 1);
 
     let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::RentPaid { from: 1, to: 0, tile: 3, amount: 4 })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::RentPaid {
+            from: 1,
+            to: 0,
+            tile: 3,
+            amount: 4
+        }
+    )));
     assert_eq!(st.players[1].cash, 1500 - 4);
     assert_eq!(st.players[0].cash, 1500 - 60 + 4);
 }
@@ -151,15 +194,39 @@ fn monopoly_doubles_unimproved_rent_and_allows_building() {
     st.tiles[3].owner = Some(0);
 
     // Building is allowed pre-roll on the owner's turn.
-    let (st2, ev) = step(&engine, &st, cmd("p0", CommandKind::Build { tile: "ave_a".into() }));
-    assert!(ev.iter().any(|e| matches!(e, Event::HouseBuilt { tile: 2, houses: 1, .. })));
+    let (st2, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Build {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::HouseBuilt {
+            tile: 2,
+            houses: 1,
+            ..
+        }
+    )));
     assert_eq!(st2.players[0].cash, 1500 - 50);
 
     // Group incomplete after losing a tile: build must be rejected.
     let mut broken = st2.clone();
     broken.tiles[3].owner = Some(1);
     let err = engine
-        .apply(&broken, &cmd("p0", CommandKind::Build { tile: "ave_a".into() }))
+        .apply(
+            &broken,
+            &cmd(
+                "p0",
+                CommandKind::Build {
+                    tile: "ave_a".into(),
+                },
+            ),
+        )
         .unwrap_err();
     assert_eq!(err, CommandError::GroupIncomplete);
 
@@ -167,9 +234,14 @@ fn monopoly_doubles_unimproved_rent_and_allows_building() {
     st.current = 1;
     st.turn = TurnPhase::AwaitRoll;
     let (st3, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::RentPaid { tile: 3, amount: 8, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::RentPaid {
+            tile: 3,
+            amount: 8,
+            ..
+        }
+    )));
     assert_eq!(st3.players[1].cash, 1500 - 8);
 }
 
@@ -185,12 +257,22 @@ fn three_doubles_send_to_jail() {
     assert_eq!(st.turn, TurnPhase::AwaitRoll);
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll)); // wraps to tax (1)
-    assert!(ev.iter().any(|e| matches!(e, Event::SalaryPaid { player: 0, amount: 200 })));
-    assert!(ev.iter().any(|e| matches!(e, Event::TaxPaid { amount: 100, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::SalaryPaid {
+            player: 0,
+            amount: 200
+        }
+    )));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::TaxPaid { amount: 100, .. })));
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll)); // third double
-    assert!(ev.iter().any(|e| matches!(e, Event::WentToJail { player: 0 })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::WentToJail { player: 0 })));
     assert_eq!(st.players[0].position, 5);
     assert_eq!(st.players[0].jail_turns, Some(0));
 
@@ -207,7 +289,9 @@ fn jail_pay_fine_then_roll() {
     st.players[0].jail_turns = Some(0);
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::PayJailFine));
-    assert!(ev.iter().any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. })));
     assert_eq!(st.players[0].jail_turns, None);
     assert_eq!(st.players[0].cash, 1450);
     assert_eq!(st.turn, TurnPhase::AwaitRoll);
@@ -234,7 +318,9 @@ fn jail_third_failed_roll_forces_fine_and_moves() {
     }
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(ev.iter().any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. })));
     assert_eq!(st.players[0].jail_turns, None);
     assert_eq!(st.players[0].position, 8);
     assert_eq!(st.players[0].cash, 1450);
@@ -248,7 +334,9 @@ fn jail_escape_with_doubles_moves_and_grants_no_extra_roll() {
     st.players[0].jail_turns = Some(0);
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(ev.iter().any(|e| matches!(e, Event::LeftJail { player: 0 })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::LeftJail { player: 0 })));
     // 5 + 4 wraps to Go: salary applies.
     assert_eq!(st.players[0].position, 0);
     assert_eq!(st.players[0].cash, 1700);
@@ -267,13 +355,26 @@ fn unpayable_rent_bankrupts_and_ends_the_game() {
     st.current = 1;
 
     let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
-    assert!(ev.iter().any(|e| matches!(e, Event::PlayerBankrupt { player: 1, creditor: Some(0) })));
-    assert!(ev.iter().any(|e| matches!(e, Event::GameEnded { winner: 0 })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PlayerBankrupt {
+            player: 1,
+            creditor: Some(0)
+        }
+    )));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::GameEnded { winner: 0 })));
     assert!(st.players[1].bankrupt);
-    assert_eq!(st.players[0].cash, 1505, "creditor receives the remaining cash");
+    assert_eq!(
+        st.players[0].cash, 1505,
+        "creditor receives the remaining cash"
+    );
     assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
     assert_eq!(
-        engine.apply(&st, &cmd("p0", CommandKind::Roll)).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p0", CommandKind::Roll))
+            .unwrap_err(),
         CommandError::GameFinished
     );
 }
@@ -293,7 +394,10 @@ fn liquidation_sells_houses_before_bankruptcy() {
     st.current = 1;
 
     let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
-    let sold = ev.iter().filter(|e| matches!(e, Event::HouseSold { .. })).count();
+    let sold = ev
+        .iter()
+        .filter(|e| matches!(e, Event::HouseSold { .. }))
+        .count();
     assert_eq!(sold, 1, "one house sale covers the 20 debt");
     assert!(!st.players[1].bankrupt);
     assert_eq!(st.players[1].cash, 25 - 20);
@@ -304,8 +408,16 @@ fn card_board(chance: Vec<CardDef>) -> GameContent {
     GameContent {
         board: vec![
             tile("go", "Go", TileKind::Go),
-            tile("ave_a", "Ave A", prop("brown", 60, 50, [2, 10, 30, 90, 160, 250])),
-            tile("ave_b", "Ave B", prop("brown", 60, 50, [4, 20, 60, 180, 320, 450])),
+            tile(
+                "ave_a",
+                "Ave A",
+                prop("brown", 60, 50, [2, 10, 30, 90, 160, 250]),
+            ),
+            tile(
+                "ave_b",
+                "Ave B",
+                prop("brown", 60, 50, [4, 20, 60, 180, 320, 450]),
+            ),
             tile("chance", "Chance", TileKind::Chance),
             tile("jail", "Jail", TileKind::Jail),
         ],
@@ -327,9 +439,14 @@ fn money_card_adjusts_cash() {
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
     assert!(ev.iter().any(|e| matches!(e, Event::CardDrawn { .. })));
-    assert!(ev.iter().any(
-        |e| matches!(e, Event::CashAdjusted { player: 0, delta: 50, .. })
-    ));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::CashAdjusted {
+            player: 0,
+            delta: 50,
+            ..
+        }
+    )));
     assert_eq!(st.players[0].cash, 1550);
     assert_eq!(st.turn, TurnPhase::AwaitEnd);
 }
@@ -339,7 +456,10 @@ fn move_to_card_collects_salary_and_resolves_landing() {
     let card = CardDef {
         id: "advance_go".into(),
         text: "Advance to Go.".into(),
-        effect: CardEffect::MoveTo { tile: "go".into(), collect_go: true },
+        effect: CardEffect::MoveTo {
+            tile: "go".into(),
+            collect_go: true,
+        },
     };
     let engine = engine_with(card_board(vec![card]), &[(1, 2)]);
     let st = two_players(&engine);
@@ -365,14 +485,23 @@ fn resign_transfers_assets_to_bank_and_can_end_game() {
 
     // Resigning out of turn is allowed.
     let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Resign));
-    assert!(ev.iter().any(|e| matches!(e, Event::PropertyTransferred { tile: 6, to: None, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PropertyTransferred {
+            tile: 6,
+            to: None,
+            ..
+        }
+    )));
     assert!(st.players[1].bankrupt);
     assert_eq!(st.tiles[6].owner, None);
     assert_eq!(st.phase, GamePhase::Active);
     assert_eq!(st.current, 0);
 
     let (st, ev) = step(&engine, &st, cmd("p2", CommandKind::Resign));
-    assert!(ev.iter().any(|e| matches!(e, Event::GameEnded { winner: 0 })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::GameEnded { winner: 0 })));
     assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
 }
 
@@ -434,7 +563,12 @@ fn view_hides_rng_and_deck_order() {
 
 #[test]
 fn command_wire_format_is_stable() {
-    let c = cmd("p0", CommandKind::Build { tile: "ave_a".into() });
+    let c = cmd(
+        "p0",
+        CommandKind::Build {
+            tile: "ave_a".into(),
+        },
+    );
     let json = serde_json::to_string(&c).expect("serializes");
     assert_eq!(json, r#"{"player":"p0","type":"build","tile":"ave_a"}"#);
     let back: PlayerCommand = serde_json::from_str(&json).expect("deserializes");
@@ -448,20 +582,37 @@ fn scaled_rent_models_follow_group_ownership_and_dice() {
     let mut st = two_players(&engine);
 
     st.tiles[2].owner = Some(0);
-    assert_eq!(StandardRent.rent(&content, &st, 2, 7), 25, "one station owned");
+    assert_eq!(
+        StandardRent.rent(&content, &st, 2, 7),
+        25,
+        "one station owned"
+    );
     st.tiles[3].owner = Some(0);
-    assert_eq!(StandardRent.rent(&content, &st, 2, 7), 50, "two stations owned");
+    assert_eq!(
+        StandardRent.rent(&content, &st, 2, 7),
+        50,
+        "two stations owned"
+    );
 
     st.tiles[4].owner = Some(0);
-    assert_eq!(StandardRent.rent(&content, &st, 4, 7), 28, "dice 7 x table 4");
+    assert_eq!(
+        StandardRent.rent(&content, &st, 4, 7),
+        28,
+        "dice 7 x table 4"
+    );
 
     // Wiring check: the dice total from the actual roll reaches the calculator.
     st.current = 1;
     st.players[1].position = 1;
     let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::RentPaid { tile: 4, amount: 12, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::RentPaid {
+            tile: 4,
+            amount: 12,
+            ..
+        }
+    )));
     assert_eq!(st.players[1].cash, 1500 - 12);
 }
 
@@ -473,7 +624,15 @@ fn scaled_rent_tiles_reject_building() {
     st.tiles[3].owner = Some(0); // full group: only the rent model blocks it
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Build { tile: "station_a".into() }))
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Build {
+                        tile: "station_a".into()
+                    }
+                )
+            )
             .unwrap_err(),
         CommandError::NotBuildable
     );
@@ -485,15 +644,37 @@ fn mortgaged_tile_collects_no_rent_and_redeeming_costs_interest() {
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
 
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Mortgage { tile: "ave_a".into() }));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::PropertyMortgaged { player: 0, tile: 2, value: 30 })));
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Mortgage {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PropertyMortgaged {
+            player: 0,
+            tile: 2,
+            value: 30
+        }
+    )));
     assert!(st.tiles[2].mortgaged);
     assert_eq!(st.players[0].cash, 1530);
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Mortgage { tile: "ave_a".into() }))
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Mortgage {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
             .unwrap_err(),
         CommandError::AlreadyMortgaged
     );
@@ -511,16 +692,37 @@ fn mortgaged_tile_collects_no_rent_and_redeeming_costs_interest() {
     let mut st = st;
     st.current = 0;
     st.turn = TurnPhase::AwaitRoll;
-    let (st, ev) =
-        step(&engine, &st, cmd("p0", CommandKind::Unmortgage { tile: "ave_a".into() }));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::PropertyUnmortgaged { player: 0, tile: 2, cost: 33 })));
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Unmortgage {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PropertyUnmortgaged {
+            player: 0,
+            tile: 2,
+            cost: 33
+        }
+    )));
     assert!(!st.tiles[2].mortgaged);
     assert_eq!(st.players[0].cash, 1530 - 33);
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Unmortgage { tile: "ave_a".into() }))
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Unmortgage {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
             .unwrap_err(),
         CommandError::NotMortgaged
     );
@@ -536,7 +738,15 @@ fn mortgage_and_build_enforce_group_constraints() {
     st.tiles[3].houses = 1;
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Mortgage { tile: "ave_a".into() }))
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Mortgage {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
             .unwrap_err(),
         CommandError::HousesInGroup
     );
@@ -545,7 +755,15 @@ fn mortgage_and_build_enforce_group_constraints() {
     st.tiles[3].mortgaged = true;
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Build { tile: "ave_a".into() }))
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Build {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
             .unwrap_err(),
         CommandError::MortgagedInGroup
     );
@@ -563,12 +781,20 @@ fn liquidation_mortgages_properties_after_houses() {
     st.current = 1;
 
     let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::PropertyMortgaged { player: 1, tile: 2, value: 30 })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PropertyMortgaged {
+            player: 1,
+            tile: 2,
+            value: 30
+        }
+    )));
     assert!(!st.players[1].bankrupt, "one mortgage covers the 20 debt");
     assert!(st.tiles[2].mortgaged);
-    assert!(!st.tiles[3].mortgaged, "no more assets than the debt requires");
+    assert!(
+        !st.tiles[3].mortgaged,
+        "no more assets than the debt requires"
+    );
     assert_eq!(st.players[1].cash, 10);
     assert_eq!(st.players[0].cash, 1520);
 }
@@ -581,30 +807,46 @@ fn declined_purchase_goes_to_auction_and_highest_bid_wins() {
     // p0 lands on ave_a (tile 2) and declines: auction opens, p1 speaks first.
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Decline));
-    assert!(ev.iter().any(|e| matches!(e, Event::AuctionStarted { tile: 2 })));
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::AuctionStarted { tile: 2 })));
     assert!(matches!(
         st.turn,
-        TurnPhase::Auction { tile: 2, high_bid: 0, high_bidder: None, turn: 1, .. }
+        TurnPhase::Auction {
+            tile: 2,
+            high_bid: 0,
+            high_bidder: None,
+            turn: 1,
+            ..
+        }
     ));
 
     // Out-of-turn and invalid bids are rejected.
     assert_eq!(
-        engine.apply(&st, &cmd("p0", CommandKind::Bid { amount: 10 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p0", CommandKind::Bid { amount: 10 }))
+            .unwrap_err(),
         CommandError::NotYourTurn
     );
     assert_eq!(
-        engine.apply(&st, &cmd("p1", CommandKind::Bid { amount: 0 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p1", CommandKind::Bid { amount: 0 }))
+            .unwrap_err(),
         CommandError::BidTooLow
     );
     assert_eq!(
-        engine.apply(&st, &cmd("p1", CommandKind::Bid { amount: 9999 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p1", CommandKind::Bid { amount: 9999 }))
+            .unwrap_err(),
         CommandError::InsufficientFunds
     );
 
     // p1 bids 10, p0 raises to 25 (below the 60 list price), p1 passes.
     let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Bid { amount: 10 }));
     assert_eq!(
-        engine.apply(&st, &cmd("p0", CommandKind::Bid { amount: 10 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p0", CommandKind::Bid { amount: 10 }))
+            .unwrap_err(),
         CommandError::BidTooLow
     );
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Bid { amount: 25 }));
@@ -612,7 +854,11 @@ fn declined_purchase_goes_to_auction_and_highest_bid_wins() {
 
     assert!(ev.iter().any(|e| matches!(
         e,
-        Event::AuctionEnded { tile: 2, winner: Some(0), amount: 25 }
+        Event::AuctionEnded {
+            tile: 2,
+            winner: Some(0),
+            amount: 25
+        }
     )));
     assert_eq!(st.tiles[2].owner, Some(0));
     assert_eq!(st.players[0].cash, 1475);
@@ -629,9 +875,14 @@ fn auction_with_no_bids_leaves_the_tile_unsold() {
     let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Pass));
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Pass));
 
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::AuctionEnded { tile: 2, winner: None, amount: 0 })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::AuctionEnded {
+            tile: 2,
+            winner: None,
+            amount: 0
+        }
+    )));
     assert_eq!(st.tiles[2].owner, None);
     assert_eq!(st.players[0].cash, 1500);
     assert_eq!(st.players[1].cash, 1500);
@@ -654,7 +905,11 @@ fn high_bidder_resigning_reopens_the_auction() {
     let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Resign));
     assert!(matches!(
         st.turn,
-        TurnPhase::Auction { high_bid: 0, high_bidder: None, .. }
+        TurnPhase::Auction {
+            high_bid: 0,
+            high_bidder: None,
+            ..
+        }
     ));
 
     // Bidding reopened from zero: p2 takes it for 1.
@@ -662,7 +917,11 @@ fn high_bidder_resigning_reopens_the_auction() {
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Pass));
     assert!(ev.iter().any(|e| matches!(
         e,
-        Event::AuctionEnded { winner: Some(2), amount: 1, .. }
+        Event::AuctionEnded {
+            winner: Some(2),
+            amount: 1,
+            ..
+        }
     )));
     assert_eq!(st.tiles[2].owner, Some(2));
 }
@@ -708,18 +967,33 @@ fn accepted_trade_swaps_tiles_and_cash_out_of_turn() {
         &st,
         cmd("p1", offer("p0", 100, &["blvd"], 0, &["ave_a"])),
     );
-    assert!(ev.iter().any(|e| matches!(e, Event::TradeProposed { trade: 0, from: 1, to: 0 })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::TradeProposed {
+            trade: 0,
+            from: 1,
+            to: 0
+        }
+    )));
     assert_eq!(st.pending_trades.len(), 1);
 
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::AcceptTrade { trade: 0 }));
-    assert!(ev.iter().any(|e| matches!(e, Event::TradeAccepted { trade: 0, .. })));
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::AcceptTrade { trade: 0 }),
+    );
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::TradeAccepted { trade: 0, .. })));
     assert_eq!(st.tiles[2].owner, Some(1));
     assert_eq!(st.tiles[6].owner, Some(0));
     assert_eq!(st.players[0].cash, 1600);
     assert_eq!(st.players[1].cash, 1400);
     assert!(st.pending_trades.is_empty());
     assert_eq!(
-        ev.iter().filter(|e| matches!(e, Event::PropertyTransferred { .. })).count(),
+        ev.iter()
+            .filter(|e| matches!(e, Event::PropertyTransferred { .. }))
+            .count(),
         2
     );
 }
@@ -735,10 +1009,22 @@ fn trade_proposals_are_validated() {
         engine.apply(st, &cmd(who, kind)).unwrap_err()
     };
 
-    assert_eq!(reject(&st, "p0", offer("p0", 10, &[], 0, &[])), CommandError::TradeInvalid);
-    assert_eq!(reject(&st, "p0", offer("ghost", 10, &[], 0, &[])), CommandError::UnknownPlayer);
-    assert_eq!(reject(&st, "p0", offer("p1", 0, &[], 0, &[])), CommandError::TradeInvalid);
-    assert_eq!(reject(&st, "p0", offer("p1", -5, &[], 0, &[])), CommandError::TradeInvalid);
+    assert_eq!(
+        reject(&st, "p0", offer("p0", 10, &[], 0, &[])),
+        CommandError::TradeInvalid
+    );
+    assert_eq!(
+        reject(&st, "p0", offer("ghost", 10, &[], 0, &[])),
+        CommandError::UnknownPlayer
+    );
+    assert_eq!(
+        reject(&st, "p0", offer("p1", 0, &[], 0, &[])),
+        CommandError::TradeInvalid
+    );
+    assert_eq!(
+        reject(&st, "p0", offer("p1", -5, &[], 0, &[])),
+        CommandError::TradeInvalid
+    );
     assert_eq!(
         reject(&st, "p0", offer("p1", 0, &["blvd"], 0, &[])),
         CommandError::NotOwner,
@@ -766,17 +1052,29 @@ fn stale_trade_rejects_without_mutation_and_can_be_declined() {
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
 
-    let (mut st, _) = step(&engine, &st, cmd("p0", offer("p1", 0, &["ave_a"], 200, &[])));
+    let (mut st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", offer("p1", 0, &["ave_a"], 200, &[])),
+    );
     st.players[1].cash = 50; // p1 can no longer pay the asked 200
 
     assert_eq!(
-        engine.apply(&st, &cmd("p1", CommandKind::AcceptTrade { trade: 0 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p1", CommandKind::AcceptTrade { trade: 0 }))
+            .unwrap_err(),
         CommandError::InsufficientFunds
     );
     assert_eq!(st.pending_trades.len(), 1, "rejection must not mutate");
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::DeclineTrade { trade: 0 }));
-    assert!(ev.iter().any(|e| matches!(e, Event::TradeDeclined { trade: 0 })));
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::DeclineTrade { trade: 0 }),
+    );
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::TradeDeclined { trade: 0 })));
     assert!(st.pending_trades.is_empty());
 }
 
@@ -787,20 +1085,32 @@ fn trade_party_rules_and_cancellation() {
     let (st, _) = step(&engine, &st, cmd("p0", offer("p1", 25, &[], 0, &[])));
 
     assert_eq!(
-        engine.apply(&st, &cmd("p0", CommandKind::AcceptTrade { trade: 0 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p0", CommandKind::AcceptTrade { trade: 0 }))
+            .unwrap_err(),
         CommandError::NotTradeParty
     );
     assert_eq!(
-        engine.apply(&st, &cmd("p1", CommandKind::CancelTrade { trade: 0 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p1", CommandKind::CancelTrade { trade: 0 }))
+            .unwrap_err(),
         CommandError::NotTradeParty
     );
     assert_eq!(
-        engine.apply(&st, &cmd("p0", CommandKind::AcceptTrade { trade: 7 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p0", CommandKind::AcceptTrade { trade: 7 }))
+            .unwrap_err(),
         CommandError::TradeNotFound
     );
 
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::CancelTrade { trade: 0 }));
-    assert!(ev.iter().any(|e| matches!(e, Event::TradeCancelled { trade: 0 })));
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::CancelTrade { trade: 0 }),
+    );
+    assert!(ev
+        .iter()
+        .any(|e| matches!(e, Event::TradeCancelled { trade: 0 })));
     assert!(st.pending_trades.is_empty());
 }
 
@@ -815,11 +1125,15 @@ fn trades_are_blocked_during_auctions_and_purged_on_bankruptcy() {
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Decline));
     assert!(matches!(st.turn, TurnPhase::Auction { .. }));
     assert_eq!(
-        engine.apply(&st, &cmd("p1", CommandKind::AcceptTrade { trade: 0 })).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p1", CommandKind::AcceptTrade { trade: 0 }))
+            .unwrap_err(),
         CommandError::WrongPhase
     );
     assert_eq!(
-        engine.apply(&st, &cmd("p1", offer("p0", 5, &[], 0, &[]))).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p1", offer("p0", 5, &[], 0, &[])))
+            .unwrap_err(),
         CommandError::WrongPhase
     );
 
@@ -839,7 +1153,9 @@ fn open_offers_per_player_are_capped() {
         st = step(&engine, &st, cmd("p0", offer("p1", 5, &[], 0, &[]))).0;
     }
     assert_eq!(
-        engine.apply(&st, &cmd("p0", offer("p1", 5, &[], 0, &[]))).unwrap_err(),
+        engine
+            .apply(&st, &cmd("p0", offer("p1", 5, &[], 0, &[])))
+            .unwrap_err(),
         CommandError::TradeLimit
     );
 }
@@ -895,16 +1211,25 @@ fn houses_build_and_sell_evenly_with_half_cost_refund() {
         "must sell from the tallest tile first"
     );
     let (st, ev) = step(&engine, &st, sell("ave_a"));
-    assert!(ev
-        .iter()
-        .any(|e| matches!(e, Event::HouseSold { tile: 2, houses: 1, refund: 25, .. })));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::HouseSold {
+            tile: 2,
+            houses: 1,
+            refund: 25,
+            ..
+        }
+    )));
     // 3 built (-150), 1 sold (+25).
     assert_eq!(st.players[0].cash, 1500 - 150 + 25);
 
     let mut st = st;
     st.tiles[2].houses = 0;
     st.tiles[3].houses = 0;
-    assert_eq!(engine.apply(&st, &sell("ave_a")).unwrap_err(), CommandError::NoHouses);
+    assert_eq!(
+        engine.apply(&st, &sell("ave_a")).unwrap_err(),
+        CommandError::NoHouses
+    );
 }
 
 #[test]

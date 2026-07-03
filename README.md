@@ -74,8 +74,10 @@ cargo run -p parcello-cli -- --name bob --join ABCDE
 Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 (repeatable, ordered; later mods override earlier ones per key),
 `--insecure-guest`, `--history <file.db>` (SQLite game logs; omit for
-in-memory, see ADR-0005). Set `PARCELLO_JWT_SECRET` to accept HS256 tokens
-with `{sub, name, exp}` claims (ADR-0003).
+in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
+canonical action - roll/decline/pass/end turn - for a player who stalls
+that long; 0 = disabled, the default). Set `PARCELLO_JWT_SECRET` to accept
+HS256 tokens with `{sub, name, exp}` claims (ADR-0003).
 
 Docker: `docker build -t parcello . && docker run -p 7878:7878 parcello`
 (untested in the development sandbox; mount a volume and add
@@ -153,6 +155,8 @@ tiles change hands (trades and bankruptcy transfer them as-is).
 - History is in-memory unless `--history` is set; the SQLite adapter logs
   `(seed, ordered accepted commands)`, i.e. complete deterministic replays.
 - No reconnect resume token: rejoin is by identity (same guest name/JWT sub).
+- The AFK timer (`--turn-timeout`) is off by default; without it a stalled
+  player blocks the game until the room idles out.
 
 ## Deviations from the architecture doc
 

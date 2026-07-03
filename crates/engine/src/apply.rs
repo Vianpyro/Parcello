@@ -63,9 +63,20 @@ pub(crate) fn apply(
         CommandKind::Decline => exec.decline(player)?,
         CommandKind::Bid { amount } => exec.bid(player, *amount)?,
         CommandKind::Pass => exec.pass(player)?,
-        CommandKind::ProposeTrade { to, give_cash, give_tiles, receive_cash, receive_tiles } => {
-            exec.propose_trade(player, to, *give_cash, give_tiles, *receive_cash, receive_tiles)?
-        }
+        CommandKind::ProposeTrade {
+            to,
+            give_cash,
+            give_tiles,
+            receive_cash,
+            receive_tiles,
+        } => exec.propose_trade(
+            player,
+            to,
+            *give_cash,
+            give_tiles,
+            *receive_cash,
+            receive_tiles,
+        )?,
         CommandKind::AcceptTrade { trade } => exec.accept_trade(player, *trade)?,
         CommandKind::DeclineTrade { trade } => exec.decline_trade(player, *trade)?,
         CommandKind::CancelTrade { trade } => exec.cancel_trade(player, *trade)?,
@@ -106,7 +117,8 @@ impl<'e> Exec<'e> {
         let total = (d1 + d2) as usize;
 
         if self.st.players[p].jail_turns.is_some() {
-            return Ok(self.roll_from_jail(p, d1, d2, total));
+            self.roll_from_jail(p, d1, d2, total);
+            return Ok(());
         }
 
         if d1 == d2 {
@@ -142,7 +154,10 @@ impl<'e> Exec<'e> {
         }
         // Third failed escape: the fine is due, then the player moves.
         let fine = self.content.rules.jail_fine;
-        self.ev.push(Event::JailFinePaid { player: p, amount: fine });
+        self.ev.push(Event::JailFinePaid {
+            player: p,
+            amount: fine,
+        });
         self.charge(p, None, fine);
         if self.st.players[p].bankrupt {
             return;
@@ -168,7 +183,11 @@ impl<'e> Exec<'e> {
         }
         self.st.players[p].cash -= price;
         self.st.tiles[tile].owner = Some(p);
-        self.ev.push(Event::PropertyPurchased { player: p, tile, price });
+        self.ev.push(Event::PropertyPurchased {
+            player: p,
+            tile,
+            price,
+        });
         self.st.turn = TurnPhase::AwaitEnd;
         Ok(())
     }
@@ -212,7 +231,12 @@ impl<'e> Exec<'e> {
         if to == p || self.st.players[to].bankrupt {
             return Err(CommandError::TradeInvalid);
         }
-        let open_from_p = self.st.pending_trades.iter().filter(|t| t.from == p).count();
+        let open_from_p = self
+            .st
+            .pending_trades
+            .iter()
+            .filter(|t| t.from == p)
+            .count();
         if open_from_p >= MAX_OPEN_TRADES_PER_PLAYER {
             return Err(CommandError::TradeLimit);
         }
@@ -239,7 +263,11 @@ impl<'e> Exec<'e> {
         self.validate_trade_assets(&offer)?;
 
         self.st.trade_seq += 1;
-        self.ev.push(Event::TradeProposed { trade: offer.id, from: p, to });
+        self.ev.push(Event::TradeProposed {
+            trade: offer.id,
+            from: p,
+            to,
+        });
         self.st.pending_trades.push(offer);
         Ok(())
     }
@@ -257,7 +285,11 @@ impl<'e> Exec<'e> {
         self.validate_trade_assets(&offer)?;
 
         self.st.pending_trades.remove(idx);
-        self.ev.push(Event::TradeAccepted { trade: id, from: offer.from, to: offer.to });
+        self.ev.push(Event::TradeAccepted {
+            trade: id,
+            from: offer.from,
+            to: offer.to,
+        });
         self.st.players[offer.from].cash += offer.receive_cash - offer.give_cash;
         self.st.players[offer.to].cash += offer.give_cash - offer.receive_cash;
         for &tile in &offer.give_tiles {
@@ -331,11 +363,15 @@ impl<'e> Exec<'e> {
 
     /// Full asset check, run both at proposal and at acceptance time.
     fn validate_trade_assets(&self, offer: &TradeOffer) -> Result<(), CommandError> {
-        for (&owner, tiles) in
-            [(&offer.from, &offer.give_tiles), (&offer.to, &offer.receive_tiles)]
-        {
+        for (&owner, tiles) in [
+            (&offer.from, &offer.give_tiles),
+            (&offer.to, &offer.receive_tiles),
+        ] {
             for &tile in tiles {
-                let prop = self.content.property(tile).ok_or(CommandError::NotAProperty)?;
+                let prop = self
+                    .content
+                    .property(tile)
+                    .ok_or(CommandError::NotAProperty)?;
                 if self.st.tiles[tile].owner != Some(owner) {
                     return Err(CommandError::NotOwner);
                 }
@@ -379,7 +415,14 @@ impl<'e> Exec<'e> {
     }
 
     fn bid(&mut self, p: usize, amount: i64) -> Result<(), CommandError> {
-        let TurnPhase::Auction { tile, high_bid, turn, active, .. } = self.st.turn else {
+        let TurnPhase::Auction {
+            tile,
+            high_bid,
+            turn,
+            active,
+            ..
+        } = self.st.turn
+        else {
             return Err(CommandError::WrongPhase);
         };
         if amount <= high_bid || amount < 1 {
@@ -390,7 +433,11 @@ impl<'e> Exec<'e> {
         if self.st.players[p].cash < amount {
             return Err(CommandError::InsufficientFunds);
         }
-        self.ev.push(Event::BidPlaced { player: p, tile, amount });
+        self.ev.push(Event::BidPlaced {
+            player: p,
+            tile,
+            amount,
+        });
         self.st.turn = TurnPhase::Auction {
             tile,
             high_bid: amount,
@@ -403,7 +450,13 @@ impl<'e> Exec<'e> {
     }
 
     fn pass(&mut self, p: usize) -> Result<(), CommandError> {
-        let TurnPhase::Auction { tile, high_bid, high_bidder, turn, active } = self.st.turn
+        let TurnPhase::Auction {
+            tile,
+            high_bid,
+            high_bidder,
+            turn,
+            active,
+        } = self.st.turn
         else {
             return Err(CommandError::WrongPhase);
         };
@@ -422,7 +475,13 @@ impl<'e> Exec<'e> {
     /// Moves the auction to the next seat that may speak (active and not the
     /// current high bidder). When nobody is left to speak, settles.
     fn advance_auction(&mut self) {
-        let TurnPhase::Auction { tile, high_bid, high_bidder, turn, active } = self.st.turn
+        let TurnPhase::Auction {
+            tile,
+            high_bid,
+            high_bidder,
+            turn,
+            active,
+        } = self.st.turn
         else {
             return;
         };
@@ -431,7 +490,13 @@ impl<'e> Exec<'e> {
         for _ in 0..n {
             i = (i + 1) % n;
             if active & (1 << i) != 0 && Some(i) != high_bidder {
-                self.st.turn = TurnPhase::Auction { tile, high_bid, high_bidder, turn: i, active };
+                self.st.turn = TurnPhase::Auction {
+                    tile,
+                    high_bid,
+                    high_bidder,
+                    turn: i,
+                    active,
+                };
                 return;
             }
         }
@@ -445,7 +510,11 @@ impl<'e> Exec<'e> {
                     amount: high_bid,
                 });
             }
-            None => self.ev.push(Event::AuctionEnded { tile, winner: None, amount: 0 }),
+            None => self.ev.push(Event::AuctionEnded {
+                tile,
+                winner: None,
+                amount: 0,
+            }),
         }
         self.st.turn = TurnPhase::AwaitEnd;
     }
@@ -457,8 +526,13 @@ impl<'e> Exec<'e> {
         let tile = self
             .content
             .tile_index(tile_id)
-            .ok_or_else(|| CommandError::UnknownTile { tile: tile_id.to_string() })?;
-        let prop = self.content.property(tile).ok_or(CommandError::NotAProperty)?;
+            .ok_or_else(|| CommandError::UnknownTile {
+                tile: tile_id.to_string(),
+            })?;
+        let prop = self
+            .content
+            .property(tile)
+            .ok_or(CommandError::NotAProperty)?;
         if self.st.tiles[tile].owner != Some(p) {
             return Err(CommandError::NotOwner);
         }
@@ -551,7 +625,11 @@ impl<'e> Exec<'e> {
         let value = prop.price / 2;
         self.st.tiles[tile].mortgaged = true;
         self.st.players[p].cash += value;
-        self.ev.push(Event::PropertyMortgaged { player: p, tile, value });
+        self.ev.push(Event::PropertyMortgaged {
+            player: p,
+            tile,
+            value,
+        });
         Ok(())
     }
 
@@ -562,13 +640,17 @@ impl<'e> Exec<'e> {
         }
         let principal = prop.price / 2;
         let cost = principal + principal / 10; // 10% interest, floored
-        // Voluntary payment never forces liquidation: reject if unaffordable.
+                                               // Voluntary payment never forces liquidation: reject if unaffordable.
         if self.st.players[p].cash < cost {
             return Err(CommandError::InsufficientFunds);
         }
         self.st.players[p].cash -= cost;
         self.st.tiles[tile].mortgaged = false;
-        self.ev.push(Event::PropertyUnmortgaged { player: p, tile, cost });
+        self.ev.push(Event::PropertyUnmortgaged {
+            player: p,
+            tile,
+            cost,
+        });
         Ok(())
     }
 
@@ -586,7 +668,9 @@ impl<'e> Exec<'e> {
         let content: &'e GameContent = self.content;
         let tile = content
             .tile_index(tile_id)
-            .ok_or_else(|| CommandError::UnknownTile { tile: tile_id.to_string() })?;
+            .ok_or_else(|| CommandError::UnknownTile {
+                tile: tile_id.to_string(),
+            })?;
         let prop = content.property(tile).ok_or(CommandError::NotAProperty)?;
         if self.st.tiles[tile].owner != Some(p) {
             return Err(CommandError::NotOwner);
@@ -608,7 +692,10 @@ impl<'e> Exec<'e> {
         }
         self.st.players[p].cash -= fine;
         self.st.players[p].jail_turns = None;
-        self.ev.push(Event::JailFinePaid { player: p, amount: fine });
+        self.ev.push(Event::JailFinePaid {
+            player: p,
+            amount: fine,
+        });
         self.ev.push(Event::LeftJail { player: p });
         Ok(())
     }
@@ -629,7 +716,14 @@ impl<'e> Exec<'e> {
 
     fn resign(&mut self, p: usize) -> Result<(), CommandError> {
         self.ev.push(Event::PlayerResigned { player: p });
-        if let TurnPhase::Auction { tile, high_bid, high_bidder, turn, active } = self.st.turn {
+        if let TurnPhase::Auction {
+            tile,
+            high_bid,
+            high_bidder,
+            turn,
+            active,
+        } = self.st.turn
+        {
             // A resigning high bidder forfeits: bidding reopens from zero
             // (rare edge; slight discount for the remaining bidders).
             let (high_bid, high_bidder) = if high_bidder == Some(p) {
@@ -661,7 +755,12 @@ impl<'e> Exec<'e> {
         let passed_go = raw >= len;
         let to = raw % len;
         self.st.players[p].position = to;
-        self.ev.push(Event::Moved { player: p, from, to, passed_go });
+        self.ev.push(Event::Moved {
+            player: p,
+            from,
+            to,
+            passed_go,
+        });
         if passed_go {
             self.pay_salary(p);
         }
@@ -674,7 +773,12 @@ impl<'e> Exec<'e> {
         let passed_go = collect_go && to <= from && to != from;
         let passed_go = passed_go || (collect_go && to == 0 && from != 0);
         self.st.players[p].position = to;
-        self.ev.push(Event::Moved { player: p, from, to, passed_go });
+        self.ev.push(Event::Moved {
+            player: p,
+            from,
+            to,
+            passed_go,
+        });
         if passed_go {
             self.pay_salary(p);
         }
@@ -711,7 +815,11 @@ impl<'e> Exec<'e> {
             }
             TileKind::Tax { amount } => {
                 let amount = *amount;
-                self.ev.push(Event::TaxPaid { player: p, tile, amount });
+                self.ev.push(Event::TaxPaid {
+                    player: p,
+                    tile,
+                    amount,
+                });
                 self.charge(p, None, amount);
                 self.st.turn = TurnPhase::AwaitEnd;
             }
@@ -731,8 +839,16 @@ impl<'e> Exec<'e> {
                     self.st.turn = TurnPhase::AwaitEnd;
                 }
                 Some(owner) => {
-                    let rent = self.strat.rent.rent(self.content, &self.st, tile, dice_total);
-                    self.ev.push(Event::RentPaid { from: p, to: owner, tile, amount: rent });
+                    let rent = self
+                        .strat
+                        .rent
+                        .rent(self.content, &self.st, tile, dice_total);
+                    self.ev.push(Event::RentPaid {
+                        from: p,
+                        to: owner,
+                        tile,
+                        amount: rent,
+                    });
                     self.charge(p, Some(owner), rent);
                     self.st.turn = TurnPhase::AwaitEnd;
                 }
@@ -863,9 +979,13 @@ impl<'e> Exec<'e> {
         let threshold = self.content.rules.bankruptcy_threshold;
         let needed = amount + threshold;
         if self.st.players[debtor].cash < needed {
-            self.strat
-                .bankruptcy
-                .liquidate(self.content, &mut self.st, debtor, needed, &mut self.ev);
+            self.strat.bankruptcy.liquidate(
+                self.content,
+                &mut self.st,
+                debtor,
+                needed,
+                &mut self.ev,
+            );
         }
         if self.st.players[debtor].cash >= needed {
             self.st.players[debtor].cash -= amount;
@@ -893,14 +1013,21 @@ impl<'e> Exec<'e> {
                     // Returned to the bank: sold clean next time.
                     self.st.tiles[tile].mortgaged = false;
                 }
-                self.ev.push(Event::PropertyTransferred { tile, from: p, to: creditor });
+                self.ev.push(Event::PropertyTransferred {
+                    tile,
+                    from: p,
+                    to: creditor,
+                });
             }
         }
         let player = &mut self.st.players[p];
         player.bankrupt = true;
         player.jail_turns = None;
         player.doubles_streak = 0;
-        self.ev.push(Event::PlayerBankrupt { player: p, creditor });
+        self.ev.push(Event::PlayerBankrupt {
+            player: p,
+            creditor,
+        });
         self.check_win();
     }
 

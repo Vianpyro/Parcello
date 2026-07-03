@@ -60,7 +60,10 @@ fn base_mod_resolves_to_valid_content() {
     write_mod(
         tmp.path(),
         "base",
-        &[("properties.toml", BASE_PROPERTIES), ("cards.toml", BASE_CARDS)],
+        &[
+            ("properties.toml", BASE_PROPERTIES),
+            ("cards.toml", BASE_CARDS),
+        ],
     );
 
     let resolved = resolve(tmp.path(), &["base".into()]).unwrap();
@@ -116,7 +119,11 @@ rents = [5, 20, 60, 180, 320, 500]
         TileKind::Property(p) => assert_eq!(p.price, 100),
         other => panic!("expected property, got {other:?}"),
     }
-    assert_eq!(content.board.len(), 4, "override must not append a duplicate");
+    assert_eq!(
+        content.board.len(),
+        4,
+        "override must not append a duplicate"
+    );
 
     // Last-loaded-wins on scalar rules; unknown keys ignored.
     assert_eq!(content.rules.starting_balance, 3000);
@@ -129,7 +136,10 @@ fn card_override_replaces_by_id() {
     write_mod(
         tmp.path(),
         "base",
-        &[("properties.toml", BASE_PROPERTIES), ("cards.toml", BASE_CARDS)],
+        &[
+            ("properties.toml", BASE_PROPERTIES),
+            ("cards.toml", BASE_CARDS),
+        ],
     );
     write_mod(
         tmp.path(),

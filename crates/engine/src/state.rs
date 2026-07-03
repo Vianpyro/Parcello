@@ -180,9 +180,6 @@ impl GameState {
     /// True when `player` owns every tile of `group` (monopoly).
     pub fn owns_full_group(&self, content: &GameContent, player: usize, group: &str) -> bool {
         let tiles = content.group_tiles(group);
-        !tiles.is_empty()
-            && tiles
-                .iter()
-                .all(|&t| self.tiles[t].owner == Some(player))
+        !tiles.is_empty() && tiles.iter().all(|&t| self.tiles[t].owner == Some(player))
     }
 }

@@ -173,7 +173,10 @@ mod tests {
     fn valid_token_yields_identity() {
         let token = sign(
             "s3cret",
-            &format!(r#"{{"sub":"disc:42","name":"Vian","exp":{}}}"#, far_future()),
+            &format!(
+                r#"{{"sub":"disc:42","name":"Vian","exp":{}}}"#,
+                far_future()
+            ),
         );
         let v = CompositeVerifier::new(Some("s3cret".into()), false);
         let id = v
@@ -199,16 +202,25 @@ mod tests {
             &format!(r#"{{"sub":"a","name":"A","exp":{}}}"#, far_future()),
         );
         assert!(v
-            .verify(&AuthPayload { token: Some(wrong_key), guest_name: None })
+            .verify(&AuthPayload {
+                token: Some(wrong_key),
+                guest_name: None
+            })
             .is_err());
 
         let expired = sign("s3cret", r#"{"sub":"a","name":"A","exp":1}"#);
         assert!(v
-            .verify(&AuthPayload { token: Some(expired), guest_name: None })
+            .verify(&AuthPayload {
+                token: Some(expired),
+                guest_name: None
+            })
             .is_err());
 
         assert!(v
-            .verify(&AuthPayload { token: Some(good + "x"), guest_name: None })
+            .verify(&AuthPayload {
+                token: Some(good + "x"),
+                guest_name: None
+            })
             .is_err());
     }
 

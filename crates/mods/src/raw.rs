@@ -47,7 +47,9 @@ impl TileRaw {
             "go_to_jail" => TileKind::GoToJail,
             "free_parking" => TileKind::FreeParking,
             "tax" => TileKind::Tax {
-                amount: self.amount.ok_or_else(|| invalid("tax requires `amount`"))?,
+                amount: self
+                    .amount
+                    .ok_or_else(|| invalid("tax requires `amount`"))?,
             },
             "property" => {
                 let rent_model = self.rent_model.unwrap_or_default();
