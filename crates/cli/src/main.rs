@@ -29,6 +29,11 @@ struct Args {
     #[arg(long, conflicts_with = "join")]
     create: bool,
 
+    /// Ordered mod list for the created room (repeatable); omit for the
+    /// server's default set.
+    #[arg(long = "mod", requires = "create")]
+    mods: Vec<String>,
+
     /// Join an existing room by code.
     #[arg(long)]
     join: Option<String>,
@@ -49,7 +54,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         guest_name: Some(args.name.clone()),
     };
     let first = if args.create {
-        ClientMessage::Create { auth }
+        ClientMessage::Create {
+            auth,
+            mods: (!args.mods.is_empty()).then(|| args.mods.clone()),
+        }
     } else {
         ClientMessage::Join {
             code: args.join.clone().expect("checked above"),

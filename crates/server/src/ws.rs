@@ -71,24 +71,27 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         match (msg, &session) {
             (ClientMessage::Ping, _) => send(&tx, ServerMessage::Pong),
 
-            (ClientMessage::Create { auth }, None) => {
+            (ClientMessage::Create { auth, mods }, None) => {
                 let Some(identity) = authenticate(&app, &auth, &tx) else {
                     continue;
                 };
-                let code = match create_room(
-                    &app.rooms,
-                    app.content.clone(),
-                    app.history.clone(),
-                    app.turn_timeout,
-                )
-                .await
-                {
-                    Ok(code) => code,
+                let content = match resolve_room_mods(&app, mods).await {
+                    Ok(content) => content,
                     Err(message) => {
                         send(&tx, ServerMessage::Error { message });
                         continue;
                     }
                 };
+                let code =
+                    match create_room(&app.rooms, content, app.history.clone(), app.turn_timeout)
+                        .await
+                    {
+                        Ok(code) => code,
+                        Err(message) => {
+                            send(&tx, ServerMessage::Error { message });
+                            continue;
+                        }
+                    };
                 send(&tx, ServerMessage::RoomCreated { code: code.clone() });
                 let room = app
                     .rooms
@@ -169,6 +172,44 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     debug!("connection closed");
 }
 
+/// Per-room mod set (ADR-0006): `None` or `[]` selects the server default.
+/// Mod ids come from the wire and end up in filesystem paths, so they are
+/// allowlist-validated here before touching `mods_dir`.
+async fn resolve_room_mods(
+    app: &AppState,
+    mods: Option<Vec<String>>,
+) -> Result<std::sync::Arc<parcello_mods::ResolvedContent>, String> {
+    let ids = match mods {
+        None => return Ok(app.content.clone()),
+        Some(ids) if ids.is_empty() => return Ok(app.content.clone()),
+        Some(ids) => ids,
+    };
+    if ids.len() > 16 {
+        return Err("too many mods (max 16)".into());
+    }
+    if let Some(bad) = ids.iter().find(|id| !valid_mod_id(id)) {
+        return Err(format!("invalid mod id: {bad}"));
+    }
+    let dir = std::sync::Arc::clone(&app.mods_dir);
+    // Small local TOML reads, but still filesystem I/O: keep it off the
+    // async executor threads.
+    tokio::task::spawn_blocking(move || parcello_mods::resolve(&dir, &ids))
+        .await
+        .map_err(|_| "mod resolution task failed".to_string())?
+        .map(std::sync::Arc::new)
+        .map_err(|e| format!("mod resolution failed: {e}"))
+}
+
+/// Directory-name charset only: no separators, no dots, so a wire-supplied
+/// id can never escape `mods_dir`.
+fn valid_mod_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// Auth happens once per connection, at Create/Join time. The room binds the
 /// resulting identity to the connection's sender; the wire identity is never
 /// trusted again afterwards.
@@ -227,4 +268,28 @@ async fn try_join(
 
 fn send(tx: &ClientTx, msg: ServerMessage) {
     let _ = tx.send(msg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_mod_id;
+
+    #[test]
+    fn mod_ids_cannot_escape_the_mods_dir() {
+        for ok in ["base", "my-mod_2", "A"] {
+            assert!(valid_mod_id(ok), "{ok} should be accepted");
+        }
+        for bad in [
+            "",
+            "..",
+            "../etc",
+            "a/b",
+            "a\\b",
+            "mod.toml",
+            "C:evil",
+            &"x".repeat(65),
+        ] {
+            assert!(!valid_mod_id(bad), "{bad:?} should be rejected");
+        }
+    }
 }

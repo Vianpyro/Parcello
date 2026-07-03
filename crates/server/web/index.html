@@ -96,6 +96,7 @@
   <input id="name" placeholder="Display name" maxlength="24" autocomplete="off">
   <input id="code" placeholder="Room code (leave empty to create)" maxlength="5"
          style="text-transform:uppercase" autocomplete="off">
+  <input id="mods" placeholder="Mods, comma-separated (optional, create only)" autocomplete="off">
   <button id="go">Play</button>
   <div id="loginmsg" class="muted"></div>
 </div>
@@ -179,7 +180,11 @@ function connect(name, code) {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   const auth = { guest_name: name };
   ws.onopen = () => {
-    ws.send(JSON.stringify(code ? { type: "join", code, auth } : { type: "create", auth }));
+    // Room mod set (ADR-0006): only meaningful when creating.
+    const mods = $("#mods").value.split(",").map(s => s.trim()).filter(Boolean);
+    ws.send(JSON.stringify(code
+      ? { type: "join", code, auth }
+      : { type: "create", auth, ...(mods.length ? { mods } : {}) }));
   };
   ws.onmessage = e => handle(JSON.parse(e.data));
   ws.onclose = () => {

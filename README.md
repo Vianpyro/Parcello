@@ -85,8 +85,9 @@ Docker: `docker build -t parcello . && docker run -p 7878:7878 parcello`
 
 ## Protocol (v0, JSON over WebSocket at `/ws`)
 
-Client -> server: `create {auth}`, `join {code, auth}`, `start`,
-`cmd {cmd}`, `ping`. Server -> client: `room_created`, `joined` (includes
+Client -> server: `create {auth, mods?}` (optional ordered mod list for
+the room, ADR-0006; omit for the server default), `join {code, auth}`,
+`start`, `cmd {cmd}`, `ping`. Server -> client: `room_created`, `joined` (includes
 the resolved mod bundle and, mid-game, a state snapshot), `lobby`,
 `game_started`, `update {events, view}`, `rejected {error}` (sent only to
 the offending player), `error`, `pong`. Shapes live in `parcello-protocol`;
@@ -110,6 +111,12 @@ last-loaded-wins per key: tiles and cards replace in place by id, rule
 scalars override by name; every conflict is logged at WARN. Unknown rule
 keys are ignored with a warning. The resolved bundle is pushed to clients
 on join, so clients never need mod files locally.
+
+Each room can pick its own ordered mod list at creation (ADR-0006): the
+clients expose a "mods" field on create (CLI: repeatable `--mod`), and an
+omitted or empty list selects the server's boot-time default set. Mod ids
+are allowlist-validated server-side. `mods/highroller` is a rules-only
+example (richer, faster games): create a room with `base, highroller`.
 
 V1 hook points: `rules.{starting_balance, go_salary, jail_fine,
 max_houses_per_property, bankruptcy_threshold, auction_on_decline}`
@@ -168,11 +175,13 @@ deck rotation once drawn.
 See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside
 `GameState`; 0003 interim auth (guest + HS256 behind `IdentityVerifier`);
 0004 server-wide mod set (room `Starting` state collapses to a point);
-0005 rusqlite writer thread instead of SQLx behind `GameHistory`.
+0005 rusqlite writer thread instead of SQLx behind `GameHistory`;
+0006 per-room mod sets at creation (amends 0004, `Starting` stays
+collapsed).
 
 ## Roadmap
 
 Flutter client polish (a Windows-desktop client lives in `clients/flutter`,
 see its README); Global Identity Service (asymmetric JWT, JWKS); WASM
-(Wasmtime) mod plugins behind `ModPlugin`; per-room mod sets; private
-trade offers; reconnect tokens; richer history queries (stats) if needed.
+(Wasmtime) mod plugins behind `ModPlugin`; private trade offers;
+reconnect tokens; richer history queries (stats) if needed.

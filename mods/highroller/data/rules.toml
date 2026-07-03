@@ -1,0 +1,8 @@
+# Example rules-only mod: faster, richer games. Load after base:
+#   room creation with mods = ["base", "highroller"] (ADR-0006), or
+#   server-wide with --mod base --mod highroller.
+
+[rules]
+starting_balance = 3000
+go_salary = 400
+jail_fine = 100

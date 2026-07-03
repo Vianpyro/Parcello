@@ -10,7 +10,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0005` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0006` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
@@ -53,7 +53,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 49 tests, all must pass
+cargo test  --workspace --locked          # 50 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -107,7 +107,10 @@ architecture doc section 5; dependencies point downward only):
   When adding an Event or CommandKind, update it too (protocol.dart +
   main.dart), same drill as `web/index.html` and the CLI.
 
-Mod set is resolved once per server at boot (ADR-0004), not per room.
+Mods: the server resolves a default set at boot (`--mod`), and each room
+may override it at creation via the optional `mods` field on Create
+(ADR-0006; ids are allowlist-validated in `ws.rs` because they become
+filesystem paths). `mods/highroller` is a rules-only example mod.
 
 ## Game rules snapshot (what exists)
 
@@ -179,12 +182,11 @@ opt-in (`--turn-timeout`, off by default).
 2. Global Identity Service: asymmetric JWT + JWKS fetch as a new
    `IdentityVerifier`; deprecate the HS256 stopgap (ADR-0003).
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
-   layer; the trait is already the seam). Check MSRV impact first.
-4. Per-room mod sets (reintroduces the room `Starting` state; ADR-0004
-   documents what collapses today).
-5. Private trade offers (requires per-player `ClientView`s - today the
+   layer; the trait is already the seam). Blocked on the MSRV 1.75 pin -
+   re-check when the MSRV moves.
+4. Private trade offers (requires per-player `ClientView`s - today the
    view is identical for all seats; this is a real protocol change).
-6. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
+5. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
    dashboards ever need it - see ADR-0005 first).
 
 When picking up any item: state assumptions briefly, write the ADR if it

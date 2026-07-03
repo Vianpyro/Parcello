@@ -31,8 +31,10 @@ class GameSession extends ChangeNotifier {
 
   String tileName(int i) => content?.board.elementAtOrNull(i)?.name ?? 'tile $i';
 
-  /// Opens the socket and immediately creates or joins a room.
-  void connect(String url, String name, String roomCode) {
+  /// Opens the socket and immediately creates or joins a room. `mods` picks
+  /// the created room's mod set (ADR-0006); ignored when joining.
+  void connect(String url, String name, String roomCode,
+      {List<String> mods = const []}) {
     disconnect();
     loginMessage = 'Connecting...';
     notifyListeners();
@@ -45,7 +47,11 @@ class GameSession extends ChangeNotifier {
     }
     final auth = {'guest_name': name};
     _ws!.sink.add(jsonEncode(roomCode.isEmpty
-        ? {'type': 'create', 'auth': auth}
+        ? {
+            'type': 'create',
+            'auth': auth,
+            if (mods.isNotEmpty) 'mods': mods,
+          }
         : {'type': 'join', 'code': roomCode, 'auth': auth}));
     _ws!.stream.listen(
       (data) => _handle(jsonDecode(data as String) as Map<String, dynamic>),

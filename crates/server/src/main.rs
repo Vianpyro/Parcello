@@ -56,7 +56,10 @@ struct Args {
 #[derive(Clone)]
 pub struct AppState {
     pub rooms: Rooms,
+    /// Default content (boot-time `--mod` list); rooms may override at
+    /// creation with their own mod list (ADR-0006).
     pub content: Arc<ResolvedContent>,
+    pub mods_dir: Arc<PathBuf>,
     pub verifier: Arc<dyn IdentityVerifier>,
     pub history: Arc<dyn GameHistory>,
     pub turn_timeout: Option<std::time::Duration>,
@@ -107,6 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
         rooms: Rooms::default(),
         content: Arc::new(resolved),
+        mods_dir: Arc::new(args.mods_dir),
         verifier,
         history,
         turn_timeout,

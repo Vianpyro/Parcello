@@ -23,9 +23,13 @@ pub struct AuthPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    /// Create a room and join it as host (seat 0).
+    /// Create a room and join it as host (seat 0). `mods` selects the
+    /// room's ordered mod list (ADR-0006); omitted or empty = the server's
+    /// boot-time default set.
     Create {
         auth: AuthPayload,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mods: Option<Vec<String>>,
     },
     /// Join an existing room by code. Rejoining with the same identity
     /// reattaches to the original seat.
@@ -126,5 +130,17 @@ mod tests {
                 cmd: parcello_engine::CommandKind::UseJailCard
             }
         ));
+
+        // Pre-ADR-0006 clients omit `mods`; the field must stay optional.
+        let create: ClientMessage =
+            serde_json::from_str(r#"{"type":"create","auth":{"guest_name":"v"}}"#).unwrap();
+        assert!(matches!(create, ClientMessage::Create { mods: None, .. }));
+        let create: ClientMessage = serde_json::from_str(
+            r#"{"type":"create","auth":{"guest_name":"v"},"mods":["base","x"]}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(create, ClientMessage::Create { mods: Some(m), .. } if m == ["base", "x"])
+        );
     }
 }

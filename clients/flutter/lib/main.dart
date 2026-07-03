@@ -48,6 +48,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _url = TextEditingController(text: 'ws://127.0.0.1:7878/ws');
   final _name = TextEditingController();
   final _code = TextEditingController();
+  final _mods = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
@@ -86,12 +87,23 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: const InputDecoration(
                       labelText: 'Room code (leave empty to create)'),
                 ),
+                TextField(
+                  controller: _mods,
+                  decoration: const InputDecoration(
+                      labelText: 'Mods, comma-separated (create only)'),
+                ),
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: () {
                     if (_name.text.trim().isEmpty) return;
+                    final mods = _mods.text
+                        .split(',')
+                        .map((m) => m.trim())
+                        .where((m) => m.isNotEmpty)
+                        .toList();
                     s.connect(_url.text.trim(), _name.text.trim(),
-                        _code.text.trim().toUpperCase());
+                        _code.text.trim().toUpperCase(),
+                        mods: mods);
                   },
                   child: const Text('Play'),
                 ),
