@@ -46,6 +46,11 @@ struct Args {
     /// Omit for in-memory history.
     #[arg(long)]
     history: Option<PathBuf>,
+
+    /// Auto-play the canonical action (roll/decline/pass/end turn) for the
+    /// acting player after this many seconds without progress. 0 disables.
+    #[arg(long, default_value_t = 0)]
+    turn_timeout: u64,
 }
 
 #[derive(Clone)]
@@ -54,6 +59,7 @@ pub struct AppState {
     pub content: Arc<ResolvedContent>,
     pub verifier: Arc<dyn IdentityVerifier>,
     pub history: Arc<dyn GameHistory>,
+    pub turn_timeout: Option<std::time::Duration>,
 }
 
 #[tokio::main]
@@ -91,16 +97,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => Arc::new(MemoryHistory::new()),
     };
+    let turn_timeout = match args.turn_timeout {
+        0 => None,
+        secs => {
+            info!(seconds = secs, "per-turn AFK timeout enabled");
+            Some(std::time::Duration::from_secs(secs))
+        }
+    };
     let state = AppState {
         rooms: Rooms::default(),
         content: Arc::new(resolved),
         verifier,
         history,
+        turn_timeout,
     };
 
     let app = Router::new()
         // Embedded web client: the server is the whole deployment.
-        .route("/", get(|| async { Html(include_str!("../web/index.html")) }))
+        .route(
+            "/",
+            get(|| async { Html(include_str!("../web/index.html")) }),
+        )
         .route("/healthz", get(|| async { "ok" }))
         .route("/ws", get(ws::ws_handler))
         .with_state(state);
