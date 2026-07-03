@@ -21,7 +21,9 @@ Layout:
 - `lib/session.dart` - WebSocket connection + game state in one
   `ChangeNotifier` (the equivalent of the web client's `st` object).
 - `lib/board.dart` - classic 40-tile ring on an 11x11 grid, wrap fallback
-  for modded board sizes.
+  for modded board sizes. Tile text scales with cell size for legibility;
+  pawns ride an animated overlay that glides tile by tile on a normal roll
+  (and slides straight for teleports/jail), so moves are visible.
 - `lib/oidc.dart` - OIDC Authorization Code + PKCE login against the
   identity provider (ADR-0009): system browser + loopback redirect; the
   id_token stays in memory only.

@@ -132,8 +132,26 @@ flutter analyze
 flutter test
 ```
 
-**End-to-end without volunteers:** start a server, then fill the room with
-bots and watch a whole game play out (0 rejected commands is the bar).
+**Play interactively as a dev** — run the Flutter client against a local
+server, with hot reload for UI work:
+
+```sh
+# Terminal 1: server (guest auth, LAN/testing)
+cargo run -p parcello-server -- --insecure-guest
+
+# Terminal 2: the dev client (use -d linux or -d macos on other OSes)
+cd clients/flutter
+flutter run -d windows
+```
+
+Keep the default URL `ws://127.0.0.1:7878/ws`, enter a name, and leave the
+room code empty to create a room (or paste one to join). The embedded
+browser client at `http://localhost:7878/` and the terminal client
+(`parcello-cli --name you --create`) are lighter ways to take a seat.
+
+**End-to-end with bots:** take one seat from a human client (above), then
+fill the remaining seats with bots and watch a full game (0 rejected
+commands is the bar). It also runs fully headless with a CLI as host:
 
 ```sh
 cargo run -p parcello-server -- --insecure-guest --history game.db
