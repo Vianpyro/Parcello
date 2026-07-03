@@ -52,6 +52,12 @@ pub enum RoomCmd {
         player_id: PlayerId,
         cmd: CommandKind,
     },
+    /// Post-game survey answer; validated and deduped here.
+    Feedback {
+        player_id: PlayerId,
+        rating: u8,
+        comment: Option<String>,
+    },
 }
 
 /// Creates the room task and registers its handle. Returns the room code.
@@ -130,6 +136,8 @@ struct Seat {
     tx: Option<ClientTx>,
     /// Issued in `Joined`; proves seat ownership on rejoin (ADR-0008).
     reconnect: String,
+    /// One post-game survey answer per seat.
+    feedback_given: bool,
 }
 
 enum Phase {
@@ -179,6 +187,10 @@ impl Room {
                         }
                         RoomCmd::Start { player_id } => self.handle_start(&player_id),
                         RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
+                        RoomCmd::Feedback { player_id, rating, comment } => {
+                            self.handle_feedback(&player_id, rating, comment);
+                            false
+                        }
                     };
                     if advanced && let Some(t) = self.turn_timeout {
                         turn_deadline = tokio::time::Instant::now() + t;
@@ -256,6 +268,7 @@ impl Room {
                     identity,
                     tx: Some(tx.clone()),
                     reconnect: new_reconnect_token(),
+                    feedback_given: false,
                 });
                 self.seats.len() - 1
             }
@@ -403,6 +416,30 @@ impl Room {
         }
     }
 
+    /// Post-game survey (Fortnite-style, but opt-in and non-blocking): only
+    /// once the game is over, once per seat, rating 1-5, comment capped.
+    fn handle_feedback(&mut self, player_id: &str, rating: u8, comment: Option<String>) {
+        if !matches!(self.phase, Phase::Finished(_)) {
+            return self.send_error(player_id, "feedback opens when the game ends");
+        }
+        let Some(seat) = self.seat_of(player_id) else {
+            return;
+        };
+        if !(1..=5).contains(&rating) {
+            return self.send_error(player_id, "rating must be 1-5");
+        }
+        if self.seats[seat].feedback_given {
+            return self.send_error(player_id, "feedback already recorded");
+        }
+        let comment = comment
+            .map(|c| c.trim().chars().take(500).collect::<String>())
+            .filter(|c| !c.is_empty());
+        self.seats[seat].feedback_given = true;
+        self.history
+            .record_feedback(&self.code, player_id, rating, comment.as_deref());
+        info!(room = %self.code, player = %player_id, rating, "feedback recorded");
+    }
+
     fn seat_of(&self, player_id: &str) -> Option<usize> {
         self.seats
             .iter()
@@ -482,6 +519,95 @@ mod tests {
     use crate::history::MemoryHistory;
     use parcello_engine::Event;
     use std::path::Path;
+
+    /// Post-game survey rules: rejected while the game runs, accepted once
+    /// finished, stored in history, one per seat.
+    #[tokio::test]
+    async fn feedback_only_after_game_end_and_once_per_seat() {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let memory = Arc::new(MemoryHistory::new());
+        let history: Arc<dyn GameHistory> = memory.clone();
+        let code = create_room(&rooms, content, history, None)
+            .await
+            .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let mut client_rxs = Vec::new();
+        for name in ["alice", "bob"] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (reply, joined) = oneshot::channel();
+            room.send(RoomCmd::Join {
+                identity: Identity {
+                    player_id: format!("guest:{name}"),
+                    name: name.to_string(),
+                    spoofable: true,
+                },
+                reconnect: None,
+                tx,
+                reply,
+            })
+            .await
+            .expect("room task alive");
+            joined.await.expect("reply sent").expect("join accepted");
+            client_rxs.push(rx);
+        }
+        room.send(RoomCmd::Start {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+
+        let feedback = |rating: u8| RoomCmd::Feedback {
+            player_id: "guest:alice".into(),
+            rating,
+            comment: Some("  great game  ".into()),
+        };
+        // Mid-game: rejected.
+        room.send(feedback(5)).await.expect("room task alive");
+        // Bob resigns: alice wins, the game is finished.
+        room.send(RoomCmd::Game {
+            player_id: "guest:bob".into(),
+            cmd: CommandKind::Resign,
+        })
+        .await
+        .expect("room task alive");
+        room.send(feedback(0)).await.expect("room task alive"); // invalid rating
+        room.send(feedback(5)).await.expect("room task alive"); // accepted
+        room.send(feedback(3)).await.expect("room task alive"); // duplicate
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let recorded: Vec<String> = memory
+            .dump(&code)
+            .into_iter()
+            .filter(|l| l.starts_with("feedback"))
+            .collect();
+        assert_eq!(
+            recorded,
+            vec![r#"feedback player=guest:alice rating=5 comment=Some("great game")"#],
+            "exactly one survey answer must be recorded, trimmed"
+        );
+        let errors = |rx: &mut mpsc::UnboundedReceiver<ServerMessage>| {
+            let mut n = 0;
+            while let Ok(msg) = rx.try_recv() {
+                if matches!(msg, ServerMessage::Error { .. }) {
+                    n += 1;
+                }
+            }
+            n
+        };
+        assert_eq!(
+            errors(&mut client_rxs[0]),
+            3,
+            "mid-game, invalid rating, and duplicate must each error"
+        );
+    }
 
     /// A guest seat can only be re-taken with the reconnect token issued at
     /// first join (ADR-0008): knowing the name is no longer enough.

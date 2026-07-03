@@ -17,6 +17,8 @@ pub trait GameHistory: Send + Sync {
     /// Called only for accepted commands: the log replays deterministically.
     fn record_command(&self, room: &str, cmd: &PlayerCommand);
     fn record_end(&self, room: &str, winner: Option<&str>);
+    /// Post-game survey answer (already validated and deduped by the room).
+    fn record_feedback(&self, room: &str, player: &str, rating: u8, comment: Option<&str>);
 }
 
 #[derive(Default)]
@@ -62,6 +64,13 @@ impl GameHistory for MemoryHistory {
     fn record_end(&self, room: &str, winner: Option<&str>) {
         self.push(room, format!("end winner={winner:?}"));
     }
+
+    fn record_feedback(&self, room: &str, player: &str, rating: u8, comment: Option<&str>) {
+        self.push(
+            room,
+            format!("feedback player={player} rating={rating} comment={comment:?}"),
+        );
+    }
 }
 
 /// SQLite adapter (ADR-0005): a dedicated writer thread owns the connection;
@@ -93,6 +102,13 @@ enum Rec {
         winner: Option<String>,
         at: i64,
     },
+    Feedback {
+        room: String,
+        player: String,
+        rating: u8,
+        comment: Option<String>,
+        at: i64,
+    },
 }
 
 impl SqliteHistory {
@@ -115,6 +131,13 @@ impl SqliteHistory {
                  at      INTEGER NOT NULL,
                  json    TEXT NOT NULL,
                  PRIMARY KEY (game_id, seq)
+             );
+             CREATE TABLE IF NOT EXISTS feedback (
+                 game_id INTEGER NOT NULL REFERENCES game(id),
+                 player  TEXT NOT NULL,
+                 rating  INTEGER NOT NULL,
+                 comment TEXT,
+                 at      INTEGER NOT NULL
              );",
         )?;
         let (tx, rx) = mpsc::channel();
@@ -179,7 +202,10 @@ fn writer_loop(conn: rusqlite::Connection, rx: mpsc::Receiver<Rec>) {
                     Ok(())
                 }
             },
-            Rec::End { room, winner, at } => match games.remove(&room) {
+            // The entry stays in the map after End: post-game feedback
+            // still needs the game id (a later Start on a recycled room
+            // code overwrites it).
+            Rec::End { room, winner, at } => match games.get(&room) {
                 Some((game_id, _)) => conn
                     .execute(
                         "UPDATE game SET winner = ?1, ended_at = ?2 WHERE id = ?3",
@@ -187,6 +213,25 @@ fn writer_loop(conn: rusqlite::Connection, rx: mpsc::Receiver<Rec>) {
                     )
                     .map(|_| ()),
                 None => Ok(()),
+            },
+            Rec::Feedback {
+                room,
+                player,
+                rating,
+                comment,
+                at,
+            } => match games.get(&room) {
+                Some((game_id, _)) => conn
+                    .execute(
+                        "INSERT INTO feedback (game_id, player, rating, comment, at)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![*game_id, player, rating, comment, at],
+                    )
+                    .map(|_| ()),
+                None => {
+                    warn!(room, "feedback for unknown game; dropped");
+                    Ok(())
+                }
             },
         };
         if let Err(e) = result {
@@ -232,6 +277,16 @@ impl GameHistory for SqliteHistory {
             at: now_unix(),
         });
     }
+
+    fn record_feedback(&self, room: &str, player: &str, rating: u8, comment: Option<&str>) {
+        self.send(Rec::Feedback {
+            room: room.to_string(),
+            player: player.to_string(),
+            rating,
+            comment: comment.map(str::to_string),
+            at: now_unix(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -256,6 +311,8 @@ mod tests {
             );
         }
         history.record_end("ABCDE", Some("p0"));
+        // Post-game survey answers land after End (same game row).
+        history.record_feedback("ABCDE", "p1", 4, Some("gg"));
         drop(history); // joins the writer: everything is flushed
 
         let conn = rusqlite::Connection::open(&db).expect("reopen");
@@ -278,5 +335,12 @@ mod tests {
         assert_eq!(jsons.len(), 3);
         assert!(jsons[0].contains(r#""type":"roll""#));
         assert!(jsons[2].contains(r#""type":"end_turn""#));
+
+        let (player, rating, comment): (String, i64, String) = conn
+            .query_row("SELECT player, rating, comment FROM feedback", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .expect("feedback row");
+        assert_eq!((player.as_str(), rating, comment.as_str()), ("p1", 4, "gg"));
     }
 }

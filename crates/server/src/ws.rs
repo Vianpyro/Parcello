@@ -150,7 +150,21 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 }
             }
 
-            (ClientMessage::Start | ClientMessage::Cmd { .. }, None) => {
+            (ClientMessage::Feedback { rating, comment }, Some(s)) => {
+                let cmd = RoomCmd::Feedback {
+                    player_id: s.player_id.clone(),
+                    rating,
+                    comment,
+                };
+                if s.room.send(cmd).await.is_err() {
+                    break;
+                }
+            }
+
+            (
+                ClientMessage::Start | ClientMessage::Cmd { .. } | ClientMessage::Feedback { .. },
+                None,
+            ) => {
                 send(
                     &tx,
                     ServerMessage::Error {

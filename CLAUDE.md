@@ -52,7 +52,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 57 tests, all must pass
+cargo test  --workspace --locked          # 62 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -104,7 +104,10 @@ architecture doc section 5; dependencies point downward only):
   dissolve after `IDLE_TIMEOUT` = 30 min; optional per-turn AFK timer
   `--turn-timeout <secs>` auto-plays the canonical action
   Roll/Decline/Pass/EndTurn for the acting seat, 0 = off default; any
-  accepted command resets the clock), `auth.rs` + `eddsa.rs`
+  accepted command resets the clock; post-game survey `feedback` message:
+  Finished phase only, once per seat, rating 1-5 + comment capped at 500
+  chars, stored via `GameHistory::record_feedback` - the client UI must
+  stay non-blocking, side card not modal), `auth.rs` + `eddsa.rs`
   (`IdentityVerifier` trait: insecure guests, EdDSA identity tokens
   verified against JWKS from any OIDC provider - Rauthy is the reference,
   ADR-0009 - and the deprecated HS256 stopgap, ADR-0003; tokens dispatch
@@ -195,8 +198,9 @@ opt-in (`--turn-timeout`, off by default).
 ## Roadmap (agreed next steps, roughly in order of value)
 
 1. Flutter client polish (`clients/flutter` exists: full protocol, board,
-   trades, tests; still needs real multiplayer playtesting and
-   Android/mobile targets).
+   trades, tests; still needs real multiplayer playtesting, FX + audio -
+   owner priority 2026-07 - and Android/mobile targets, postponed by
+   owner).
 2. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
    the Flutter client (`oidc.dart`: PKCE + system browser + loopback; web
    and CLI paste the token manually). Remaining: deploy the Rauthy issuer.

@@ -4,10 +4,12 @@ Open-source multiplayer board game in the spirit of Business Tour / Monopoly.
 Authoritative Rust server, thin clients, community-hosted servers
 (Minecraft model), data-driven mods.
 
-This repository is the playable backend: pure game engine, TOML mod layer,
-WebSocket server with an embedded browser client, and a terminal test
-client. A richer Flutter client and the Global Identity Service are
-separate future components.
+This repository holds the complete, playable game: pure game engine, TOML
+mod layer, WebSocket server with an embedded browser client, a terminal
+test client (with a `--bot` autopilot for solo playtesting), and a
+cross-platform Flutter desktop client (`clients/flutter`). Player accounts
+are optional and verified against an external OIDC identity provider
+(self-hosted, e.g. Rauthy - ADR-0009); guests can always play.
 
 ## Workspace
 
@@ -17,7 +19,11 @@ separate future components.
 | `parcello-mods`      | Mod Layer (section 7)     | TOML bundles, Registry merge, `ModPlugin` trait.     |
 | `parcello-protocol`  | Transport contract        | JSON message envelopes shared by server and clients. |
 | `parcello-server`    | Transport + Session (5)   | Axum WS server, rooms, auth, history, web client.    |
-| `parcello-cli`       | Test harness              | Terminal client to exercise the server end-to-end.   |
+| `parcello-cli`       | Test harness              | Terminal client; `--bot` autopilot fills seats solo. |
+
+Not a cargo crate: `clients/flutter` is the Dart/Flutter desktop client
+(Windows, Linux, macOS), mirroring the web client feature-for-feature with
+an added OIDC login flow. See `clients/flutter/README.md`.
 
 Patterns from the doc and where they live:
 
@@ -94,22 +100,73 @@ always play. The Flutter client has a "Sign in with account" button
 (OIDC + PKCE against your identity provider); the web client and CLI
 accept a pasted token.
 
+## Development & testing
+
+The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
+
+```sh
+# Rust: 62 tests, formatting, and lints (all must pass before a PR)
+cargo test   --workspace --locked
+cargo fmt    --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+
+# MSRV: the project builds on Rust 1.96 with the committed lockfile
+cargo build  --workspace --locked
+
+# Optional but part of release hygiene: no vulnerable dependencies
+cargo audit
+```
+
+Always pass `--locked` so builds are reproducible against the committed
+`Cargo.lock`. Engine rules are covered in `crates/engine/tests/engine.rs`
+(scripted dice via `FixedDice`, `plain_board`/`transit_board` fixtures);
+session behaviour (rooms, reconnect tokens, private trades, feedback) has
+async tests in `crates/server/src/room.rs`; the wire format is pinned by
+tests in `parcello-protocol`.
+
+Flutter client (needs the Flutter SDK):
+
+```sh
+cd clients/flutter
+flutter analyze
+flutter test
+```
+
+**End-to-end without volunteers:** start a server, then fill the room with
+bots and watch a whole game play out (0 rejected commands is the bar).
+
+```sh
+cargo run -p parcello-server -- --insecure-guest --history game.db
+cargo run -p parcello-cli -- --name host --create           # start the game
+cargo run -p parcello-cli -- --name bot1 --join CODE --bot
+cargo run -p parcello-cli -- --name bot2 --join CODE --bot
+```
+
+With `--history`, post-game survey answers land in the SQLite `feedback`
+table, so you can verify the whole feedback path end-to-end.
+
 ## Releases
 
 Bumping the workspace `version` in `Cargo.toml` on `main` triggers
 `.github/workflows/release.yml`: it tags `vX.Y.Z`, builds the server + CLI
 for Linux (x64 + arm64), Windows, and macOS (arm64) with the `mods/`
 directory bundled, builds the Flutter client for Windows, Linux, and
-macOS, attaches everything to an auto-generated GitHub release, and
-pushes the server image to GHCR (`vX.Y.Z` + `latest`, linux/amd64). Keep
+macOS, assembles Steam-depot-shaped all-in-one archives (client + server
+together) for Windows and Linux (the Linux one fits the Steam Deck),
+attaches everything to an auto-generated GitHub release, and pushes the
+server image to GHCR (`vX.Y.Z` + `latest`, linux/amd64). Keep
 `clients/flutter/pubspec.yaml`'s version in step - it stamps the client
-executable. Re-pushing without a bump is a no-op.
+executable. Re-pushing without a bump is a no-op. All dependency licenses
+are permissive (checked with cargo-license), so commercial distribution
+is unencumbered.
 
 ## Protocol (v0, JSON over WebSocket at `/ws`)
 
 Client -> server: `create {auth, mods?}` (optional ordered mod list for
 the room, ADR-0006; omit for the server default), `join {code, auth}`,
-`start`, `cmd {cmd}`, `ping`. Server -> client: `room_created`, `joined`
+`start`, `cmd {cmd}`, `feedback {rating, comment?}` (post-game survey:
+1-5 plus an optional comment, stored in the server history; one per
+player per game, fully optional and never blocking), `ping`. Server -> client: `room_created`, `joined`
 (includes the resolved mod bundle, a per-seat reconnect token - present it
 in `auth.reconnect` to re-take a guest seat, ADR-0008 - and, mid-game, a
 state snapshot), `lobby`,
@@ -210,7 +267,14 @@ redundant, accounts always optional).
 
 ## Roadmap
 
-Flutter client polish (a Windows-desktop client lives in `clients/flutter`,
-see its README); Global Identity Service (asymmetric JWT, JWKS); WASM
-(Wasmtime) mod plugins behind `ModPlugin`; richer history queries (stats)
-if needed.
+- FX + audio and real multiplayer playtesting for the Flutter client
+  (next priority).
+- Deploy the OIDC issuer (Rauthy); the server-side EdDSA verifier is done
+  (ADR-0009). The deprecated HS256 auth stays until LAN/WAN playtests have
+  happened.
+- Structured multiple-choice post-game surveys (today's survey is a single
+  1-5 rating plus an optional comment).
+- Android / mobile targets (postponed).
+- WASM (Wasmtime) mod plugins behind `ModPlugin` (unblocked by the move to
+  Rust 1.96).
+- Richer history queries (stats) if needed; a Steam all-in-one release.

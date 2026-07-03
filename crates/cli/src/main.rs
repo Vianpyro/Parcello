@@ -97,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
     );
     println!("          accept <id> | refuse <id> | cancel <id>");
+    println!("post-game: feedback <1-5> [comment]");
 
     let mut ctx = Ctx::default();
     let mut stdin = BufReader::new(tokio::io::stdin()).lines();
@@ -199,6 +200,13 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
         ("cancel", Some(id)) => CommandKind::CancelTrade {
             trade: id.parse().ok()?,
         },
+        ("feedback", Some(rating)) => {
+            let rest: Vec<&str> = parts.collect();
+            return Some(ClientMessage::Feedback {
+                rating: rating.parse().ok()?,
+                comment: (!rest.is_empty()).then(|| rest.join(" ")),
+            });
+        }
         ("pay", None) => CommandKind::PayJailFine,
         ("card", None) => CommandKind::UseJailCard,
         ("end", None) => CommandKind::EndTurn,

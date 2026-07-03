@@ -47,6 +47,14 @@ pub enum ClientMessage {
     Cmd {
         cmd: CommandKind,
     },
+    /// Post-game survey (opens when the game ends): 1-5 rating plus an
+    /// optional comment, stored in the server's history. One per player
+    /// per game; entirely optional.
+    Feedback {
+        rating: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        comment: Option<String>,
+    },
     Ping,
 }
 
@@ -147,6 +155,13 @@ mod tests {
             ClientMessage::Cmd {
                 cmd: parcello_engine::CommandKind::UseJailCard
             }
+        ));
+
+        let fb: ClientMessage =
+            serde_json::from_str(r#"{"type":"feedback","rating":4,"comment":"gg"}"#).unwrap();
+        assert!(matches!(
+            fb,
+            ClientMessage::Feedback { rating: 4, comment: Some(c) } if c == "gg"
         ));
 
         // Pre-ADR-0006 clients omit `mods`; the field must stay optional.

@@ -54,6 +54,9 @@ class GameSession extends ChangeNotifier {
   String loginMessage = '';
   bool joined = false;
 
+  /// Post-game survey shown once per game; answering or dismissing hides it.
+  bool feedbackDone = false;
+
   bool get myTurn => view != null && seat != null && view!.current == seat;
 
   String playerName(int i) =>
@@ -123,6 +126,22 @@ class GameSession extends ChangeNotifier {
     _ws?.sink.add(jsonEncode({'type': 'start'}));
   }
 
+  /// Post-game survey answer; `rating` 1-5, empty comment omitted.
+  void sendFeedback(int rating, String comment) {
+    _ws?.sink.add(jsonEncode({
+      'type': 'feedback',
+      'rating': rating,
+      if (comment.trim().isNotEmpty) 'comment': comment.trim(),
+    }));
+    feedbackDone = true;
+    notifyListeners();
+  }
+
+  void dismissFeedback() {
+    feedbackDone = true;
+    notifyListeners();
+  }
+
   void _handle(Map<String, dynamic> msg) {
     switch (msg['type']) {
       case 'room_created':
@@ -145,6 +164,7 @@ class GameSession extends ChangeNotifier {
         seats = _seatList(msg['players']);
       case 'game_started':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
+        feedbackDone = false;
         _log('Game started.');
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);

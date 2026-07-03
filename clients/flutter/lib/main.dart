@@ -436,6 +436,9 @@ class _SidePanel extends StatelessWidget {
       Card(
           child: Padding(
               padding: const EdgeInsets.all(12), child: _trades(context))),
+      // Post-game survey: an ordinary side card, never a modal - it must
+      // not block anything (no frustration by design).
+      if (s.view?.finished == true && !s.feedbackDone) _FeedbackCard(s: s),
       Card(
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -562,6 +565,69 @@ class _SidePanel extends StatelessWidget {
           child: const Text('New offer'),
         ),
     ]);
+  }
+}
+
+/// Post-game survey card (side panel, dismissible, one per game).
+class _FeedbackCard extends StatefulWidget {
+  final GameSession s;
+  const _FeedbackCard({required this.s});
+
+  @override
+  State<_FeedbackCard> createState() => _FeedbackCardState();
+}
+
+class _FeedbackCardState extends State<_FeedbackCard> {
+  int _rating = 0;
+  final _comment = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.s;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(
+              child: Text('HOW WAS THE GAME?',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF9AA3B2),
+                      letterSpacing: 1)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 16),
+              onPressed: s.dismissFeedback,
+              tooltip: 'Dismiss',
+            ),
+          ]),
+          Row(children: [
+            for (var star = 1; star <= 5; star++)
+              IconButton(
+                icon: Icon(
+                  star <= _rating ? Icons.star : Icons.star_border,
+                  color: const Color(0xFFD8B45A),
+                ),
+                onPressed: () => setState(() => _rating = star),
+              ),
+          ]),
+          TextField(
+            controller: _comment,
+            maxLength: 500,
+            decoration: const InputDecoration(
+                labelText: 'Anything to add? (optional)', counterText: ''),
+          ),
+          const SizedBox(height: 6),
+          FilledButton(
+            onPressed: _rating == 0
+                ? null
+                : () => s.sendFeedback(_rating, _comment.text),
+            child: const Text('Send'),
+          ),
+        ]),
+      ),
+    );
   }
 }
 

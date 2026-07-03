@@ -136,6 +136,18 @@
         </div>
       </div>
     </div>
+    <!-- Post-game survey: a plain side card, never a modal - it must not
+         block anything (no frustration by design). -->
+    <div class="card" id="fb" style="display:none">
+      <h3>How was the game? <span id="fbx" style="float:right;cursor:pointer">&#10005;</span></h3>
+      <div id="fbstars" style="font-size:22px;cursor:pointer;letter-spacing:6px;color:#d8b45a">
+        <span data-r="1">&#9734;</span><span data-r="2">&#9734;</span><span data-r="3">&#9734;</span><span data-r="4">&#9734;</span><span data-r="5">&#9734;</span>
+      </div>
+      <input id="fbtext" placeholder="Anything to add? (optional)" maxlength="500"
+             style="width:100%;margin:6px 0" autocomplete="off">
+      <button id="fbsend" disabled>Send</button>
+      <span id="fbthanks" class="muted" style="display:none">Thanks for the feedback!</span>
+    </div>
     <div class="card">
       <button id="resign" class="danger">Resign</button>
     </div>
@@ -343,7 +355,28 @@ function render() {
   renderStatus();
   renderActions();
   renderOffers();
+  renderFeedback();
 }
+
+// -- post-game survey ---------------------------------------------------------
+let fbRating = 0, fbDone = false;
+function renderFeedback() {
+  $("#fb").style.display = st.view?.phase.type === "finished" && !fbDone ? "block" : "none";
+}
+document.querySelectorAll("#fbstars span").forEach(s => s.onclick = () => {
+  fbRating = Number(s.dataset.r);
+  document.querySelectorAll("#fbstars span").forEach(x =>
+    x.innerHTML = Number(x.dataset.r) <= fbRating ? "&#9733;" : "&#9734;");
+  $("#fbsend").disabled = false;
+});
+$("#fbsend").onclick = () => {
+  const comment = $("#fbtext").value.trim();
+  ws?.send(JSON.stringify({ type: "feedback", rating: fbRating, ...(comment ? { comment } : {}) }));
+  $("#fbsend").style.display = "none";
+  $("#fbthanks").style.display = "inline";
+  setTimeout(() => { fbDone = true; renderFeedback(); }, 1500);
+};
+$("#fbx").onclick = () => { fbDone = true; renderFeedback(); };
 
 function renderPlayers() {
   const el = $("#players");
