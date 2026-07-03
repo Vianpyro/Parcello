@@ -10,23 +10,21 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0007` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0008` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
 ## Hard constraints (do not break)
 
-- **MSRV is Rust 1.75** (`rust-version` in the workspace). `Cargo.lock`
-  carries load-bearing pins for transitive deps that resolve past 1.75:
-  clap `<4.6`, indexmap `2.7.1`, tempfile `<3.15`, rusqlite `<0.32`, and
-  tokio-tungstenite `0.24` deliberately aligned with axum 0.7 (this keeps
-  the whole url/idna/icu family OUT of the graph - do not reintroduce it).
-  Consequences:
-  - Always build/test with `--locked`. Never run bare `cargo update`.
-  - Adding a dependency: pick a version compatible with 1.75, then verify
-    `cargo build --workspace --locked` still passes; pin transitives with
-    `cargo update -p <crate> --precise <ver>` if needed.
+- **MSRV is Rust 1.96** (`rust-version` in the workspace; tracks recent
+  stable since the 2026-07 dependency refresh - the old 1.75 pins are
+  gone). Keep the CI msrv job, the Dockerfile base image, and
+  `rust-version` in step when bumping. Consequences:
+  - Build/test with `--locked` (reproducibility); `cargo update` is
+    allowed but run `cargo test --workspace` and `cargo audit` after.
+  - `cargo audit` is part of the release hygiene: the tree was clean at
+    the refresh; keep it that way.
 - **Engine purity** (crate `parcello-engine`): no I/O, no async, no rand,
   no clock. Randomness comes only from the SplitMix64 state inside
   `GameState.rng` (ADR-0002). Deps: serde + thiserror only.
@@ -54,7 +52,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 52 tests, all must pass
+cargo test  --workspace --locked          # 53 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -63,7 +61,7 @@ cargo run -p parcello-cli -- --name bob --join ABCDE
 
 CI (`.github/workflows/ci.yml`): stable job runs `fmt --check`,
 `clippy --all-targets --locked -- -D warnings`, tests; msrv job builds on
-1.75 with `--locked`.
+1.96 with `--locked`.
 
 Releases (`.github/workflows/release.yml`): bumping the workspace version
 in `Cargo.toml` on main tags `vX.Y.Z` and publishes a GitHub release with
@@ -95,7 +93,9 @@ architecture doc section 5; dependencies point downward only):
   create/join, relay; identity is bound to the connection and never
   re-trusted from the wire), `room.rs` (one Tokio task per room; state
   machine Lobby -> Active -> Finished; host = seat 0; 2..=6 players; rejoin
-  by identity, last connection wins; rooms with zero connected seats
+  by identity, last connection wins, but spoofable (guest) seats require
+  the per-seat reconnect token issued in `Joined` (ADR-0008); rooms with
+  zero connected seats
   dissolve after `IDLE_TIMEOUT` = 30 min; optional per-turn AFK timer
   `--turn-timeout <secs>` auto-plays the canonical action
   Roll/Decline/Pass/EndTurn for the acting seat, 0 = off default; any
@@ -176,7 +176,7 @@ opt-in (`--turn-timeout`, off by default).
   (first run reformatted the tree and fixed one `unit_arg` lint). Keep them
   green; fix warnings rather than silencing them.
 - `Dockerfile` builds and the image serves `/healthz` (verified locally,
-  Docker 28). Multi-stage rust:1.75-slim -> bookworm-slim.
+  Docker 28). Multi-stage rust:1.96-slim -> bookworm-slim.
 - `crates/server/web/index.html` has never rendered in a real browser.
   Protocol coverage was verified mechanically (all 32 Event variants and
   all 17 CommandKind tags match the enums), so remaining risk is
@@ -191,11 +191,11 @@ opt-in (`--turn-timeout`, off by default).
 2. Global Identity Service: asymmetric JWT + JWKS fetch as a new
    `IdentityVerifier`; deprecate the HS256 stopgap (ADR-0003).
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
-   layer; the trait is already the seam). Blocked on the MSRV 1.75 pin -
-   re-check when the MSRV moves.
-4. Reconnect tokens; richer history queries (SQLx behind `GameHistory` if
-   dashboards ever need it - see ADR-0005 first).
+   layer; the trait is already the seam). Unblocked since the MSRV moved
+   to 1.96; pick a current Wasmtime.
+4. Richer history queries (SQLx behind `GameHistory` if dashboards ever
+   need it - see ADR-0005 first).
 
 When picking up any item: state assumptions briefly, write the ADR if it
 deviates from `docs/architecture.typ`, add tests, keep `--locked` green on
-1.75, and update README + this file.
+1.96, and update README + this file.

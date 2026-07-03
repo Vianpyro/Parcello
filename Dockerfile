@@ -1,5 +1,5 @@
 # Standard multi-stage build; published to GHCR by .github/workflows/release.yml.
-FROM rust:1.75-slim AS build
+FROM rust:1.96-slim AS build
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates

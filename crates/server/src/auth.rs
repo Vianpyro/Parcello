@@ -7,7 +7,7 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
 
@@ -18,6 +18,9 @@ pub struct Identity {
     /// Stable global id ("hs256:<sub>" or "guest:<name>").
     pub player_id: String,
     pub name: String,
+    /// True when nothing cryptographic backs this identity (guests). The
+    /// room then requires the seat's reconnect token to rejoin (ADR-0008).
+    pub spoofable: bool,
 }
 
 pub trait IdentityVerifier: Send + Sync {
@@ -56,6 +59,7 @@ impl IdentityVerifier for CompositeVerifier {
             return Ok(Identity {
                 player_id: format!("guest:{}", name.to_lowercase()),
                 name,
+                spoofable: true,
             });
         }
         Err("auth payload must contain a token or a guest_name".into())
@@ -63,7 +67,8 @@ impl IdentityVerifier for CompositeVerifier {
 }
 
 /// Guest names are identity in insecure mode: same name = same seat on
-/// rejoin, and nothing prevents impersonation. LAN/testing only.
+/// rejoin. Mid-game seats are shielded by reconnect tokens (ADR-0008),
+/// but names remain impersonable at first join. LAN/testing only.
 fn sanitize_guest_name(raw: &str) -> Result<String, String> {
     let name = raw.trim();
     if name.is_empty() || name.len() > 24 {
@@ -137,6 +142,7 @@ impl Hs256Verifier {
         Ok(Identity {
             player_id: format!("hs256:{}", claims.sub),
             name: claims.name,
+            spoofable: false,
         })
     }
 }
@@ -183,6 +189,7 @@ mod tests {
             .verify(&AuthPayload {
                 token: Some(token),
                 guest_name: None,
+                reconnect: None,
             })
             .unwrap();
         assert_eq!(id.player_id, "hs256:disc:42");
@@ -204,7 +211,8 @@ mod tests {
         assert!(v
             .verify(&AuthPayload {
                 token: Some(wrong_key),
-                guest_name: None
+                guest_name: None,
+                reconnect: None,
             })
             .is_err());
 
@@ -212,14 +220,16 @@ mod tests {
         assert!(v
             .verify(&AuthPayload {
                 token: Some(expired),
-                guest_name: None
+                guest_name: None,
+                reconnect: None,
             })
             .is_err());
 
         assert!(v
             .verify(&AuthPayload {
                 token: Some(good + "x"),
-                guest_name: None
+                guest_name: None,
+                reconnect: None,
             })
             .is_err());
     }
@@ -231,6 +241,7 @@ mod tests {
             .verify(&AuthPayload {
                 token: None,
                 guest_name: Some("Vian_42".into()),
+                reconnect: None,
             })
             .unwrap();
         assert_eq!(id.player_id, "guest:vian_42");
@@ -239,6 +250,7 @@ mod tests {
             .verify(&AuthPayload {
                 token: None,
                 guest_name: Some("bad name!".into()),
+                reconnect: None,
             })
             .is_err());
 
@@ -247,6 +259,7 @@ mod tests {
             .verify(&AuthPayload {
                 token: None,
                 guest_name: Some("Vian".into()),
+                reconnect: None,
             })
             .is_err());
     }

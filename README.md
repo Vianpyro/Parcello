@@ -35,7 +35,7 @@ Patterns from the doc and where they live:
 
 ## Quickstart
 
-Rust 1.75+.
+Rust 1.96+.
 
 ```sh
 cargo build --workspace
@@ -97,8 +97,10 @@ executable. Re-pushing without a bump is a no-op.
 
 Client -> server: `create {auth, mods?}` (optional ordered mod list for
 the room, ADR-0006; omit for the server default), `join {code, auth}`,
-`start`, `cmd {cmd}`, `ping`. Server -> client: `room_created`, `joined` (includes
-the resolved mod bundle and, mid-game, a state snapshot), `lobby`,
+`start`, `cmd {cmd}`, `ping`. Server -> client: `room_created`, `joined`
+(includes the resolved mod bundle, a per-seat reconnect token - present it
+in `auth.reconnect` to re-take a guest seat, ADR-0008 - and, mid-game, a
+state snapshot), `lobby`,
 `game_started`, `update {events, view}`, `rejected {error}` (sent only to
 the offending player), `error`, `pong`. Shapes live in `parcello-protocol`;
 commands and events are the engine's own serialized types, so the wire
@@ -173,10 +175,12 @@ deck rotation once drawn.
 
 - Rooms with no connected seat dissolve after 30 minutes idle; there is no
   persistence, so a dissolved game is gone.
-- Guest identities are spoofable by design (`--insecure-guest`).
+- Guest identities are spoofable at first join (`--insecure-guest`);
+  mid-game seats are protected by reconnect tokens (ADR-0008).
 - History is in-memory unless `--history` is set; the SQLite adapter logs
   `(seed, ordered accepted commands)`, i.e. complete deterministic replays.
-- No reconnect resume token: rejoin is by identity (same guest name/JWT sub).
+- A guest who loses their reconnect token cannot re-take their seat until
+  the room dissolves.
 - The AFK timer (`--turn-timeout`) is off by default; without it a stalled
   player blocks the game until the room idles out.
 
@@ -187,11 +191,12 @@ See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside
 0004 server-wide mod set (room `Starting` state collapses to a point);
 0005 rusqlite writer thread instead of SQLx behind `GameHistory`;
 0006 per-room mod sets at creation (amends 0004, `Starting` stays
-collapsed); 0007 private trade offers via per-seat `ClientView`s.
+collapsed); 0007 private trade offers via per-seat `ClientView`s;
+0008 per-seat reconnect tokens (guest seat hijack protection).
 
 ## Roadmap
 
 Flutter client polish (a Windows-desktop client lives in `clients/flutter`,
 see its README); Global Identity Service (asymmetric JWT, JWKS); WASM
-(Wasmtime) mod plugins behind `ModPlugin`; reconnect tokens; richer
-history queries (stats) if needed.
+(Wasmtime) mod plugins behind `ModPlugin`; richer history queries (stats)
+if needed.

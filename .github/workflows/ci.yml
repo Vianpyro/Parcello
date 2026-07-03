@@ -23,14 +23,12 @@ jobs:
       - run: cargo test --workspace --locked
 
   msrv:
-    name: msrv 1.75 / build
+    name: msrv 1.96 / build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.75"
+          toolchain: "1.96"
       - uses: Swatinem/rust-cache@v2
-      # --locked is load-bearing: the lockfile pins transitive deps that
-      # would otherwise resolve past this toolchain (see README notes).
       - run: cargo build --workspace --locked

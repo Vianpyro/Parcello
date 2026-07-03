@@ -40,7 +40,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     continue;
                 }
             };
-            if sink.send(Message::Text(json)).await.is_err() {
+            if sink.send(Message::Text(json.into())).await.is_err() {
                 break;
             }
         }
@@ -75,6 +75,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 let Some(identity) = authenticate(&app, &auth, &tx) else {
                     continue;
                 };
+                let reconnect = auth.reconnect;
                 let content = match resolve_room_mods(&app, mods).await {
                     Ok(content) => content,
                     Err(message) => {
@@ -100,13 +101,14 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     .get(&code)
                     .cloned()
                     .expect("room registered by create_room");
-                session = try_join(room, identity, &tx).await;
+                session = try_join(room, identity, reconnect, &tx).await;
             }
 
             (ClientMessage::Join { code, auth }, None) => {
                 let Some(identity) = authenticate(&app, &auth, &tx) else {
                     continue;
                 };
+                let reconnect = auth.reconnect;
                 let room = app.rooms.read().await.get(&code.to_uppercase()).cloned();
                 let Some(room) = room else {
                     send(
@@ -117,7 +119,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     );
                     continue;
                 };
-                session = try_join(room, identity, &tx).await;
+                session = try_join(room, identity, reconnect, &tx).await;
             }
 
             (ClientMessage::Create { .. } | ClientMessage::Join { .. }, Some(_)) => {
@@ -230,12 +232,14 @@ fn authenticate(
 async fn try_join(
     room: mpsc::Sender<RoomCmd>,
     identity: crate::auth::Identity,
+    reconnect: Option<String>,
     tx: &ClientTx,
 ) -> Option<Session> {
     let player_id = identity.player_id.clone();
     let (reply, on_reply) = oneshot::channel();
     let join = RoomCmd::Join {
         identity,
+        reconnect,
         tx: tx.clone(),
         reply,
     };

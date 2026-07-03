@@ -18,6 +18,10 @@ pub struct AuthPayload {
     /// Guest display name, accepted only with `--insecure-guest`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guest_name: Option<String>,
+    /// Per-seat reconnect token issued in `Joined` (ADR-0008). Required to
+    /// re-take a seat held by a spoofable (guest) identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconnect: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -70,6 +74,9 @@ pub enum ServerMessage {
         content: Box<ResolvedContent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         view: Option<Box<ClientView>>,
+        /// Keep this to rejoin the seat after a disconnect (ADR-0008).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reconnect: Option<String>,
     },
     /// Broadcast on lobby membership or connection changes.
     Lobby {
@@ -105,6 +112,7 @@ mod tests {
             auth: AuthPayload {
                 token: None,
                 guest_name: Some("vianney".into()),
+                reconnect: None,
             },
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -112,6 +120,16 @@ mod tests {
             json,
             r#"{"type":"join","code":"ABCDE","auth":{"guest_name":"vianney"}}"#
         );
+
+        // Reconnect token (ADR-0008) rides in the auth payload.
+        let msg: ClientMessage = serde_json::from_str(
+            r#"{"type":"join","code":"ABCDE","auth":{"guest_name":"v","reconnect":"tok"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            msg,
+            ClientMessage::Join { auth: AuthPayload { reconnect: Some(t), .. }, .. } if t == "tok"
+        ));
 
         let cmd: ClientMessage =
             serde_json::from_str(r#"{"type":"cmd","cmd":{"type":"roll"}}"#).unwrap();

@@ -4,6 +4,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -12,6 +13,31 @@ import 'protocol.dart';
 
 class GameSession extends ChangeNotifier {
   WebSocketChannel? _ws;
+
+  /// Reconnect tokens by room code (ADR-0008), persisted so a restarted
+  /// client can still prove seat ownership. Best-effort: IO errors only
+  /// cost the persistence, never the session.
+  final Map<String, String> _reconnectTokens = {};
+  late final File _tokenFile = () {
+    final base =
+        Platform.environment['APPDATA'] ?? Platform.environment['HOME'] ?? '.';
+    return File('$base/parcello/reconnect.json');
+  }();
+
+  GameSession() {
+    try {
+      final saved = jsonDecode(_tokenFile.readAsStringSync()) as Map;
+      _reconnectTokens.addAll(saved.cast<String, String>());
+    } catch (_) {}
+  }
+
+  void _saveToken(String code, String token) {
+    _reconnectTokens[code] = token;
+    try {
+      _tokenFile.parent.createSync(recursive: true);
+      _tokenFile.writeAsStringSync(jsonEncode(_reconnectTokens));
+    } catch (_) {}
+  }
 
   int? seat;
   String? code;
@@ -45,7 +71,11 @@ class GameSession extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final auth = {'guest_name': name};
+    final auth = {
+      'guest_name': name,
+      if (_reconnectTokens[roomCode] != null)
+        'reconnect': _reconnectTokens[roomCode],
+    };
     _ws!.sink.add(jsonEncode(roomCode.isEmpty
         ? {
             'type': 'create',
@@ -94,6 +124,9 @@ class GameSession extends ChangeNotifier {
         seat = msg['seat'] as int;
         content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
         seats = _seatList(msg['players']);
+        if (msg['reconnect'] != null) {
+          _saveToken(code!, msg['reconnect'] as String);
+        }
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }

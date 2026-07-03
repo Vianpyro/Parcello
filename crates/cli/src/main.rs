@@ -37,6 +37,11 @@ struct Args {
     /// Join an existing room by code.
     #[arg(long)]
     join: Option<String>,
+
+    /// Reconnect token from a previous join (printed on join; proves seat
+    /// ownership when rejoining as a guest).
+    #[arg(long)]
+    reconnect: Option<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -52,6 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth = AuthPayload {
         token: None,
         guest_name: Some(args.name.clone()),
+        reconnect: args.reconnect.clone(),
     };
     let first = if args.create {
         ClientMessage::Create {
@@ -64,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             auth,
         }
     };
-    sink.send(Message::Text(serde_json::to_string(&first)?))
+    sink.send(Message::Text(serde_json::to_string(&first)?.into()))
         .await?;
 
     println!("connected to {} as {}", args.url, args.name);
@@ -101,7 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 };
-                sink.send(Message::Text(serde_json::to_string(&msg)?)).await?;
+                sink.send(Message::Text(serde_json::to_string(&msg)?.into()))
+                    .await?;
             }
         }
     }
@@ -200,10 +207,14 @@ impl Ctx {
                 players,
                 content,
                 view,
+                reconnect,
             } => {
                 self.my_seat = Some(seat);
                 self.content = Some(*content);
                 println!("* joined room {code} as seat {seat}");
+                if let Some(token) = reconnect {
+                    println!("* reconnect token: {token} (rejoin with --reconnect {token})");
+                }
                 self.print_lobby(&players);
                 if let Some(view) = view {
                     println!("* game in progress:");

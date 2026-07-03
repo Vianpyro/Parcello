@@ -179,6 +179,9 @@ function connect(name, code) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   const auth = { guest_name: name };
+  // Seat ownership proof for guest rejoin (ADR-0008).
+  const tok = code && localStorage.getItem(`parcello_tok_${code}`);
+  if (tok) auth.reconnect = tok;
   ws.onopen = () => {
     // Room mod set (ADR-0006): only meaningful when creating.
     const mods = $("#mods").value.split(",").map(s => s.trim()).filter(Boolean);
@@ -207,6 +210,7 @@ function handle(msg) {
       st.seat = msg.seat;
       st.content = msg.content.content;
       st.seats = msg.players;
+      if (msg.reconnect) localStorage.setItem(`parcello_tok_${msg.code}`, msg.reconnect);
       location.hash = msg.code;
       $("#login").style.display = "none";
       $("#app").style.display = "grid";

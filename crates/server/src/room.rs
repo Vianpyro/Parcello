@@ -36,6 +36,9 @@ pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;
 pub enum RoomCmd {
     Join {
         identity: Identity,
+        /// Reconnect token presented by the client (ADR-0008); required to
+        /// re-take a seat held by a spoofable identity.
+        reconnect: Option<String>,
         tx: ClientTx,
         reply: oneshot::Sender<Result<(), String>>,
     },
@@ -98,15 +101,35 @@ fn event_visible_to(event: &Event, seat: usize) -> bool {
 }
 
 fn random_code() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    (0..5).map(|_| rng.gen_range(b'A'..=b'Z') as char).collect()
+    (0..5)
+        .map(|_| rand::random_range(b'A'..=b'Z') as char)
+        .collect()
+}
+
+/// 32 alphanumeric chars from the thread CSPRNG (~190 bits): unguessable
+/// proof of seat ownership for the room's lifetime (ADR-0008).
+fn new_reconnect_token() -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    (0..32)
+        .map(|_| CHARS[rand::random_range(0..CHARS.len())] as char)
+        .collect()
+}
+
+/// Constant-time-ish comparison: no early exit on the first differing byte.
+fn token_eq(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
 }
 
 struct Seat {
     identity: Identity,
     /// `None` while disconnected; the seat survives for rejoin.
     tx: Option<ClientTx>,
+    /// Issued in `Joined`; proves seat ownership on rejoin (ADR-0008).
+    reconnect: String,
 }
 
 enum Phase {
@@ -143,8 +166,8 @@ impl Room {
                     // ponytail: any accepted command resets the turn clock;
                     // per-actor deadlines if trade-offer spam ever stalls games.
                     let advanced = match cmd {
-                        RoomCmd::Join { identity, tx, reply } => {
-                            let result = self.handle_join(identity, tx);
+                        RoomCmd::Join { identity, reconnect, tx, reply } => {
+                            let result = self.handle_join(identity, reconnect, tx);
                             let _ = reply.send(result);
                             false
                         }
@@ -201,10 +224,25 @@ impl Room {
         Some((st.players[seat].id.clone(), kind))
     }
 
-    fn handle_join(&mut self, identity: Identity, tx: ClientTx) -> Result<(), String> {
+    fn handle_join(
+        &mut self,
+        identity: Identity,
+        reconnect: Option<String>,
+        tx: ClientTx,
+    ) -> Result<(), String> {
         let seat_index = match self.seat_of(&identity.player_id) {
             Some(i) => {
-                // Rejoin: last connection wins; the seat is preserved.
+                // Rejoin: last connection wins, but a spoofable (guest)
+                // identity must prove seat ownership with the reconnect
+                // token issued at first join (ADR-0008). JWT identities
+                // are cryptographically bound and need no token.
+                let proven = !self.seats[i].identity.spoofable
+                    || reconnect
+                        .as_deref()
+                        .is_some_and(|t| token_eq(t, &self.seats[i].reconnect));
+                if !proven {
+                    return Err("seat is protected: rejoin with its reconnect token".into());
+                }
                 self.seats[i].tx = Some(tx.clone());
                 info!(room = %self.code, player = %identity.player_id, seat = i, "rejoined");
                 i
@@ -219,6 +257,7 @@ impl Room {
                 self.seats.push(Seat {
                     identity,
                     tx: Some(tx.clone()),
+                    reconnect: new_reconnect_token(),
                 });
                 self.seats.len() - 1
             }
@@ -236,6 +275,7 @@ impl Room {
             players: self.seat_infos(),
             content: Box::new((*self.content).clone()),
             view,
+            reconnect: Some(self.seats[seat_index].reconnect.clone()),
         };
         if tx.send(joined).is_err() {
             self.seats[seat_index].tx = None;
@@ -445,6 +485,64 @@ mod tests {
     use parcello_engine::Event;
     use std::path::Path;
 
+    /// A guest seat can only be re-taken with the reconnect token issued at
+    /// first join (ADR-0008): knowing the name is no longer enough.
+    #[tokio::test]
+    async fn guest_seat_rejoin_requires_the_reconnect_token() {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
+        let code = create_room(&rooms, content, history, None)
+            .await
+            .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let alice = || Identity {
+            player_id: "guest:alice".to_string(),
+            name: "alice".to_string(),
+            spoofable: true,
+        };
+        let join = |reconnect: Option<String>| {
+            let room = room.clone();
+            let identity = alice();
+            async move {
+                let (tx, mut rx) = mpsc::unbounded_channel();
+                let (reply, joined) = oneshot::channel();
+                room.send(RoomCmd::Join {
+                    identity,
+                    reconnect,
+                    tx,
+                    reply,
+                })
+                .await
+                .expect("room task alive");
+                let result = joined.await.expect("reply sent");
+                let token = match rx.try_recv() {
+                    Ok(ServerMessage::Joined { reconnect, .. }) => reconnect,
+                    _ => None,
+                };
+                (result, token)
+            }
+        };
+
+        let (result, token) = join(None).await;
+        result.expect("first join accepted");
+        let token = token.expect("token issued on join");
+
+        let (hijack, _) = join(None).await;
+        assert!(hijack.is_err(), "name alone must not re-take the seat");
+        let (bad, _) = join(Some("wrong-token".into())).await;
+        assert!(bad.is_err(), "wrong token must not re-take the seat");
+        let (rejoin, _) = join(Some(token)).await;
+        rejoin.expect("correct token re-takes the seat");
+    }
+
     /// A third party must receive neither the trade event nor the offer in
     /// its view (ADR-0007): per-seat routing through the real room task.
     #[tokio::test]
@@ -471,7 +569,9 @@ mod tests {
                 identity: Identity {
                     player_id: format!("guest:{name}"),
                     name: name.to_string(),
+                    spoofable: true,
                 },
+                reconnect: None,
                 tx,
                 reply,
             })
@@ -560,7 +660,9 @@ mod tests {
                 identity: Identity {
                     player_id: format!("guest:{name}"),
                     name: name.to_string(),
+                    spoofable: true,
                 },
+                reconnect: None,
                 tx,
                 reply,
             })
