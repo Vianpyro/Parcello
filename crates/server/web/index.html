@@ -94,6 +94,7 @@
 <div id="login">
   <h1>Parcello</h1>
   <input id="name" placeholder="Display name" maxlength="24" autocomplete="off">
+  <input id="token" placeholder="Identity token (optional)" autocomplete="off">
   <input id="code" placeholder="Room code (leave empty to create)" maxlength="5"
          style="text-transform:uppercase" autocomplete="off">
   <input id="mods" placeholder="Mods, comma-separated (optional, create only)" autocomplete="off">
@@ -168,17 +169,19 @@ function log(text) {
 $("#go").onclick = () => {
   const name = $("#name").value.trim();
   const code = $("#code").value.trim().toUpperCase();
-  if (!name) { $("#loginmsg").textContent = "Name required."; return; }
-  localStorage.setItem("parcello_name", name);
-  connect(name, code);
+  const token = $("#token").value.trim();
+  if (!name && !token) { $("#loginmsg").textContent = "Name or identity token required."; return; }
+  if (name) localStorage.setItem("parcello_name", name);
+  connect(name, code, token);
 };
 $("#name").value = localStorage.getItem("parcello_name") || "";
 $("#code").value = (location.hash || "").replace("#", "");
 
-function connect(name, code) {
+function connect(name, code, token) {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  const auth = { guest_name: name };
+  // Identity token (ADR-0009) wins over guest name server-side.
+  const auth = token ? { token } : { guest_name: name };
   // Seat ownership proof for guest rejoin (ADR-0008).
   const tok = code && localStorage.getItem(`parcello_tok_${code}`);
   if (tok) auth.reconnect = tok;

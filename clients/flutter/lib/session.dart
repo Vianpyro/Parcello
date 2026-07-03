@@ -58,9 +58,11 @@ class GameSession extends ChangeNotifier {
   String tileName(int i) => content?.board.elementAtOrNull(i)?.name ?? 'tile $i';
 
   /// Opens the socket and immediately creates or joins a room. `mods` picks
-  /// the created room's mod set (ADR-0006); ignored when joining.
+  /// the created room's mod set (ADR-0006); ignored when joining. A
+  /// non-empty `token` (identity provider JWT, ADR-0009) replaces the
+  /// guest name.
   void connect(String url, String name, String roomCode,
-      {List<String> mods = const []}) {
+      {List<String> mods = const [], String token = ''}) {
     disconnect();
     loginMessage = 'Connecting...';
     notifyListeners();
@@ -72,7 +74,7 @@ class GameSession extends ChangeNotifier {
       return;
     }
     final auth = {
-      'guest_name': name,
+      if (token.isNotEmpty) 'token': token else 'guest_name': name,
       if (_reconnectTokens[roomCode] != null)
         'reconnect': _reconnectTokens[roomCode],
     };

@@ -4,6 +4,7 @@
 //! -> bind -> serve `/ws`. Rooms are created on demand by client connections.
 
 mod auth;
+mod eddsa;
 mod history;
 mod room;
 mod ws;
@@ -41,6 +42,15 @@ struct Args {
     /// Accept unauthenticated guests (LAN/testing; identities are spoofable).
     #[arg(long)]
     insecure_guest: bool,
+
+    /// JWKS URL of an EdDSA identity provider (ADR-0009); repeatable for
+    /// redundant issuer instances. Enables `id:` token logins.
+    #[arg(long = "identity-url")]
+    identity_urls: Vec<String>,
+
+    /// When set, identity tokens must carry this audience (`aud` claim).
+    #[arg(long)]
+    identity_audience: Option<String>,
 
     /// SQLite file for game history (seeds + accepted-command replay logs).
     /// Omit for in-memory history.
@@ -85,13 +95,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let jwt_secret = std::env::var("PARCELLO_JWT_SECRET").ok();
-    if jwt_secret.is_none() && !args.insecure_guest {
-        warn!("no PARCELLO_JWT_SECRET and no --insecure-guest: nobody can authenticate");
+    let eddsa = if args.identity_urls.is_empty() {
+        None
+    } else {
+        info!(urls = ?args.identity_urls, "EdDSA identity provider enabled");
+        Some(eddsa::EdDsaVerifier::spawn(
+            args.identity_urls.clone(),
+            args.identity_audience.clone(),
+        ))
+    };
+    if jwt_secret.is_some() {
+        warn!("PARCELLO_JWT_SECRET (HS256) is deprecated; move to --identity-url (ADR-0009)");
+    }
+    if eddsa.is_none() && jwt_secret.is_none() && !args.insecure_guest {
+        warn!(
+            "no --identity-url, no PARCELLO_JWT_SECRET, no --insecure-guest: nobody can authenticate"
+        );
     }
     if args.insecure_guest {
         warn!("--insecure-guest: guest identities are spoofable; LAN/testing only");
     }
-    let verifier = Arc::new(CompositeVerifier::new(jwt_secret, args.insecure_guest));
+    let verifier = Arc::new(CompositeVerifier::new(
+        eddsa,
+        jwt_secret,
+        args.insecure_guest,
+    ));
 
     let history: Arc<dyn GameHistory> = match &args.history {
         Some(path) => {

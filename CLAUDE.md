@@ -52,7 +52,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 53 tests, all must pass
+cargo test  --workspace --locked          # 57 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -100,10 +100,11 @@ architecture doc section 5; dependencies point downward only):
   dissolve after `IDLE_TIMEOUT` = 30 min; optional per-turn AFK timer
   `--turn-timeout <secs>` auto-plays the canonical action
   Roll/Decline/Pass/EndTurn for the acting seat, 0 = off default; any
-  accepted command resets the clock), `auth.rs`
-  (`IdentityVerifier` trait: insecure guests and/or HS256 JWT via
-  hmac/sha2 - no `ring`; the real Identity Service later slots in behind
-  the same trait, ADR-0003), `history.rs` (`GameHistory` port; in-memory
+  accepted command resets the clock), `auth.rs` + `eddsa.rs`
+  (`IdentityVerifier` trait: insecure guests, EdDSA identity tokens
+  verified against JWKS from any OIDC provider - Rauthy is the reference,
+  ADR-0009 - and the deprecated HS256 stopgap, ADR-0003; tokens dispatch
+  on the header `alg`), `history.rs` (`GameHistory` port; in-memory
   adapter + `SqliteHistory`: dedicated writer thread owns the rusqlite
   connection, trait methods enqueue and never block, `Drop` drains -
   ADR-0005), `web/index.html` (embedded via `include_str!` - the server
@@ -189,10 +190,10 @@ opt-in (`--turn-timeout`, off by default).
 1. Flutter client polish (`clients/flutter` exists: full protocol, board,
    trades, tests; still needs real multiplayer playtesting and
    Android/mobile targets).
-2. Global Identity Service: design fixed by ADR-0009 (self-hosted EdDSA
-   issuer + JWKS, accounts always optional). Game-server side: implement
-   the `EdDsaVerifier` (JWKS fetch/cache + Ed25519); the issuer lives in
-   its own repo. Deprecates the HS256 stopgap (ADR-0003).
+2. Identity: verifier side DONE (`eddsa.rs`, ADR-0009). Remaining: deploy
+   the OIDC issuer (Rauthy recommended), then a login flow in the clients
+   (today the token is pasted manually); remove HS256 one release after
+   EdDSA sees real use.
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Unblocked since the MSRV moved
    to 1.96; pick a current Wasmtime.

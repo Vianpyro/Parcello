@@ -76,8 +76,10 @@ Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 `--insecure-guest`, `--history <file.db>` (SQLite game logs; omit for
 in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
 canonical action - roll/decline/pass/end turn - for a player who stalls
-that long; 0 = disabled, the default). Set `PARCELLO_JWT_SECRET` to accept
-HS256 tokens with `{sub, name, exp}` claims (ADR-0003).
+that long; 0 = disabled, the default), `--identity-url <jwks-url>`
+(repeatable; accept EdDSA identity tokens from an OIDC provider such as
+Rauthy, ADR-0009) with optional `--identity-audience <client-id>`.
+`PARCELLO_JWT_SECRET` (HS256, ADR-0003) still works but is deprecated.
 
 Docker: `docker build -t parcello . && docker run -p 7878:7878 parcello`
 (mount a volume and add `--history data/parcello.db` for persistence), or

@@ -22,8 +22,12 @@ struct Args {
     url: String,
 
     /// Guest display name (server must run with --insecure-guest).
+    #[arg(long, required_unless_present = "token")]
+    name: Option<String>,
+
+    /// Identity token (EdDSA JWT from the identity provider, ADR-0009).
     #[arg(long)]
-    name: String,
+    token: Option<String>,
 
     /// Create a new room instead of joining one.
     #[arg(long, conflicts_with = "join")]
@@ -55,8 +59,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut sink, mut stream) = socket.split();
 
     let auth = AuthPayload {
-        token: None,
-        guest_name: Some(args.name.clone()),
+        token: args.token.clone(),
+        // The server prefers the token when both are present.
+        guest_name: args.name.clone(),
         reconnect: args.reconnect.clone(),
     };
     let first = if args.create {
@@ -73,7 +78,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sink.send(Message::Text(serde_json::to_string(&first)?.into()))
         .await?;
 
-    println!("connected to {} as {}", args.url, args.name);
+    println!(
+        "connected to {} as {}",
+        args.url,
+        args.name.as_deref().unwrap_or("(identity token)")
+    );
     println!(
         "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
     );

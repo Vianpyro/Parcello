@@ -28,28 +28,51 @@ pub trait IdentityVerifier: Send + Sync {
 }
 
 /// Tries a JWT first (if configured), then guest fallback (if enabled).
+/// Tokens are dispatched by their header `alg`: EdDSA is the supported
+/// path (ADR-0009), HS256 the deprecated stopgap (ADR-0003).
 pub struct CompositeVerifier {
+    eddsa: Option<crate::eddsa::EdDsaVerifier>,
     hs256: Option<Hs256Verifier>,
     allow_guests: bool,
 }
 
 impl CompositeVerifier {
-    pub fn new(jwt_secret: Option<String>, allow_guests: bool) -> Self {
+    pub fn new(
+        eddsa: Option<crate::eddsa::EdDsaVerifier>,
+        jwt_secret: Option<String>,
+        allow_guests: bool,
+    ) -> Self {
         Self {
+            eddsa,
             hs256: jwt_secret.map(Hs256Verifier::new),
             allow_guests,
         }
     }
 }
 
+#[derive(Deserialize)]
+struct AlgOnly {
+    alg: String,
+}
+
 impl IdentityVerifier for CompositeVerifier {
     fn verify(&self, auth: &AuthPayload) -> Result<Identity, String> {
         if let Some(token) = &auth.token {
-            let verifier = self
-                .hs256
-                .as_ref()
-                .ok_or("this server does not accept tokens (no JWT secret configured)")?;
-            return verifier.verify(token);
+            let header = token.split('.').next().unwrap_or_default();
+            let alg: AlgOnly = decode_json(header)?;
+            return match alg.alg.as_str() {
+                "EdDSA" => self
+                    .eddsa
+                    .as_ref()
+                    .ok_or("this server has no identity provider configured (--identity-url)")?
+                    .verify(token),
+                "HS256" => self
+                    .hs256
+                    .as_ref()
+                    .ok_or("this server does not accept HS256 tokens (no JWT secret)")?
+                    .verify(token),
+                other => Err(format!("unsupported token algorithm: {other}")),
+            };
         }
         if let Some(name) = &auth.guest_name {
             if !self.allow_guests {
@@ -147,7 +170,7 @@ impl Hs256Verifier {
     }
 }
 
-fn decode_json<T: serde::de::DeserializeOwned>(part: &str) -> Result<T, String> {
+pub(crate) fn decode_json<T: serde::de::DeserializeOwned>(part: &str) -> Result<T, String> {
     let bytes = URL_SAFE_NO_PAD
         .decode(part)
         .map_err(|_| "malformed token encoding")?;
@@ -184,7 +207,7 @@ mod tests {
                 far_future()
             ),
         );
-        let v = CompositeVerifier::new(Some("s3cret".into()), false);
+        let v = CompositeVerifier::new(None, Some("s3cret".into()), false);
         let id = v
             .verify(&AuthPayload {
                 token: Some(token),
@@ -202,7 +225,7 @@ mod tests {
             "s3cret",
             &format!(r#"{{"sub":"a","name":"A","exp":{}}}"#, far_future()),
         );
-        let v = CompositeVerifier::new(Some("s3cret".into()), false);
+        let v = CompositeVerifier::new(None, Some("s3cret".into()), false);
 
         let wrong_key = sign(
             "other",
@@ -239,7 +262,7 @@ mod tests {
 
     #[test]
     fn guest_mode_gates_and_sanitizes() {
-        let open = CompositeVerifier::new(None, true);
+        let open = CompositeVerifier::new(None, None, true);
         let id = open
             .verify(&AuthPayload {
                 token: None,
@@ -258,7 +281,7 @@ mod tests {
             .is_err()
         );
 
-        let closed = CompositeVerifier::new(None, false);
+        let closed = CompositeVerifier::new(None, None, false);
         assert!(
             closed
                 .verify(&AuthPayload {

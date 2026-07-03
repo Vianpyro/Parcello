@@ -1,6 +1,7 @@
 # ADR-0009: Identity Service design (self-hosted, redundant, optional)
 
-Status: accepted (design; implementation pending)
+Status: accepted (verifier implemented server-side; issuer = existing
+OIDC provider, see amendment below)
 
 ## Context
 The interim auth (ADR-0003) leaves two gaps: guest names are impersonable
@@ -56,16 +57,30 @@ only public keys:
   passkey public key - prefer passkeys, nothing to leak), sub, display
   name, stats. No analytics, no third parties.
 
+## Amendment: use an existing OIDC provider, not a custom issuer
+
+Writing a credential-handling service from scratch is the wrong risk
+trade-off when security is priority #1. Any OIDC provider that signs
+with Ed25519 satisfies this ADR's wire contract (EdDSA JWT + JWKS).
+**Rauthy** is the reference deployment: Rust, single container,
+passkey-first, EdDSA by default, SQLite or Postgres, built for exactly
+this kind of self-hosted HA setup. Keycloak or Zitadel also work
+(both heavier; enable an Ed25519 signing key).
+
+Parcello therefore only implements the verifier side:
+`crates/server/src/eddsa.rs` - a JWKS refresh thread (multiple
+`--identity-url`s, 15-min cadence, poked on unknown `kid`, a failed
+fetch never drops known-good keys) feeding a cache that `verify` reads
+without blocking. Claims: `sub`/`exp` required, display name from
+`name`/`preferred_username`/`sub`, optional `aud` enforcement via
+`--identity-audience`. Token identities are `id:<sub>`, non-spoofable
+(no reconnect token needed to rejoin, ADR-0008).
+
 ## Consequences
-- Game-server work (next implementation step): an `EdDsaVerifier` behind
-  `IdentityVerifier` - JWKS fetch + cache + Ed25519 verify. Needs one
-  signature crate (`ed25519-dalek`) and a small HTTPS fetch; pick
-  rustls-based deps, run `cargo audit` after.
-- The identity service itself lives in its own repository; this ADR fixes
-  its wire contract (EdDSA JWT + JWKS) so both sides can proceed
-  independently.
-- HS256 (ADR-0003) becomes deprecated the day the EdDSA path lands, and
-  is removed one release later.
+- Game servers pass `--identity-url <jwks-url>` (repeatable, one per
+  issuer instance) and optionally `--identity-audience <client-id>`.
+- HS256 (ADR-0003) is deprecated (boot warning); removal one release
+  after the EdDSA path has seen real use.
 - Stats submission (server -> identity service) is out of scope here; it
   will need its own ADR - notably how an untrusted community server is
   prevented from forging stats.
