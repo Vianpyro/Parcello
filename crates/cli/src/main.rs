@@ -160,6 +160,7 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
     let cmd = match (parts.next()?, parts.next()) {
         ("start", None) => return Some(ClientMessage::Start),
         ("again", None) => return Some(ClientMessage::PlayAgain),
+        ("leave", None) => return Some(ClientMessage::Leave),
         ("roll", None) => CommandKind::Roll,
         ("buy", None) => CommandKind::Buy,
         ("no", None) => CommandKind::Decline,

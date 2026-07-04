@@ -27,9 +27,12 @@ Layout:
 - `lib/oidc.dart` - OIDC Authorization Code + PKCE login against the
   identity provider (ADR-0009): system browser + loopback redirect; the
   id_token stays in memory only.
-- `lib/main.dart` - login screen (guest name or account sign-in), game
-  screen, per-phase action buttons, tile owner menu, trade composer, and
-  the dice-result overlay in the middle of the board.
+- `lib/main.dart` - three screens: **Connect** (server URL + identity, the
+  socket stays open), **Menu** (create a private game, join by code, public
+  games "coming soon"), and the **Game** screen (per-phase action buttons,
+  tile owner menu, trade composer, dice overlay, play-again/continue).
+  Buttons are full-width and >=46px tall so a mobile port needs little
+  rework (`wideButton` helper).
 
 `lib/sfx.dart` plays the sound effects in `assets/sfx/` (via `audioplayers`,
 best-effort/defensive): `dice-roll` on a roll, a `move-pawn-NN` per tile as

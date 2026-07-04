@@ -54,7 +54,9 @@ cargo run -p parcello-server -- --insecure-guest
 ```
 
 **Play in a browser:** open `http://localhost:7878/`, enter a name, leave
-the code empty to create a room (or paste a code to join), share the code.
+the code empty to create a room (or paste a code to join), then click the
+room code to copy it and share. Room codes are pronounceable (CVCVC, e.g.
+`GOLUR`) so they are easy to read out over voice chat.
 The client is a single embedded HTML file speaking the same protocol as the
 CLI; the server stays the only authority. It has not been exercised in a
 real browser inside the development sandbox (protocol coverage is verified
@@ -188,7 +190,9 @@ is unencumbered.
 Client -> server: `create {auth, mods?}` (optional ordered mod list for
 the room, ADR-0006; omit for the server default), `join {code, auth}`,
 `start`, `play_again` (after a game ends, restart it in the same room for
-whoever is still connected; first sender wins), `cmd {cmd}`,
+whoever is still connected; first sender wins), `leave` (leave the room but
+keep the socket open, so the same connection can create/join another room),
+`cmd {cmd}`,
 `feedback {rating, comment?}` (post-game survey: 1-5 plus an optional
 comment, stored in the server history; one per player per game, fully
 optional and never blocking), `ping`. Server -> client: `room_created`, `joined`

@@ -57,6 +57,12 @@ class GameSession extends ChangeNotifier {
   String loginMessage = '';
   bool joined = false;
 
+  /// True once the socket is up (the menu is shown). Identity is remembered
+  /// here so create/join over the same connection need no re-entry.
+  bool connected = false;
+  String _authName = '';
+  String _authToken = '';
+
   /// Post-game survey shown once per game; answering or dismissing hides it.
   bool feedbackDone = false;
 
@@ -97,35 +103,25 @@ class GameSession extends ChangeNotifier {
 
   String tileName(int i) => content?.board.elementAtOrNull(i)?.name ?? 'tile $i';
 
-  /// Opens the socket and immediately creates or joins a room. `mods` picks
-  /// the created room's mod set (ADR-0006); ignored when joining. A
-  /// non-empty `token` (identity provider JWT, ADR-0009) replaces the
-  /// guest name.
-  void connect(String url, String name, String roomCode,
-      {List<String> mods = const [], String token = ''}) {
+  /// Opens the socket to `url` and remembers the identity (guest `name`, or
+  /// an OIDC `token`, ADR-0009). Does NOT enter a room - create/join happen
+  /// later from the menu over this same connection.
+  void connect(String url, String name, {String token = ''}) {
     disconnect();
+    _authName = name;
+    _authToken = token;
     loginMessage = 'Connecting...';
     notifyListeners();
+    final WebSocketChannel ws;
     try {
-      _ws = WebSocketChannel.connect(Uri.parse(url));
+      ws = WebSocketChannel.connect(Uri.parse(url));
     } catch (e) {
       loginMessage = 'Bad server URL: $e';
       notifyListeners();
       return;
     }
-    final auth = {
-      if (token.isNotEmpty) 'token': token else 'guest_name': name,
-      if (_reconnectTokens[roomCode] != null)
-        'reconnect': _reconnectTokens[roomCode],
-    };
-    _ws!.sink.add(jsonEncode(roomCode.isEmpty
-        ? {
-            'type': 'create',
-            'auth': auth,
-            if (mods.isNotEmpty) 'mods': mods,
-          }
-        : {'type': 'join', 'code': roomCode, 'auth': auth}));
-    _sub = _ws!.stream.listen(
+    _ws = ws;
+    _sub = ws.stream.listen(
       (data) => _handle(jsonDecode(data as String) as Map<String, dynamic>),
       onDone: _onClosed,
       onError: (Object e) {
@@ -133,6 +129,38 @@ class GameSession extends ChangeNotifier {
         _onClosed();
       },
     );
+    // Only reveal the menu once the socket is actually up.
+    ws.ready.then((_) {
+      connected = true;
+      loginMessage = '';
+      notifyListeners();
+    }).catchError((Object e) {
+      loginMessage = 'Cannot reach server: $e';
+      _onClosed();
+    });
+  }
+
+  Map<String, dynamic> _auth(String code) => {
+        if (_authToken.isNotEmpty)
+          'token': _authToken
+        else
+          'guest_name': _authName,
+        if (_reconnectTokens[code] != null) 'reconnect': _reconnectTokens[code],
+      };
+
+  /// Host a new private room. `mods` picks its mod set (ADR-0006).
+  void createGame({List<String> mods = const []}) {
+    _ws?.sink.add(jsonEncode({
+      'type': 'create',
+      'auth': _auth(''),
+      if (mods.isNotEmpty) 'mods': mods,
+    }));
+  }
+
+  /// Join a private room by its 5-letter code.
+  void joinGame(String roomCode) {
+    final c = roomCode.trim().toUpperCase();
+    _ws?.sink.add(jsonEncode({'type': 'join', 'code': c, 'auth': _auth(c)}));
   }
 
   void disconnect() {
@@ -148,9 +176,9 @@ class GameSession extends ChangeNotifier {
     _ws?.sink.add(jsonEncode({'type': 'play_again'}));
   }
 
-  /// Leave the room and return to the start screen.
-  void leave() {
-    disconnect();
+  /// Leave the room but stay connected, returning to the menu.
+  void leaveRoom() {
+    _ws?.sink.add(jsonEncode({'type': 'leave'}));
     joined = false;
     view = null;
     code = null;
@@ -159,11 +187,26 @@ class GameSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onClosed() {
-    _ws = null;
+  /// Close the connection entirely, returning to the connect screen.
+  void disconnectFromServer() {
+    disconnect();
+    connected = false;
     joined = false;
-    if (loginMessage == 'Connecting...' || loginMessage.isEmpty) {
-      loginMessage = 'Disconnected. Enter the room code to rejoin.';
+    view = null;
+    code = null;
+    loginMessage = '';
+    notifyListeners();
+  }
+
+  void _onClosed() {
+    _sub?.cancel();
+    _sub = null;
+    _ws = null;
+    connected = false;
+    joined = false;
+    view = null;
+    if (loginMessage.isEmpty || loginMessage == 'Connecting...') {
+      loginMessage = 'Disconnected from server.';
     }
     notifyListeners();
   }

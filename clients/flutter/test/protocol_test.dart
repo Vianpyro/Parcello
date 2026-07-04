@@ -146,13 +146,13 @@ void main() {
     );
   });
 
-  testWidgets('login screen renders and requires a name', (tester) async {
+  testWidgets('connect screen renders and requires a name', (tester) async {
     await tester.pumpWidget(ParcelloApp(session: GameSession()));
-    expect(find.text('Play'), findsOneWidget);
+    expect(find.text('Connect'), findsOneWidget);
     expect(find.text('Display name'), findsOneWidget);
     // Tapping without a name must not navigate or crash.
-    await tester.tap(find.text('Play'));
+    await tester.tap(find.text('Connect'));
     await tester.pump();
-    expect(find.text('Play'), findsOneWidget);
+    expect(find.text('Connect'), findsOneWidget);
   });
 }

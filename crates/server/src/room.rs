@@ -118,10 +118,23 @@ fn event_visible_to(event: &Event, seat: usize) -> bool {
     }
 }
 
+/// A pronounceable 5-char code (consonant-vowel-consonant-vowel-consonant),
+/// easy to read out over voice chat. ~171k combinations - far more than the
+/// rooms a self-hosted server holds concurrently, and `create_room` retries
+/// on the rare collision.
 fn random_code() -> String {
-    (0..5)
-        .map(|_| rand::random_range(b'A'..=b'Z') as char)
-        .collect()
+    const CONSONANTS: &[u8] = b"BCDFGHJKLMNPRSTVWXZ";
+    const VOWELS: &[u8] = b"AEIOU";
+    let pick = |set: &[u8]| set[rand::random_range(0..set.len())] as char;
+    [
+        pick(CONSONANTS),
+        pick(VOWELS),
+        pick(CONSONANTS),
+        pick(VOWELS),
+        pick(CONSONANTS),
+    ]
+    .iter()
+    .collect()
 }
 
 /// 32 alphanumeric chars from the thread CSPRNG (~190 bits): unguessable
@@ -645,6 +658,26 @@ mod tests {
     use crate::history::MemoryHistory;
     use parcello_engine::Event;
     use std::path::Path;
+
+    #[test]
+    fn room_codes_are_pronounceable() {
+        const CONSONANTS: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ";
+        const VOWELS: &[u8] = b"AEIOUY";
+        for _ in 0..300 {
+            let code = random_code();
+            let b = code.as_bytes();
+            assert_eq!(b.len(), 5, "{code}");
+            for i in [0, 2, 4] {
+                assert!(
+                    CONSONANTS.contains(&b[i]),
+                    "pos {i} not a consonant: {code}"
+                );
+            }
+            for i in [1, 3] {
+                assert!(VOWELS.contains(&b[i]), "pos {i} not a vowel: {code}");
+            }
+        }
+    }
 
     /// Post-game survey rules: rejected while the game runs, accepted once
     /// finished, stored in history, one per seat.

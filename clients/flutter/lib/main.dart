@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'board.dart';
 import 'oidc.dart';
@@ -31,28 +32,53 @@ class ParcelloApp extends StatelessWidget {
       ),
       home: ListenableBuilder(
         listenable: session,
-        builder: (context, _) =>
-            session.joined ? GameScreen(s: session) : LoginScreen(s: session),
+        builder: (context, _) {
+          if (session.joined) return GameScreen(s: session);
+          if (session.connected) return MenuScreen(s: session);
+          return ConnectScreen(s: session);
+        },
       ),
     );
   }
 }
 
-// -- login ---------------------------------------------------------------------
-
-class LoginScreen extends StatefulWidget {
-  final GameSession s;
-  const LoginScreen({super.key, required this.s});
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
+/// Copies a room code and confirms with a brief snackbar.
+void copyCode(BuildContext context, String code) {
+  Clipboard.setData(ClipboardData(text: code));
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text('Room code $code copied'),
+    duration: const Duration(seconds: 1),
+  ));
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+/// A tall, full-width button so every screen ports to touch with minimal
+/// change. Primary = filled, secondary = outlined.
+Widget wideButton(String label, VoidCallback? onPressed, {bool primary = true}) {
+  final style = ButtonStyle(
+    minimumSize: WidgetStateProperty.all(const Size.fromHeight(52)),
+    textStyle: WidgetStateProperty.all(
+        const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+  );
+  return primary
+      ? FilledButton(onPressed: onPressed, style: style, child: Text(label))
+      : OutlinedButton(onPressed: onPressed, style: style, child: Text(label));
+}
+
+// -- connect -------------------------------------------------------------------
+
+/// Step 1: connect to a server with an identity. The connection is kept open
+/// so the menu (step 2) can create/join without reconnecting.
+class ConnectScreen extends StatefulWidget {
+  final GameSession s;
+  const ConnectScreen({super.key, required this.s});
+
+  @override
+  State<ConnectScreen> createState() => _ConnectScreenState();
+}
+
+class _ConnectScreenState extends State<ConnectScreen> {
   final _url = TextEditingController(text: 'ws://127.0.0.1:7878/ws');
   final _name = TextEditingController();
-  final _code = TextEditingController();
-  final _mods = TextEditingController();
   final _token = TextEditingController();
   String? _signedInAs;
 
@@ -101,78 +127,172 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final s = widget.s;
-    // Rejoin hint: prefill the last room code after a disconnect.
-    if (_code.text.isEmpty && s.code != null) _code.text = s.code!;
     return Scaffold(
       body: Center(
-        child: Card(
-          child: Container(
-            width: 360,
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Parcello',
-                    style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFFD8B45A))),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _url,
-                  decoration: const InputDecoration(labelText: 'Server URL'),
-                ),
-                TextField(
-                  controller: _name,
-                  maxLength: 24,
-                  decoration: const InputDecoration(labelText: 'Display name'),
-                ),
-                TextField(
-                  controller: _code,
-                  maxLength: 5,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                      labelText: 'Room code (leave empty to create)'),
-                ),
-                TextField(
-                  controller: _mods,
-                  decoration: const InputDecoration(
-                      labelText: 'Mods, comma-separated (create only)'),
-                ),
-                TextField(
-                  controller: _token,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Identity token (optional)'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: _signIn,
-                  child: Text(_signedInAs == null
-                      ? 'Sign in with account'
-                      : 'Signed in as $_signedInAs'),
-                ),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () {
-                    if (_name.text.trim().isEmpty && _token.text.trim().isEmpty) {
+        child: SingleChildScrollView(
+          child: Card(
+            child: Container(
+              width: 380,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Parcello',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFD8B45A))),
+                  const SizedBox(height: 2),
+                  const Text('Connect to a server',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Color(0xFF9AA3B2))),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _url,
+                    decoration: const InputDecoration(labelText: 'Server URL'),
+                  ),
+                  TextField(
+                    controller: _name,
+                    maxLength: 24,
+                    decoration:
+                        const InputDecoration(labelText: 'Display name'),
+                  ),
+                  const SizedBox(height: 8),
+                  wideButton(
+                      _signedInAs == null
+                          ? 'Sign in with account (optional)'
+                          : 'Signed in as $_signedInAs',
+                      _signIn,
+                      primary: false),
+                  const SizedBox(height: 10),
+                  wideButton('Connect', () {
+                    if (_name.text.trim().isEmpty &&
+                        _token.text.trim().isEmpty) {
                       return;
                     }
-                    final mods = _mods.text
-                        .split(',')
-                        .map((m) => m.trim())
-                        .where((m) => m.isNotEmpty)
-                        .toList();
                     s.connect(_url.text.trim(), _name.text.trim(),
-                        _code.text.trim().toUpperCase(),
-                        mods: mods, token: _token.text.trim());
-                  },
-                  child: const Text('Play'),
+                        token: _token.text.trim());
+                  }),
+                  const SizedBox(height: 8),
+                  Text(s.loginMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFF9AA3B2))),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// -- menu ----------------------------------------------------------------------
+
+/// Step 2 (connected): create a private game, join one by code, or (soon)
+/// browse public games.
+class MenuScreen extends StatefulWidget {
+  final GameSession s;
+  const MenuScreen({super.key, required this.s});
+
+  @override
+  State<MenuScreen> createState() => _MenuScreenState();
+}
+
+class _MenuScreenState extends State<MenuScreen> {
+  final _code = TextEditingController();
+  final _mods = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.s;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Parcello'),
+        backgroundColor: const Color(0xFF262B35),
+        actions: [
+          TextButton.icon(
+            onPressed: s.disconnectFromServer,
+            icon: const Icon(Icons.logout, size: 18),
+            label: const Text('Disconnect'),
+          ),
+        ],
+      ),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: 420,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('PRIVATE GAME',
+                            style: TextStyle(
+                                fontSize: 12,
+                                letterSpacing: 1,
+                                color: Color(0xFF9AA3B2))),
+                        const SizedBox(height: 10),
+                        wideButton('Create a game',
+                            () => s.createGame(mods: _parseMods())),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: TextField(
+                            controller: _mods,
+                            decoration: const InputDecoration(
+                                isDense: true,
+                                labelText: 'Mods (optional, comma-separated)'),
+                          ),
+                        ),
+                        const Divider(height: 24),
+                        TextField(
+                          controller: _code,
+                          maxLength: 5,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration:
+                              const InputDecoration(labelText: 'Room code'),
+                        ),
+                        wideButton('Join by code', () {
+                          if (_code.text.trim().isEmpty) return;
+                          s.joinGame(_code.text);
+                        }, primary: false),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('PUBLIC GAMES',
+                            style: TextStyle(
+                                fontSize: 12,
+                                letterSpacing: 1,
+                                color: Color(0xFF9AA3B2))),
+                        const SizedBox(height: 10),
+                        wideButton('Browse public games', null),
+                        const SizedBox(height: 6),
+                        const Text('Coming soon.',
+                            style: TextStyle(
+                                fontSize: 12, color: Color(0xFF9AA3B2))),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Text(s.loginMessage,
-                    style: const TextStyle(color: Color(0xFF9AA3B2))),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xFFC0564F))),
               ],
             ),
           ),
@@ -180,6 +300,12 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+
+  List<String> _parseMods() => _mods.text
+      .split(',')
+      .map((m) => m.trim())
+      .where((m) => m.isNotEmpty)
+      .toList();
 }
 
 // -- game ----------------------------------------------------------------------
@@ -540,10 +666,18 @@ class _ActionsState extends State<_Actions> {
     if (v == null || v.finished) return const SizedBox.shrink();
     final t = v.turn;
 
+    final touch = ButtonStyle(
+      minimumSize: WidgetStateProperty.all(const Size(0, 46)),
+      padding: WidgetStateProperty.all(
+          const EdgeInsets.symmetric(horizontal: 18)),
+      textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 15)),
+    );
     Widget btn(String label, Map<String, dynamic> cmd, {bool primary = true}) {
       return primary
-          ? FilledButton(onPressed: () => s.sendCmd(cmd), child: Text(label))
-          : OutlinedButton(onPressed: () => s.sendCmd(cmd), child: Text(label));
+          ? FilledButton(
+              onPressed: () => s.sendCmd(cmd), style: touch, child: Text(label))
+          : OutlinedButton(
+              onPressed: () => s.sendCmd(cmd), style: touch, child: Text(label));
     }
 
     final children = <Widget>[];
@@ -649,19 +783,11 @@ class _SidePanel extends StatelessWidget {
                           color: Color(0xFFD8B45A))),
                   const SizedBox(height: 8),
                   Row(children: [
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: s.sendPlayAgain,
-                        child: const Text('Play again'),
-                      ),
-                    ),
+                    Expanded(child: wideButton('Play again', s.sendPlayAgain)),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: OutlinedButton(
-                        onPressed: s.leave,
-                        child: const Text('Continue'),
-                      ),
-                    ),
+                        child: wideButton('Continue', s.leaveRoom,
+                            primary: false)),
                   ]),
                   const Text('"Play again" restarts for everyone still here.',
                       style: TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
@@ -673,18 +799,36 @@ class _SidePanel extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('ROOM ${s.code}',
-                style: const TextStyle(
-                    fontSize: 12, color: Color(0xFF9AA3B2), letterSpacing: 1)),
+            Row(children: [
+              Expanded(
+                child: Text('ROOM ${s.code ?? ""}',
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFD8B45A),
+                        letterSpacing: 2)),
+              ),
+              if (s.code != null)
+                IconButton(
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Copy room code',
+                  icon: const Icon(Icons.copy, color: Color(0xFF9AA3B2)),
+                  onPressed: () => copyCode(context, s.code!),
+                ),
+            ]),
             const SizedBox(height: 6),
             _players(),
             if (s.view == null) ...[
               const SizedBox(height: 8),
-              FilledButton(
-                onPressed:
-                    s.seat == 0 && s.seats.length >= 2 ? s.sendStart : null,
-                child: const Text('Start game'),
-              ),
+              wideButton('Start game',
+                  s.seat == 0 && s.seats.length >= 2 ? s.sendStart : null),
+              if (s.code != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: wideButton('Copy code to share', () => copyCode(context, s.code!),
+                      primary: false),
+                ),
             ],
           ]),
         ),

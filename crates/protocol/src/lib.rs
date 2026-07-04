@@ -46,6 +46,9 @@ pub enum ClientMessage {
     /// After a game ends, replay in the same room: the first sender restarts
     /// the game for everyone still connected; players who left are dropped.
     PlayAgain,
+    /// Leave the current room but keep the connection open, returning to the
+    /// menu. The same socket can then create or join another room.
+    Leave,
     /// In-game player command, relayed verbatim to the engine.
     Cmd {
         cmd: CommandKind,
@@ -170,6 +173,9 @@ mod tests {
 
         let again: ClientMessage = serde_json::from_str(r#"{"type":"play_again"}"#).unwrap();
         assert!(matches!(again, ClientMessage::PlayAgain));
+
+        let leave: ClientMessage = serde_json::from_str(r#"{"type":"leave"}"#).unwrap();
+        assert!(matches!(leave, ClientMessage::Leave));
 
         let fb: ClientMessage =
             serde_json::from_str(r#"{"type":"feedback","rating":4,"comment":"gg"}"#).unwrap();

@@ -68,6 +68,9 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
             }
         };
 
+        // Set when the client leaves its room but keeps the socket open; the
+        // session is cleared after the match so a new Create/Join can follow.
+        let mut leave = false;
         match (msg, &session) {
             (ClientMessage::Ping, _) => send(&tx, ServerMessage::Pong),
 
@@ -154,6 +157,17 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 }
             }
 
+            (ClientMessage::Leave, Some(s)) => {
+                let _ = s
+                    .room
+                    .send(RoomCmd::Disconnect {
+                        player_id: s.player_id.clone(),
+                    })
+                    .await;
+                leave = true;
+            }
+            (ClientMessage::Leave, None) => {} // already roomless
+
             (ClientMessage::Cmd { cmd }, Some(s)) => {
                 let cmd = RoomCmd::Game {
                     player_id: s.player_id.clone(),
@@ -189,6 +203,9 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     },
                 );
             }
+        }
+        if leave {
+            session = None;
         }
     }
 

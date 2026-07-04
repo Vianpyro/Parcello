@@ -57,7 +57,8 @@ Authoritative documents, in order of precedence:
 cargo build --workspace --locked
 cargo test  --workspace --locked          # 73 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
-# Browser client: http://localhost:7878/   (create/join by 5-letter code)
+# Browser client: http://localhost:7878/   (create/join by 5-letter code;
+#   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
 cargo run -p parcello-cli -- --name alice --create
 cargo run -p parcello-cli -- --name bob --join ABCDE
 ```
@@ -101,8 +102,10 @@ architecture doc section 5; dependencies point downward only):
   create/join, relay; identity is bound to the connection and never
   re-trusted from the wire), `room.rs` (one Tokio task per room; state
   machine Lobby -> Active -> Finished; `PlayAgain` restarts a Finished room
-  for the still-connected seats via the shared `start_game`; host = seat 0;
-  2..=6 players; rejoin
+  for the still-connected seats via the shared `start_game`; `Leave` drops
+  the room but keeps the socket open (ws.rs clears the session so the same
+  connection can create/join again - the Flutter client's connect/menu
+  split relies on this); host = seat 0; 2..=6 players; rejoin
   by identity, last connection wins, but spoofable (guest) seats require
   the per-seat reconnect token issued in `Joined` (ADR-0008); rooms with
   zero connected seats

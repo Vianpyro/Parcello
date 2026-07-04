@@ -18,17 +18,21 @@
     margin: 0; background: var(--bg); color: var(--text);
     font: 14px/1.4 system-ui, sans-serif;
   }
+  /* Touch-friendly: min 44px tall, generous padding (mobile-ready). */
   button {
-    background: var(--accent); border: 0; border-radius: 4px;
-    padding: 6px 12px; font-weight: 600; cursor: pointer; color: #221d0e;
+    background: var(--accent); border: 0; border-radius: 6px;
+    padding: 10px 18px; min-height: 44px; font-size: 15px; font-weight: 600;
+    cursor: pointer; color: #221d0e;
   }
   button.secondary { background: var(--line); color: var(--text); }
   button.danger { background: var(--danger); color: #fff; }
   button:disabled { opacity: .45; cursor: default; }
   input, select {
     background: var(--bg); color: var(--text); border: 1px solid var(--line);
-    border-radius: 4px; padding: 6px 8px;
+    border-radius: 6px; padding: 10px 10px; font-size: 15px; min-height: 44px;
   }
+  /* Login uses full-width buttons for a clean, mobile-like column. */
+  #login button { width: 100%; }
   #login {
     max-width: 360px; margin: 12vh auto; background: var(--panel);
     padding: 24px; border-radius: 8px; display: flex; flex-direction: column; gap: 10px;
@@ -119,7 +123,8 @@
   <div id="board"></div>
   <div id="side">
     <div class="card">
-      <h3>Room <span id="roomcode"></span></h3>
+      <h3>Room <span id="roomcode" title="Click to copy" style="cursor:pointer;color:var(--accent);letter-spacing:2px"></span>
+        <span id="copiedmsg" class="muted" style="font-size:12px"></span></h3>
       <div id="players"></div>
       <div id="lobbyctl" style="margin-top:8px; display:flex; gap:6px;">
         <button id="start">Start game</button>
@@ -675,6 +680,13 @@ function renderOffers() {
 // -- misc controls ------------------------------------------------------------------
 $("#start").onclick = () => ws?.send(JSON.stringify({ type: "start" }));
 $("#resign").onclick = () => { if (confirm("Resign from the game?")) send({ type: "resign" }); };
+$("#roomcode").onclick = () => {
+  if (!st.code) return;
+  navigator.clipboard?.writeText(st.code);
+  const m = $("#copiedmsg");
+  m.textContent = " copied!";
+  setTimeout(() => { m.textContent = ""; }, 1200);
+};
 $("#playagain").onclick = () => ws?.send(JSON.stringify({ type: "play_again" }));
 $("#continue").onclick = () => {
   if (ws) { ws.onclose = null; ws.close(); ws = null; }
