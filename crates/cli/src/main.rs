@@ -123,8 +123,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 (&ctx.content, &ctx.view, ctx.my_seat)
                             && let Some(kind) = bot::decide(&content.content, view, me)
                         {
-                            // Human pacing; also yields between bot moves.
-                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                            // Pace bot actions so a watching client has time
+                            // to play out the pawn-movement animation.
+                            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                             let cmd = ClientMessage::Cmd { cmd: kind };
                             sink.send(Message::Text(serde_json::to_string(&cmd)?.into()))
                                 .await?;
@@ -158,6 +159,7 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
     let mut parts = line.split_whitespace();
     let cmd = match (parts.next()?, parts.next()) {
         ("start", None) => return Some(ClientMessage::Start),
+        ("again", None) => return Some(ClientMessage::PlayAgain),
         ("roll", None) => CommandKind::Roll,
         ("buy", None) => CommandKind::Buy,
         ("no", None) => CommandKind::Decline,

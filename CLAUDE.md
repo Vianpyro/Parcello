@@ -55,7 +55,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 72 tests, all must pass
+cargo test  --workspace --locked          # 73 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -100,7 +100,9 @@ architecture doc section 5; dependencies point downward only):
 - `crates/server` - axum. `ws.rs` (transport: parse, authenticate once at
   create/join, relay; identity is bound to the connection and never
   re-trusted from the wire), `room.rs` (one Tokio task per room; state
-  machine Lobby -> Active -> Finished; host = seat 0; 2..=6 players; rejoin
+  machine Lobby -> Active -> Finished; `PlayAgain` restarts a Finished room
+  for the still-connected seats via the shared `start_game`; host = seat 0;
+  2..=6 players; rejoin
   by identity, last connection wins, but spoofable (guest) seats require
   the per-seat reconnect token issued in `Joined` (ADR-0008); rooms with
   zero connected seats

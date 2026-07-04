@@ -187,9 +187,11 @@ is unencumbered.
 
 Client -> server: `create {auth, mods?}` (optional ordered mod list for
 the room, ADR-0006; omit for the server default), `join {code, auth}`,
-`start`, `cmd {cmd}`, `feedback {rating, comment?}` (post-game survey:
-1-5 plus an optional comment, stored in the server history; one per
-player per game, fully optional and never blocking), `ping`. Server -> client: `room_created`, `joined`
+`start`, `play_again` (after a game ends, restart it in the same room for
+whoever is still connected; first sender wins), `cmd {cmd}`,
+`feedback {rating, comment?}` (post-game survey: 1-5 plus an optional
+comment, stored in the server history; one per player per game, fully
+optional and never blocking), `ping`. Server -> client: `room_created`, `joined`
 (includes the resolved mod bundle, a per-seat reconnect token - present it
 in `auth.reconnect` to re-take a guest seat, ADR-0008 - and, mid-game, a
 state snapshot), `lobby`,

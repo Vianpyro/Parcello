@@ -43,6 +43,9 @@ pub enum ClientMessage {
     },
     /// Host only, from the Lobby: start the game.
     Start,
+    /// After a game ends, replay in the same room: the first sender restarts
+    /// the game for everyone still connected; players who left are dropped.
+    PlayAgain,
     /// In-game player command, relayed verbatim to the engine.
     Cmd {
         cmd: CommandKind,
@@ -164,6 +167,9 @@ mod tests {
                 cmd: parcello_engine::CommandKind::UseJailCard
             }
         ));
+
+        let again: ClientMessage = serde_json::from_str(r#"{"type":"play_again"}"#).unwrap();
+        assert!(matches!(again, ClientMessage::PlayAgain));
 
         let fb: ClientMessage =
             serde_json::from_str(r#"{"type":"feedback","rating":4,"comment":"gg"}"#).unwrap();

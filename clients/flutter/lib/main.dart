@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'board.dart';
 import 'oidc.dart';
 import 'session.dart';
+import 'sfx.dart';
 
 void main() => runApp(ParcelloApp(session: GameSession()));
 
@@ -194,13 +195,17 @@ class GameScreen extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
-            child: BoardWidget(
-              content: s.content!,
-              view: s.view,
-              mySeat: s.seat,
-              onTileTap: (i) => _tileMenu(context, i),
-              center: _CenterPanel(s: s),
-            ),
+            child: Stack(alignment: Alignment.center, children: [
+              BoardWidget(
+                content: s.content!,
+                view: s.view,
+                mySeat: s.seat,
+                onTileTap: (i) => _tileMenu(context, i),
+                center: _CenterPanel(s: s),
+              ),
+              // Dice result, floating over the middle of the board.
+              _DiceRoll(seq: s.diceSeq, d1: s.diceD1, d2: s.diceD2),
+            ]),
           ),
           const SizedBox(width: 12),
           SizedBox(width: 340, child: _SidePanel(s: s)),
@@ -300,8 +305,11 @@ class _CenterPanel extends StatelessWidget {
               style: TextStyle(
                   fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
           const Spacer(),
-          if (s.gameEndsAt != null && s.view?.finished != true)
+          if (s.gameEndsAt != null && s.view?.finished != true) ...[
             _Countdown(endsAt: s.gameEndsAt!),
+            const SizedBox(width: 8),
+          ],
+          const _MuteButton(),
         ]),
         const SizedBox(height: 4),
         Text(_status(), style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -382,6 +390,135 @@ class _CountdownState extends State<_Countdown> {
                 secs <= 60 ? const Color(0xFFC0564F) : const Color(0xFF2A2A2A),
           )),
     ]);
+  }
+}
+
+/// Toggles sound effects on/off (`sfx.enabled`).
+class _MuteButton extends StatefulWidget {
+  const _MuteButton();
+
+  @override
+  State<_MuteButton> createState() => _MuteButtonState();
+}
+
+class _MuteButtonState extends State<_MuteButton> {
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      iconSize: 18,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints(),
+      tooltip: sfx.enabled ? 'Mute sound' : 'Unmute sound',
+      icon: Icon(sfx.enabled ? Icons.volume_up : Icons.volume_off,
+          color: const Color(0xFF2A2A2A)),
+      onPressed: () => setState(() => sfx.enabled = !sfx.enabled),
+    );
+  }
+}
+
+/// The dice result, shown big in the middle of the board for a couple of
+/// seconds after each roll, then faded out (like a physical board game).
+class _DiceRoll extends StatefulWidget {
+  final int seq, d1, d2;
+  const _DiceRoll({required this.seq, required this.d1, required this.d2});
+
+  @override
+  State<_DiceRoll> createState() => _DiceRollState();
+}
+
+class _DiceRollState extends State<_DiceRoll> {
+  bool _visible = false;
+  Timer? _timer;
+
+  @override
+  void didUpdateWidget(_DiceRoll old) {
+    super.didUpdateWidget(old);
+    if (widget.seq != old.seq && widget.seq > 0) {
+      setState(() => _visible = true);
+      _timer?.cancel();
+      _timer = Timer(const Duration(milliseconds: 2500), () {
+        if (mounted) setState(() => _visible = false);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: _visible ? 1 : 0,
+        duration: const Duration(milliseconds: 300),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          _Die(widget.d1),
+          const SizedBox(width: 18),
+          _Die(widget.d2),
+        ]),
+      ),
+    );
+  }
+}
+
+/// A single pip die face (1-6).
+class _Die extends StatelessWidget {
+  final int value;
+  const _Die(this.value);
+
+  // Lit cells of a 3x3 grid (row*3 + col) per standard pip layout.
+  static const _pips = <int, List<int>>{
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 2, 3, 5, 6, 8],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final on = (_pips[value] ?? const <int>[]).toSet();
+    return Container(
+      width: 66,
+      height: 66,
+      padding: const EdgeInsets.all(9),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        children: [
+          for (var r = 0; r < 3; r++)
+            Expanded(
+              child: Row(children: [
+                for (var c = 0; c < 3; c++)
+                  Expanded(
+                    child: Center(
+                      child: on.contains(r * 3 + c)
+                          ? Container(
+                              width: 12,
+                              height: 12,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF1E1E1E),
+                                shape: BoxShape.circle,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ),
+              ]),
+            ),
+        ],
+      ),
+    );
   }
 }
 
@@ -494,7 +631,43 @@ class _SidePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final v = s.view;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // Game over: replay together, or go back to the start screen.
+      if (v != null && v.finished)
+        Card(
+          color: const Color(0xFF2E2A1C),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${s.playerName(v.winner!)} wins!',
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFD8B45A))),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: s.sendPlayAgain,
+                        child: const Text('Play again'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: s.leave,
+                        child: const Text('Continue'),
+                      ),
+                    ),
+                  ]),
+                  const Text('"Play again" restarts for everyone still here.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
+                ]),
+          ),
+        ),
       Card(
         child: Padding(
           padding: const EdgeInsets.all(12),

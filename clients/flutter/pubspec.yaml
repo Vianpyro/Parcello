@@ -12,9 +12,8 @@ dependencies:
   flutter:
     sdk: flutter
   web_socket_channel: ^3.0.3
-  # Sound effects: add `audioplayers: ^6.8.1` here to enable playback.
-  # On Windows it needs Developer Mode enabled (native plugin symlinks):
-  # run `start ms-settings:developers`. See assets/sfx/README.md.
+  # audioplayers: sound-effect playback (assets/sfx/). Present but not wired
+  # yet - the SFX hookup is the next step now that Developer Mode is on.
 
 dev_dependencies:
   flutter_test:

@@ -3,6 +3,7 @@
 /// authoritative; this only projects what it pushes.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,9 +11,11 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'protocol.dart';
+import 'sfx.dart';
 
 class GameSession extends ChangeNotifier {
   WebSocketChannel? _ws;
+  StreamSubscription? _sub;
 
   /// Reconnect tokens by room code (ADR-0008), persisted so a restarted
   /// client can still prove seat ownership. Best-effort: IO errors only
@@ -60,6 +63,12 @@ class GameSession extends ChangeNotifier {
   /// When set, the game is time-boxed and ends at this wall-clock instant
   /// (ADR-0010); the UI shows a local countdown. Null for untimed games.
   DateTime? gameEndsAt;
+
+  /// Latest dice roll for the center-of-board display. `diceSeq` bumps on
+  /// every roll so the overlay re-triggers even on a repeated value.
+  int diceSeq = 0;
+  int diceD1 = 0;
+  int diceD2 = 0;
 
   /// Net worth of a seat, mirroring `GameState::net_worth` on the server so
   /// the shown ranking predicts the timed-game winner: cash + property
@@ -116,7 +125,7 @@ class GameSession extends ChangeNotifier {
             if (mods.isNotEmpty) 'mods': mods,
           }
         : {'type': 'join', 'code': roomCode, 'auth': auth}));
-    _ws!.stream.listen(
+    _sub = _ws!.stream.listen(
       (data) => _handle(jsonDecode(data as String) as Map<String, dynamic>),
       onDone: _onClosed,
       onError: (Object e) {
@@ -127,8 +136,27 @@ class GameSession extends ChangeNotifier {
   }
 
   void disconnect() {
+    // Cancel first so a deliberate close does not fire `_onClosed`.
+    _sub?.cancel();
+    _sub = null;
     _ws?.sink.close();
     _ws = null;
+  }
+
+  /// Replay in the same room (server picks whoever is still connected).
+  void sendPlayAgain() {
+    _ws?.sink.add(jsonEncode({'type': 'play_again'}));
+  }
+
+  /// Leave the room and return to the start screen.
+  void leave() {
+    disconnect();
+    joined = false;
+    view = null;
+    code = null;
+    gameEndsAt = null;
+    loginMessage = '';
+    notifyListeners();
   }
 
   void _onClosed() {
@@ -193,8 +221,14 @@ class GameSession extends ChangeNotifier {
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         for (final e in msg['events'] as List) {
-          _log(describeEvent(
-              e as Map<String, dynamic>, playerName, tileName));
+          final ev = e as Map<String, dynamic>;
+          if (ev['type'] == 'dice_rolled') {
+            diceD1 = ev['d1'] as int;
+            diceD2 = ev['d2'] as int;
+            diceSeq++;
+            sfx.diceRoll();
+          }
+          _log(describeEvent(ev, playerName, tileName));
         }
       case 'rejected':
         _log('Rejected: ${msg['error']['code']}');

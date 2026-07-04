@@ -57,8 +57,21 @@
   .pawn { width: 10px; height: 10px; border-radius: 50%; border: 1px solid #0007; }
   #center {
     grid-area: 2 / 2 / 11 / 11; background: var(--board); border-radius: 4px;
-    color: #2a2a2a; display: flex; flex-direction: column; padding: 10px; gap: 8px; min-height: 0;
+    color: #2a2a2a; display: flex; flex-direction: column; padding: 10px; gap: 8px;
+    min-height: 0; position: relative;
   }
+  /* Dice result, floating over the middle of the board (ADR: playfeel). */
+  #dice {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    gap: 18px; pointer-events: none; opacity: 0; transition: opacity .3s;
+  }
+  #dice .die {
+    width: 66px; height: 66px; background: #fff; border-radius: 12px;
+    box-shadow: 0 4px 10px #0008; display: grid;
+    grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 9px; gap: 3px;
+  }
+  #dice .die i { border-radius: 50%; background: #1e1e1e; align-self: center; justify-self: center; width: 12px; height: 12px; }
+  #dice .die i.off { visibility: hidden; }
   #center h2 { margin: 0; font-size: 20px; letter-spacing: 2px; }
   #status { font-weight: 600; }
   #actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -135,6 +148,15 @@
           <button id="tr_close" class="secondary">Close</button>
         </div>
       </div>
+    </div>
+    <!-- Game over: replay together, or go back to the start screen. -->
+    <div class="card" id="gameover" style="display:none">
+      <h3 id="govwinner"></h3>
+      <div style="display:flex; gap:6px">
+        <button id="playagain" style="flex:1">Play again</button>
+        <button id="continue" class="secondary" style="flex:1">Continue</button>
+      </div>
+      <div class="muted" style="margin-top:6px">"Play again" restarts for everyone still here.</div>
     </div>
     <!-- Post-game survey: a plain side card, never a modal - it must not
          block anything (no frustration by design). -->
@@ -248,7 +270,10 @@ function handle(msg) {
       break;
     case "update":
       st.view = msg.view;
-      msg.events.forEach(ev => log(describe(ev)));
+      msg.events.forEach(ev => {
+        if (ev.type === "dice_rolled") showDice(ev.d1, ev.d2);
+        log(describe(ev));
+      });
       render();
       break;
     case "rejected":
@@ -283,6 +308,21 @@ function netWorth(seat) {
   });
   return w;
 }
+// Dice result overlay: two pip dice in the board centre, fading out.
+const DICE_PIPS = { 1:[4], 2:[0,8], 3:[0,4,8], 4:[0,2,6,8], 5:[0,2,4,6,8], 6:[0,2,3,5,6,8] };
+function dieHtml(n) {
+  const on = new Set(DICE_PIPS[n] || []);
+  return `<div class="die">${[...Array(9)].map((_, i) => `<i class="${on.has(i) ? "" : "off"}"></i>`).join("")}</div>`;
+}
+let _diceTimer;
+function showDice(d1, d2) {
+  const el = $("#dice"); if (!el) return;
+  el.innerHTML = dieHtml(d1) + dieHtml(d2);
+  el.style.opacity = "1";
+  clearTimeout(_diceTimer);
+  _diceTimer = setTimeout(() => { el.style.opacity = "0"; }, 2500);
+}
+
 function tickCountdown() {
   const el = $("#countdown"); if (!el) return;
   if (!st.gameEndsAt || st.view?.phase.type === "finished") { el.textContent = ""; return; }
@@ -344,7 +384,7 @@ function buildBoard() {
     center.id = "center";
     // Interior spans the (d-2) x (d-2) inner cells.
     center.style.gridArea = `2 / 2 / ${d} / ${d}`;
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   } else {
     // Non-ring boards (mods): linear fallback, panel below.
@@ -352,7 +392,7 @@ function buildBoard() {
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");
     center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   }
 }
@@ -392,6 +432,7 @@ function render() {
   renderActions();
   renderOffers();
   renderFeedback();
+  renderGameOver();
   tickCountdown();
 }
 
@@ -634,6 +675,20 @@ function renderOffers() {
 // -- misc controls ------------------------------------------------------------------
 $("#start").onclick = () => ws?.send(JSON.stringify({ type: "start" }));
 $("#resign").onclick = () => { if (confirm("Resign from the game?")) send({ type: "resign" }); };
+$("#playagain").onclick = () => ws?.send(JSON.stringify({ type: "play_again" }));
+$("#continue").onclick = () => {
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  st.view = null;
+  $("#app").style.display = "none";
+  $("#login").style.display = "flex";
+  $("#loginmsg").textContent = "";
+};
+
+function renderGameOver() {
+  const over = st.view?.phase.type === "finished";
+  $("#gameover").style.display = over ? "block" : "none";
+  if (over) $("#govwinner").textContent = `${playerName(st.view.phase.winner)} wins!`;
+}
 
 // -- event log ------------------------------------------------------------------------
 function describe(e) {

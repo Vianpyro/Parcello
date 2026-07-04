@@ -54,6 +54,9 @@ pub enum RoomCmd {
     Start {
         player_id: PlayerId,
     },
+    PlayAgain {
+        player_id: PlayerId,
+    },
     Game {
         player_id: PlayerId,
         cmd: CommandKind,
@@ -208,6 +211,7 @@ impl Room {
                             false
                         }
                         RoomCmd::Start { player_id } => self.handle_start(&player_id),
+                        RoomCmd::PlayAgain { player_id } => self.handle_play_again(&player_id),
                         RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
                         RoomCmd::Feedback { player_id, rating, comment } => {
                             self.handle_feedback(&player_id, rating, comment);
@@ -388,7 +392,32 @@ impl Room {
             self.send_error(player_id, "need at least 2 players");
             return false;
         }
+        self.start_game();
+        true
+    }
 
+    /// Replay in the same room after a game ends: the first requester restarts
+    /// for everyone still connected; seats that left are dropped. Returns true
+    /// when a new game actually started (turn clock should reset).
+    fn handle_play_again(&mut self, player_id: &str) -> bool {
+        if !matches!(self.phase, Phase::Finished(_)) {
+            self.send_error(player_id, "no finished game to replay");
+            return false;
+        }
+        let connected = self.seats.iter().filter(|s| s.tx.is_some()).count();
+        if connected < MIN_PLAYERS {
+            self.send_error(player_id, "need at least 2 connected players to replay");
+            return false;
+        }
+        // Drop players who returned to the start screen; re-seat the rest.
+        self.seats.retain(|s| s.tx.is_some());
+        self.start_game();
+        true
+    }
+
+    /// Deals a fresh game to the current seats and broadcasts it. Shared by
+    /// the first Start and every PlayAgain.
+    fn start_game(&mut self) {
         let players: Vec<(PlayerId, String)> = self
             .seats
             .iter()
@@ -401,8 +430,12 @@ impl Room {
             &players.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
             seed,
         );
-        // Start the game clock now, if the room is time-boxed (ADR-0010).
+        // Start the game clock now, if the room is time-boxed (ADR-0010), and
+        // reopen the post-game survey for the new game.
         self.game_deadline = self.game_timeout.map(|d| tokio::time::Instant::now() + d);
+        for seat in &mut self.seats {
+            seat.feedback_given = false;
+        }
         info!(room = %self.code, players = self.seats.len(), "game started");
 
         let remaining = self.time_remaining_secs();
@@ -414,7 +447,6 @@ impl Room {
             .collect();
         self.phase = Phase::Active(state);
         self.send_per_seat(msgs);
-        true
     }
 
     /// Seconds left before the game clock ends the game, if time-boxed.
@@ -701,6 +733,95 @@ mod tests {
             3,
             "mid-game, invalid rating, and duplicate must each error"
         );
+    }
+
+    /// After a game ends, `PlayAgain` restarts it in the same room for the
+    /// players still connected.
+    #[tokio::test]
+    async fn play_again_restarts_the_game() {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
+        let code = create_room(&rooms, content, history, None, None)
+            .await
+            .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let mut rxs = Vec::new();
+        for name in ["alice", "bob"] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (reply, joined) = oneshot::channel();
+            room.send(RoomCmd::Join {
+                identity: Identity {
+                    player_id: format!("guest:{name}"),
+                    name: name.to_string(),
+                    spoofable: true,
+                },
+                reconnect: None,
+                tx,
+                reply,
+            })
+            .await
+            .expect("room task alive");
+            joined.await.expect("reply sent").expect("join accepted");
+            rxs.push(rx);
+        }
+        room.send(RoomCmd::Start {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+        // Bob resigns -> alice wins -> the game is finished.
+        room.send(RoomCmd::Game {
+            player_id: "guest:bob".into(),
+            cmd: CommandKind::Resign,
+        })
+        .await
+        .expect("room task alive");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        for rx in &mut rxs {
+            while rx.try_recv().is_ok() {} // drain up to the finish
+        }
+
+        room.send(RoomCmd::PlayAgain {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        for (i, rx) in rxs.iter_mut().enumerate() {
+            let mut restarted = false;
+            while let Ok(msg) = rx.try_recv() {
+                if matches!(msg, ServerMessage::GameStarted { .. }) {
+                    restarted = true;
+                }
+            }
+            assert!(restarted, "seat {i} must be pulled into the new game");
+        }
+
+        // The new game is live: a roll from the acting player is accepted.
+        room.send(RoomCmd::Game {
+            player_id: "guest:alice".into(),
+            cmd: CommandKind::Roll,
+        })
+        .await
+        .expect("room task alive");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut rolled = false;
+        while let Ok(msg) = rxs[1].try_recv() {
+            if let ServerMessage::Update { events, .. } = msg
+                && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+            {
+                rolled = true;
+            }
+        }
+        assert!(rolled, "the replayed game must accept commands");
     }
 
     /// A guest seat can only be re-taken with the reconnect token issued at

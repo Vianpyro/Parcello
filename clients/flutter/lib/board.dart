@@ -10,6 +10,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'protocol.dart';
+import 'sfx.dart';
 
 const pawnColors = [
   Color(0xFFC0564F),
@@ -293,6 +294,7 @@ class _PawnAnim {
   final AnimationController ctrl;
   List<int> waypoints; // tile indices to glide through
   int target; // where the pawn currently rests / is heading
+  int lastHopSeg = 0; // highest tile-step already sounded this move
   _PawnAnim(this.ctrl, this.target) : waypoints = [target];
 }
 
@@ -300,11 +302,32 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
   int get _boardLen => 4 * (widget.side - 1);
   final Map<int, _PawnAnim> _anims = {};
 
+  /// Creates a pawn animation with the SFX hooks: a per-tile step sound as
+  /// the glide crosses each square, a landing sound on completion.
+  _PawnAnim _makeAnim(int pos) {
+    final anim = _PawnAnim(AnimationController(vsync: this), pos);
+    anim.ctrl.addListener(() => _onTick(anim));
+    anim.ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.completed) sfx.pawnStop();
+    });
+    return anim;
+  }
+
+  void _onTick(_PawnAnim a) {
+    final segs = a.waypoints.length - 1;
+    if (segs < 2) return; // teleport / single hop: only the landing sounds
+    final seg = (a.ctrl.value * segs).floor();
+    if (seg > a.lastHopSeg && seg < segs) {
+      a.lastHopSeg = seg;
+      sfx.moveHop(seg);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     for (final p in widget.pawns) {
-      _anims[p.seat] = _PawnAnim(AnimationController(vsync: this), p.position);
+      _anims[p.seat] = _makeAnim(p.position);
     }
   }
 
@@ -312,29 +335,38 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
   void didUpdateWidget(_PawnLayer old) {
     super.didUpdateWidget(old);
     for (final p in widget.pawns) {
-      final a = _anims.putIfAbsent(
-          p.seat, () => _PawnAnim(AnimationController(vsync: this), p.position));
+      final a = _anims.putIfAbsent(p.seat, () => _makeAnim(p.position));
       if (p.position != a.target) _animate(a, p.position);
     }
   }
 
   void _animate(_PawnAnim a, int to) {
     final from = a.target;
+    a.lastHopSeg = 0;
     final forward = (to - from) % _boardLen; // 0..39
     final List<int> path;
     if (forward >= 1 && forward <= 12) {
       // Dice-sized move: hop each tile so the pawn follows the border.
+      // ~260ms per tile, eased per hop (see _offsetOf), so the step-by-step
+      // travel reads clearly rather than as one fast glide.
       path = [for (var k = 0; k <= forward; k++) (from + k) % _boardLen];
-      a.ctrl.duration = Duration(milliseconds: (forward * 130).clamp(200, 1700));
+      a.ctrl.duration = Duration(milliseconds: (forward * 260).clamp(400, 3200));
     } else {
       // Teleport / backward / long jump: glide straight to the target.
       path = [from, to];
-      a.ctrl.duration = const Duration(milliseconds: 500);
+      a.ctrl.duration = const Duration(milliseconds: 700);
     }
     a.target = to;
+    // Reset to 0 now so the pawn holds at its START square during the beat
+    // below (otherwise it lingers at the previous move's end = 1.0).
+    a.ctrl.reset();
     setState(() => a.waypoints = path);
-    a.ctrl.forward(from: 0).whenComplete(() {
-      if (mounted) setState(() => a.waypoints = [a.target]);
+    // A short beat between the dice result and the pawn setting off.
+    Future.delayed(const Duration(milliseconds: 260), () {
+      if (!mounted || a.target != to) return; // superseded by a newer move
+      a.ctrl.forward(from: 0).whenComplete(() {
+        if (mounted) setState(() => a.waypoints = [a.target]);
+      });
     });
   }
 
@@ -348,7 +380,10 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
     if (pts.length == 1) return pts.first;
     final p = a.ctrl.value * (pts.length - 1);
     final seg = p.floor().clamp(0, pts.length - 2);
-    return Offset.lerp(pts[seg], pts[seg + 1], p - seg)!;
+    // Ease within each tile-to-tile segment so the pawn "hops" from square
+    // to square instead of gliding at constant speed.
+    final eased = Curves.easeInOut.transform(p - seg);
+    return Offset.lerp(pts[seg], pts[seg + 1], eased)!;
   }
 
   @override
