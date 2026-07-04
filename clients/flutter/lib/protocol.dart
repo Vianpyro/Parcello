@@ -65,6 +65,43 @@ class GameContent {
             .toList();
 }
 
+/// Mirror of the engine `RuleParams` (ADR-0015). Absolute values; the host
+/// edits them in the lobby and the server clamps.
+class RuleParams {
+  final int startingBalance;
+  final int goSalary;
+  final int jailFine;
+  final int maxHousesPerProperty;
+  final int bankruptcyThreshold;
+  final bool auctionOnDecline;
+  final int expropriation;
+  final int rentBoost;
+  final int winFullGroups;
+
+  RuleParams.fromJson(Map<String, dynamic> j)
+      : startingBalance = j['starting_balance'] as int,
+        goSalary = j['go_salary'] as int,
+        jailFine = j['jail_fine'] as int,
+        maxHousesPerProperty = j['max_houses_per_property'] as int,
+        bankruptcyThreshold = j['bankruptcy_threshold'] as int,
+        auctionOnDecline = j['auction_on_decline'] as bool,
+        expropriation = j['expropriation'] as int? ?? 0,
+        rentBoost = j['rent_boost'] as int? ?? 0,
+        winFullGroups = j['win_full_groups'] as int? ?? 0;
+}
+
+/// Per-room settings the host edits in the lobby (ADR-0015).
+class RoomSettings {
+  final int? gameSeconds;
+  final int? turnSeconds;
+  final RuleParams rules;
+
+  RoomSettings.fromJson(Map<String, dynamic> j)
+      : gameSeconds = j['game_seconds'] as int?,
+        turnSeconds = j['turn_seconds'] as int?,
+        rules = RuleParams.fromJson(j['rules'] as Map<String, dynamic>);
+}
+
 class PlayerView {
   final String id;
   final String name;

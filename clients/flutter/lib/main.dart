@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import 'board.dart';
 import 'oidc.dart';
+import 'protocol.dart';
 import 'session.dart';
 import 'sfx.dart';
 
@@ -351,6 +352,10 @@ class GameScreen extends StatelessWidget {
     final mine = ts.owner == s.seat;
     final rival = ts.owner != null && ts.owner != s.seat;
     final price = def.price ?? 0;
+    // Prefer the live room rules (host may have tweaked them, ADR-0015);
+    // fall back to the content snapshot from join.
+    final boost = s.settings?.rules.rentBoost ?? c.rentBoost;
+    final expro = s.settings?.rules.expropriation ?? c.expropriation;
 
     showModalBottomSheet<void>(
       context: context,
@@ -378,9 +383,9 @@ class GameScreen extends StatelessWidget {
                   close();
                 }));
           }
-          if (c.rentBoost > 0 && !ts.mortgaged && ts.boosts < 3) {
+          if (boost > 0 && !ts.mortgaged && ts.boosts < 3) {
             items.add(ListTile(
-                title: Text('Boost rent (\$${price * c.rentBoost ~/ 100})'),
+                title: Text('Boost rent (\$${price * boost ~/ 100})'),
                 onTap: () {
                   s.sendCmd({'type': 'boost_rent', 'tile': def.id});
                   close();
@@ -397,11 +402,11 @@ class GameScreen extends StatelessWidget {
               }));
         } else if (rival &&
             def.isProperty &&
-            c.expropriation > 0 &&
+            expro > 0 &&
             ts.houses == 0 &&
             !ts.mortgaged) {
           items.add(ListTile(
-              title: Text('Seize (\$${price * c.expropriation ~/ 100})'),
+              title: Text('Seize (\$${price * expro ~/ 100})'),
               subtitle: const Text('take this tile from its owner'),
               onTap: () {
                 s.sendCmd({'type': 'expropriate', 'tile': def.id});
@@ -862,6 +867,7 @@ class _SidePanel extends StatelessWidget {
                   child: wideButton('Copy code to share', () => copyCode(context, s.code!),
                       primary: false),
                 ),
+              if (s.settings != null) _SettingsPanel(s: s),
             ],
           ]),
         ),
@@ -1009,6 +1015,171 @@ class _SidePanel extends StatelessWidget {
           child: const Text('New offer'),
         ),
     ]);
+  }
+}
+
+/// Lobby settings panel (ADR-0015): the host (seat 0) edits timers and rules
+/// for this game; everyone else sees them read-only. Collapsed by default so
+/// the lobby stays tidy. Settings freeze once the game starts.
+class _SettingsPanel extends StatefulWidget {
+  final GameSession s;
+  const _SettingsPanel({required this.s});
+
+  @override
+  State<_SettingsPanel> createState() => _SettingsPanelState();
+}
+
+class _SettingsPanelState extends State<_SettingsPanel> {
+  // key -> (label, controller). Order defines the display order.
+  static const _fields = [
+    ('game', 'Game length (min, 0=off)'),
+    ('turn', 'Turn limit (s, 0=off)'),
+    ('starting_balance', 'Starting balance'),
+    ('go_salary', 'GO salary'),
+    ('jail_fine', 'Jail fine'),
+    ('max_houses', 'Max houses (1-5)'),
+    ('bankruptcy_threshold', 'Bankruptcy threshold'),
+    ('expropriation', 'Expropriation %'),
+    ('rent_boost', 'Rent boost %'),
+    ('win_full_groups', 'Domination groups (0=off)'),
+  ];
+  late final Map<String, TextEditingController> _c;
+  late bool _auction;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.s.settings!;
+    final r = s.rules;
+    int mins(int? secs) => secs == null ? 0 : secs ~/ 60;
+    _c = {
+      'game': TextEditingController(text: '${mins(s.gameSeconds)}'),
+      'turn': TextEditingController(text: '${s.turnSeconds ?? 0}'),
+      'starting_balance': TextEditingController(text: '${r.startingBalance}'),
+      'go_salary': TextEditingController(text: '${r.goSalary}'),
+      'jail_fine': TextEditingController(text: '${r.jailFine}'),
+      'max_houses': TextEditingController(text: '${r.maxHousesPerProperty}'),
+      'bankruptcy_threshold':
+          TextEditingController(text: '${r.bankruptcyThreshold}'),
+      'expropriation': TextEditingController(text: '${r.expropriation}'),
+      'rent_boost': TextEditingController(text: '${r.rentBoost}'),
+      'win_full_groups': TextEditingController(text: '${r.winFullGroups}'),
+    };
+    _auction = r.auctionOnDecline;
+  }
+
+  @override
+  void dispose() {
+    for (final c in _c.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  int _n(String k) => int.tryParse(_c[k]!.text.trim()) ?? 0;
+
+  void _apply() {
+    final gameMin = _n('game'), turnSec = _n('turn');
+    widget.s.configure({
+      'game_seconds': gameMin > 0 ? gameMin * 60 : null,
+      'turn_seconds': turnSec > 0 ? turnSec : null,
+      'rules': {
+        'starting_balance': _n('starting_balance'),
+        'go_salary': _n('go_salary'),
+        'jail_fine': _n('jail_fine'),
+        'max_houses_per_property': _n('max_houses'),
+        'bankruptcy_threshold': _n('bankruptcy_threshold'),
+        'auction_on_decline': _auction,
+        'expropriation': _n('expropriation'),
+        'rent_boost': _n('rent_boost'),
+        'win_full_groups': _n('win_full_groups'),
+      },
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.s.settings!;
+    final host = widget.s.seat == 0;
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        title: const Text('Game settings',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        subtitle: Text(_summary(s),
+            style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
+        children: host ? _hostFields() : _readOnly(s),
+      ),
+    );
+  }
+
+  String _summary(RoomSettings s) {
+    final g = s.gameSeconds == null ? 'off' : '${s.gameSeconds! ~/ 60}min';
+    final t = s.turnSeconds == null ? 'off' : '${s.turnSeconds}s';
+    return 'game $g - turn $t';
+  }
+
+  List<Widget> _hostFields() => [
+        for (final (key, label) in _fields)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(children: [
+              Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
+              SizedBox(
+                width: 84,
+                child: TextField(
+                  controller: _c[key],
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.right,
+                  decoration: const InputDecoration(isDense: true),
+                ),
+              ),
+            ]),
+          ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: const Text('Auction on decline',
+              style: TextStyle(fontSize: 12)),
+          value: _auction,
+          onChanged: (v) => setState(() => _auction = v),
+        ),
+        const SizedBox(height: 4),
+        wideButton('Apply settings', _apply, primary: false),
+      ];
+
+  List<Widget> _readOnly(RoomSettings s) {
+    final r = s.rules;
+    final rows = <(String, String)>[
+      ('Game length', s.gameSeconds == null ? 'off' : '${s.gameSeconds! ~/ 60} min'),
+      ('Turn limit', s.turnSeconds == null ? 'off' : '${s.turnSeconds} s'),
+      ('Starting balance', '\$${r.startingBalance}'),
+      ('GO salary', '\$${r.goSalary}'),
+      ('Jail fine', '\$${r.jailFine}'),
+      ('Max houses', '${r.maxHousesPerProperty}'),
+      ('Bankruptcy threshold', '\$${r.bankruptcyThreshold}'),
+      ('Auctions', r.auctionOnDecline ? 'on' : 'off'),
+      ('Expropriation', r.expropriation == 0 ? 'off' : '${r.expropriation}%'),
+      ('Rent boost', r.rentBoost == 0 ? 'off' : '${r.rentBoost}%'),
+      ('Domination', r.winFullGroups == 0 ? 'off' : '${r.winFullGroups} groups'),
+    ];
+    return [
+      for (final (label, value) in rows)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 12)),
+              Text(value,
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+    ];
   }
 }
 

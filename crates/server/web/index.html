@@ -78,6 +78,10 @@
   #dice .die i.off { visibility: hidden; }
   #center h2 { margin: 0; font-size: 20px; letter-spacing: 2px; }
   #status { font-weight: 600; }
+  .setgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-top: 8px; }
+  .setgrid label { display: flex; flex-direction: column; font-size: 12px; gap: 2px; }
+  .setgrid label.chk { flex-direction: row; align-items: center; gap: 6px; grid-column: 1 / -1; }
+  .setgrid input[type=number] { width: 100%; }
   #actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   #log {
     flex: 1; overflow-y: auto; background: #fffdf6; border: 1px solid #c9c4ae;
@@ -131,6 +135,23 @@
         <button id="addbot" class="secondary" title="Bots yield their seat when a player joins">Add bot</button>
         <button id="rmbot" class="secondary">Remove bot</button>
       </div>
+      <details id="settingspanel" style="margin-top:10px">
+        <summary style="cursor:pointer;font-weight:600">Game settings</summary>
+        <div class="setgrid">
+          <label>Game length (min, 0=off)<input id="set_game" type="number" min="0"></label>
+          <label>Turn limit (s, 0=off)<input id="set_turn" type="number" min="0"></label>
+          <label>Starting balance<input id="set_starting_balance" type="number" min="0"></label>
+          <label>GO salary<input id="set_go_salary" type="number" min="0"></label>
+          <label>Jail fine<input id="set_jail_fine" type="number" min="0"></label>
+          <label>Max houses (1-5)<input id="set_max_houses" type="number" min="1" max="5"></label>
+          <label>Bankruptcy threshold<input id="set_bankruptcy" type="number" min="0"></label>
+          <label>Expropriation %<input id="set_expropriation" type="number" min="0"></label>
+          <label>Rent boost %<input id="set_rent_boost" type="number" min="0"></label>
+          <label>Domination groups (0=off)<input id="set_win_groups" type="number" min="0"></label>
+          <label class="chk"><input id="set_auction" type="checkbox">Auction on decline</label>
+        </div>
+        <button id="applysettings" style="margin-top:8px">Apply settings</button>
+      </details>
     </div>
     <div class="card" id="tradecard">
       <h3>Trades</h3>
@@ -254,6 +275,7 @@ function handle(msg) {
       st.seat = msg.seat;
       st.content = msg.content.content;
       st.seats = msg.players;
+      st.settings = msg.settings;
       if (msg.reconnect) localStorage.setItem(`parcello_tok_${msg.code}`, msg.reconnect);
       st.gameEndsAt = deadlineFrom(msg.time_remaining);
       st.turnSeconds = msg.turn_seconds ?? null;
@@ -269,6 +291,9 @@ function handle(msg) {
       break;
     case "lobby":
       st.seats = msg.players;
+      st.settings = msg.settings;
+      // Keep effective rules live for the tile menu (boost/seize costs).
+      if (st.content) st.content.rules = msg.settings.rules;
       render();
       break;
     case "game_started":
@@ -519,6 +544,54 @@ function renderPlayers() {
   $("#start").disabled = !host || st.seats.length < 2;
   $("#addbot").disabled = !host || full;
   $("#rmbot").disabled = !host || bots === 0;
+  renderSettings();
+}
+
+// Per-room settings panel (ADR-0015): host edits, everyone sees. Hidden
+// once the game starts (settings are frozen). Populating input values on
+// each lobby update also snaps the host's fields to the server's clamped
+// result after Apply.
+function renderSettings() {
+  const el = $("#settingspanel");
+  if (!el) return;
+  el.style.display = st.view ? "none" : "block";
+  if (st.view || !st.settings) return;
+  const host = st.seat === 0;
+  const s = st.settings, r = s.rules;
+  const put = (id, val) => { const e = $("#" + id); if (e) { e.value = val; e.disabled = !host; } };
+  put("set_game", s.game_seconds ? Math.round(s.game_seconds / 60) : 0);
+  put("set_turn", s.turn_seconds ?? 0);
+  put("set_starting_balance", r.starting_balance);
+  put("set_go_salary", r.go_salary);
+  put("set_jail_fine", r.jail_fine);
+  put("set_max_houses", r.max_houses_per_property);
+  put("set_bankruptcy", r.bankruptcy_threshold);
+  put("set_expropriation", r.expropriation);
+  put("set_rent_boost", r.rent_boost);
+  put("set_win_groups", r.win_full_groups);
+  const auc = $("#set_auction");
+  if (auc) { auc.checked = r.auction_on_decline; auc.disabled = !host; }
+  $("#applysettings").style.display = host ? "inline" : "none";
+}
+
+function applySettings() {
+  const n = id => Math.max(0, parseInt($("#" + id).value || "0", 10) || 0);
+  const gameMin = n("set_game"), turnSec = n("set_turn");
+  ws?.send(JSON.stringify({ type: "configure", settings: {
+    game_seconds: gameMin > 0 ? gameMin * 60 : null,
+    turn_seconds: turnSec > 0 ? turnSec : null,
+    rules: {
+      starting_balance: n("set_starting_balance"),
+      go_salary: n("set_go_salary"),
+      jail_fine: n("set_jail_fine"),
+      max_houses_per_property: n("set_max_houses"),
+      bankruptcy_threshold: n("set_bankruptcy"),
+      auction_on_decline: $("#set_auction").checked,
+      expropriation: n("set_expropriation"),
+      rent_boost: n("set_rent_boost"),
+      win_full_groups: n("set_win_groups"),
+    },
+  } }));
 }
 
 function setStatus(text) { const s = $("#status"); if (s) s.textContent = text; }
@@ -714,6 +787,7 @@ function renderOffers() {
 $("#start").onclick = () => ws?.send(JSON.stringify({ type: "start" }));
 $("#addbot").onclick = () => ws?.send(JSON.stringify({ type: "add_bot" }));
 $("#rmbot").onclick = () => ws?.send(JSON.stringify({ type: "remove_bot" }));
+$("#applysettings").onclick = applySettings;
 $("#resign").onclick = () => { if (confirm("Resign from the game?")) send({ type: "resign" }); };
 $("#roomcode").onclick = () => {
   if (!st.code) return;

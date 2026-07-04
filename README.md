@@ -193,7 +193,8 @@ the room, ADR-0006; omit for the server default), `join {code, auth}`,
 whoever is still connected; first sender wins), `leave` (leave the room but
 keep the socket open, so the same connection can create/join another room),
 `add_bot` / `remove_bot` (host, lobby: add or drop a server-driven bot
-seat, ADR-0014), `cmd {cmd}`,
+seat, ADR-0014), `configure {settings}` (host, lobby: set the room's timers
+and rules, clamped server-side, ADR-0015), `cmd {cmd}`,
 `feedback {rating, comment?}` (post-game survey: 1-5 plus an optional
 comment, stored in the server history; one per player per game, fully
 optional and never blocking), `ping`. Server -> client: `room_created`, `joined`
@@ -297,15 +298,26 @@ deck rotation once drawn.
   the room dissolves.
 - A disconnected player's turn is auto-played after a 30s grace so an AFK
   player never stalls the table (they keep their seat and can rejoin). The
-  `--turn-timeout` flag extends this to connected-but-idle players; it is
-  off by default, so a present but slow player is never forced. When set,
-  its value rides `GameStarted`/`Joined` as `turn_seconds` and clients show
+  room's turn limit (default 25s, host-editable, ADR-0015) extends this to
+  connected-but-idle players: a strict auto-skip of the acting seat. Set it
+  to off in the lobby if you want a present-but-slow player never forced.
+  When on, it rides `GameStarted`/`Joined` as `turn_seconds` and clients show
   a per-turn countdown (reset on each accepted command); absent when off.
 - The host can add bots from the lobby (an "Add bot" button; `addbot` in the
   CLI). Bots are server-driven seats that play the shared autopilot
   heuristic at ~0.8s/move. They fill empty seats but yield to humans: a
   player joining a full room evicts the newest bot instead of being turned
   away (ADR-0014). Removed via "Remove bot" / `rmbot`.
+- The host sets each game's options in the lobby (ADR-0015): the two timers
+  and every rule scalar (starting balance, GO salary, jail fine, max houses,
+  bankruptcy threshold, auctions on/off, expropriation %, rent boost %,
+  domination groups). Edits broadcast live to the lobby; the server clamps
+  every value. New rooms default to a 60-minute game with a 25 s turn limit
+  (strict auto-skip). One server runs many rooms, each with its own settings
+  - no orchestrator needed. `--turn-timeout` / `--game-timeout` set the
+  per-room defaults (0 disables); the host overrides them. CLI:
+  `set <field> <value>` (e.g. `set game 45`, `set turn off`,
+  `set expropriation 0`).
 
 ## Deviations from the architecture doc
 
@@ -320,7 +332,9 @@ collapsed); 0007 private trade offers via per-seat `ClientView`s;
 redundant, accounts always optional); 0010 time-boxed games end by net
 worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts;
 0013 domination win (control N full colour groups); 0014 server-side bot
-seats (host-added, yield to humans, shared `bot::decide` heuristic).
+seats (host-added, yield to humans, shared `bot::decide` heuristic);
+0015 per-room host-editable settings (timers + rules chosen in the lobby,
+clamped server-side; one server runs many independent games).
 
 ## Roadmap
 

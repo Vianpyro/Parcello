@@ -53,6 +53,9 @@ class GameSession extends ChangeNotifier {
   GameContent? content;
   ClientView? view;
   List<SeatInfo> seats = [];
+  /// Current room settings (timers + rules, ADR-0015); the host edits them
+  /// in the lobby. Null before the first Joined/Lobby message.
+  RoomSettings? settings;
   final List<String> log = [];
   String loginMessage = '';
   bool joined = false;
@@ -235,6 +238,12 @@ class GameSession extends ChangeNotifier {
     _ws?.sink.add(jsonEncode({'type': 'remove_bot'}));
   }
 
+  /// Host only: replace the room settings (ADR-0015). `settings` is the raw
+  /// wire map; the server clamps and broadcasts the applied values back.
+  void configure(Map<String, dynamic> settings) {
+    _ws?.sink.add(jsonEncode({'type': 'configure', 'settings': settings}));
+  }
+
   /// Post-game survey answer; `rating` 1-5, empty comment omitted.
   void sendFeedback(int rating, String comment) {
     _ws?.sink.add(jsonEncode({
@@ -260,6 +269,7 @@ class GameSession extends ChangeNotifier {
         seat = msg['seat'] as int;
         content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
         seats = _seatList(msg['players']);
+        settings = RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
         if (msg['reconnect'] != null) {
           _saveToken(code!, msg['reconnect'] as String);
         }
@@ -274,6 +284,7 @@ class GameSession extends ChangeNotifier {
         _log('Joined room $code. Mods: ${content!.modIds.join(', ')}');
       case 'lobby':
         seats = _seatList(msg['players']);
+        settings = RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
       case 'game_started':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         feedbackDone = false;

@@ -117,18 +117,24 @@ architecture doc section 5; dependencies point downward only):
   yield to humans - joining a full room evicts the newest bot instead of
   rejecting; `SeatInfo.is_bot` labels them (ADR-0014); rooms with
   zero connected seats
-  dissolve after `IDLE_TIMEOUT` = 30 min; smart per-turn AFK timer
-  (`afk_deadline`, recomputed each loop so a mid-turn disconnect shortens
-  it): a disconnected acting seat is auto-played the canonical action
-  Roll/Decline/Pass/EndTurn after `DISCONNECTED_GRACE` = 30s always, a
-  connected-but-idle seat only when `--turn-timeout <secs>` is set (0 = off
-  default); any accepted command resets the clock; optional game clock
-  `--game-timeout <secs>` ends a time-boxed game via
-  `Engine::finish_on_time` - richest by `GameState::net_worth` wins, ties to
-  lowest seat, `Event::TimeUp` (ADR-0010); `GameStarted`/`Joined` carry
-  `time_remaining` for the game countdown (clients mirror the net-worth
-  formula) and `turn_seconds` (the `--turn-timeout` value, absent when off)
-  for a per-turn countdown the clients reset on each Update; post-game
+  dissolve after `IDLE_TIMEOUT` = 30 min; per-room settings
+  (`RoomSettings` = timers + full `RuleParams`, ADR-0015): host edits them in
+  the lobby via `Configure` (host+lobby only, `clamp_settings` bounds the
+  untrusted wire values), broadcast on every `Lobby`/`Joined`; `start_game`
+  rebuilds the engine with the effective rules and derives the timers from
+  the settings, so the config is frozen and replay-safe once Active; smart
+  per-turn AFK timer (`afk_deadline`, recomputed each loop so a mid-turn
+  disconnect shortens it): a disconnected acting seat is auto-played the
+  canonical action Roll/Decline/Pass/EndTurn after `DISCONNECTED_GRACE` = 30s
+  always, a connected-but-idle seat when `settings.turn_seconds` is set
+  (default 25s, `--turn-timeout` sets the per-room default, 0 = off); any
+  accepted command resets the clock; game clock derived from
+  `settings.game_seconds` (default 3600s, `--game-timeout` default, 0 =
+  untimed) ends a time-boxed game via `Engine::finish_on_time` - richest by
+  `GameState::net_worth` wins, ties to lowest seat, `Event::TimeUp`
+  (ADR-0010); `GameStarted`/`Joined` carry `time_remaining` for the game
+  countdown (clients mirror the net-worth formula) and `turn_seconds` for a
+  per-turn countdown the clients reset on each Update; post-game
   survey `feedback` message:
   Finished phase only, once per seat, rating 1-5 + comment capped at 500
   chars, stored via `GameHistory::record_feedback` - the client UI must
@@ -142,8 +148,8 @@ architecture doc section 5; dependencies point downward only):
   ADR-0005), `web/index.html` (embedded via `include_str!` - the server
   binary is the whole deployment).
 - `crates/cli` - terminal test harness; keep it in sync with new commands
-  (it is the cheapest end-to-end protocol check; `addbot`/`rmbot` stdin
-  commands too). `--bot` turns it into an autopilot seat using the shared
+  (it is the cheapest end-to-end protocol check; `addbot`/`rmbot` and
+  `set <field> <value>` stdin commands too, ADR-0015). `--bot` turns it into an autopilot seat using the shared
   `parcello_engine::bot::decide` (buy/bid/build/jail-card, declines trades)
   so games can be playtested without volunteers; soak it with 3 bots when
   touching turn flow. Server-side bots (ADR-0014) reuse the same heuristic.
@@ -193,8 +199,9 @@ on in the base fast mod.
 
 Deliberate simplifications (documented, do not "fix" without discussion):
 no immediate interest when mortgaged tiles change hands; jail cards are a
-count (not tradeable, never leave the deck rotation); the AFK timer is
-opt-in (`--turn-timeout`, off by default).
+count (not tradeable, never leave the deck rotation); per-game settings are
+rules + timers only - the board/mod set is still chosen at room creation, not
+lobby-editable (ADR-0015).
 
 ## Code conventions
 

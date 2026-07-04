@@ -17,7 +17,7 @@ use parcello_engine::{
     PlayerId, TurnPhase,
 };
 use parcello_mods::ResolvedContent;
-use parcello_protocol::{SeatInfo, ServerMessage};
+use parcello_protocol::{RoomSettings, SeatInfo, ServerMessage};
 use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::{error, info, warn};
 
@@ -68,6 +68,11 @@ pub enum RoomCmd {
     RemoveBot {
         player_id: PlayerId,
     },
+    /// Host replaces the room's settings in the lobby (ADR-0015).
+    Configure {
+        player_id: PlayerId,
+        settings: RoomSettings,
+    },
     Game {
         player_id: PlayerId,
         cmd: CommandKind,
@@ -102,6 +107,13 @@ pub async fn create_room(
     registry.insert(code.clone(), tx);
     drop(registry);
 
+    // Initial settings: the mod's rules and the server's default timers.
+    // The host tweaks them in the lobby before starting (ADR-0015).
+    let settings = RoomSettings {
+        game_seconds: game_timeout.map(|d| d.as_secs()),
+        turn_seconds: turn_timeout.map(|d| d.as_secs()),
+        rules: content.content.rules.clone(),
+    };
     let room = Room {
         code: code.clone(),
         content,
@@ -109,8 +121,7 @@ pub async fn create_room(
         seats: Vec::new(),
         phase: Phase::Lobby,
         history,
-        turn_timeout,
-        game_timeout,
+        settings,
         game_deadline: None,
         bot_counter: 0,
     };
@@ -167,6 +178,27 @@ fn token_eq(a: &str, b: &str) -> bool {
             == 0
 }
 
+/// Clamp host-supplied room settings to sane ranges (ADR-0015). The wire
+/// values are untrusted: absurd numbers would break the game (a house level
+/// past the 6-entry rent table, negative economy) or the experience (a
+/// one-second game). Returned settings are always safe to apply.
+fn clamp_settings(mut s: RoomSettings) -> RoomSettings {
+    s.game_seconds = s.game_seconds.map(|v| v.clamp(60, 86_400));
+    s.turn_seconds = s.turn_seconds.map(|v| v.clamp(5, 3_600));
+    let r = &mut s.rules;
+    r.starting_balance = r.starting_balance.clamp(0, 1_000_000);
+    r.go_salary = r.go_salary.clamp(0, 100_000);
+    r.jail_fine = r.jail_fine.clamp(0, 100_000);
+    // rents[] has six levels (0..=5, level 5 = hotel); a higher cap would
+    // index past the array in the rent calculator.
+    r.max_houses_per_property = r.max_houses_per_property.clamp(1, 5);
+    r.bankruptcy_threshold = r.bankruptcy_threshold.clamp(0, 1_000_000);
+    r.expropriation = r.expropriation.clamp(0, 1_000);
+    r.rent_boost = r.rent_boost.clamp(0, 1_000);
+    r.win_full_groups = r.win_full_groups.clamp(0, 100);
+    s
+}
+
 struct Seat {
     identity: Identity,
     /// `None` while disconnected; the seat survives for rejoin. Bot seats
@@ -194,14 +226,12 @@ struct Room {
     seats: Vec<Seat>,
     phase: Phase,
     history: Arc<dyn GameHistory>,
-    /// `Some(d)`: a connected but idle player's turn is auto-played after
-    /// `d` (AFK protection). Disconnected players are always skipped after
-    /// `DISCONNECTED_GRACE`, independent of this.
-    turn_timeout: Option<Duration>,
-    /// `Some(d)`: the game ends after `d` and the richest player wins
-    /// (net worth, ADR-0010). `game_deadline` is the absolute instant,
-    /// set when the game starts.
-    game_timeout: Option<Duration>,
+    /// Host-editable per-room config (timers + rules, ADR-0015). Frozen once
+    /// the game starts (`Configure` is lobby-only). The turn timer, game
+    /// clock, and effective rules are all derived from here at `start_game`.
+    settings: RoomSettings,
+    /// Absolute instant the game clock fires, set at `start_game` from
+    /// `settings.game_seconds`; `None` for an untimed game (ADR-0010).
     game_deadline: Option<tokio::time::Instant>,
     /// Monotonic counter for bot seat names ("Bot 1", "Bot 2", ...), so a
     /// removed-then-readded bot never reuses a `player_id`.
@@ -256,6 +286,13 @@ impl Room {
                         }
                         RoomCmd::RemoveBot { player_id } => {
                             self.handle_remove_bot(&player_id);
+                            false
+                        }
+                        RoomCmd::Configure {
+                            player_id,
+                            settings,
+                        } => {
+                            self.handle_configure(&player_id, settings);
                             false
                         }
                         RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
@@ -316,18 +353,16 @@ impl Room {
 
     /// How long the acting seat may stall before its canonical action is
     /// auto-played, or `None` for no limit. A disconnected seat (truly AFK)
-    /// is skipped after `DISCONNECTED_GRACE` whether or not `--turn-timeout`
-    /// is set; a connected but slow player only faces `--turn-timeout`.
+    /// is skipped after `DISCONNECTED_GRACE` whether or not a turn limit is
+    /// set; a connected but slow player only faces the room's turn limit.
     fn afk_deadline(&self) -> Option<Duration> {
         let seat = self.acting_seat()?;
+        let turn_limit = self.settings.turn_seconds.map(Duration::from_secs);
         let connected = self.seats.get(seat).is_some_and(|s| s.tx.is_some());
         if connected {
-            self.turn_timeout
+            turn_limit
         } else {
-            Some(
-                self.turn_timeout
-                    .map_or(DISCONNECTED_GRACE, |t| t.min(DISCONNECTED_GRACE)),
-            )
+            Some(turn_limit.map_or(DISCONNECTED_GRACE, |t| t.min(DISCONNECTED_GRACE)))
         }
     }
 
@@ -361,7 +396,10 @@ impl Room {
                 continue;
             }
             let view = ClientView::for_seat(st, i);
-            if let Some(kind) = parcello_engine::bot::decide(&self.content.content, &view, i) {
+            // The engine's content carries the effective rules after
+            // start_game rebuilds it (ADR-0015), so the bot plays by the
+            // room's actual settings.
+            if let Some(kind) = parcello_engine::bot::decide(self.engine.content(), &view, i) {
                 return Some((st.players[i].id.clone(), kind));
             }
         }
@@ -415,6 +453,22 @@ impl Room {
             self.seats.remove(i);
             self.broadcast_lobby();
         }
+    }
+
+    /// Host replaces the room's settings from the lobby (ADR-0015). The wire
+    /// values are untrusted, so every field is clamped to a sane range before
+    /// it is applied; the clamped result is broadcast back so all clients
+    /// (and the host's own inputs) converge on what the server accepted.
+    fn handle_configure(&mut self, player_id: &str, settings: RoomSettings) {
+        if !matches!(self.phase, Phase::Lobby) {
+            return self.send_error(player_id, "settings can only change in the lobby");
+        }
+        if !self.is_host(player_id) {
+            return self.send_error(player_id, "only the host can change settings");
+        }
+        self.settings = clamp_settings(settings);
+        info!(room = %self.code, "settings updated");
+        self.broadcast_lobby();
     }
 
     fn handle_join(
@@ -475,11 +529,12 @@ impl Room {
             code: self.code.clone(),
             seat: seat_index,
             players: self.seat_infos(),
-            content: Box::new((*self.content).clone()),
+            content: Box::new(self.effective_resolved()),
             view,
             reconnect: Some(self.seats[seat_index].reconnect.clone()),
             time_remaining: self.time_remaining_secs(),
-            turn_seconds: self.turn_timeout.map(|d| d.as_secs()),
+            turn_seconds: self.settings.turn_seconds,
+            settings: self.settings.clone(),
         };
         if tx.send(joined).is_err() {
             self.seats[seat_index].tx = None;
@@ -521,8 +576,7 @@ impl Room {
             self.send_error(player_id, "need at least 2 players");
             return false;
         }
-        self.start_game();
-        true
+        self.start_game(player_id)
     }
 
     /// Replay in the same room after a game ends: the first requester restarts
@@ -540,13 +594,29 @@ impl Room {
         }
         // Drop players who returned to the start screen; re-seat the rest.
         self.seats.retain(|s| s.tx.is_some());
-        self.start_game();
-        true
+        self.start_game(player_id)
+    }
+
+    /// Base content with the host's effective rules applied (ADR-0015).
+    fn effective_resolved(&self) -> ResolvedContent {
+        let mut resolved = (*self.content).clone();
+        resolved.content.rules = self.settings.rules.clone();
+        resolved
     }
 
     /// Deals a fresh game to the current seats and broadcasts it. Shared by
-    /// the first Start and every PlayAgain.
-    fn start_game(&mut self) {
+    /// the first Start and every PlayAgain. Returns true when the game
+    /// actually started (turn clock should reset). Rebuilds the engine with
+    /// the host's chosen rules (ADR-0015), which is why it can fail.
+    fn start_game(&mut self, host: &str) -> bool {
+        let engine = match Engine::new(Arc::new(self.effective_resolved().content)) {
+            Ok(engine) => engine,
+            Err(e) => {
+                self.send_error(host, &format!("invalid settings: {e}"));
+                return false;
+            }
+        };
+        self.engine = engine;
         let players: Vec<(PlayerId, String)> = self
             .seats
             .iter()
@@ -561,14 +631,17 @@ impl Room {
         );
         // Start the game clock now, if the room is time-boxed (ADR-0010), and
         // reopen the post-game survey for the new game.
-        self.game_deadline = self.game_timeout.map(|d| tokio::time::Instant::now() + d);
+        self.game_deadline = self
+            .settings
+            .game_seconds
+            .map(|s| tokio::time::Instant::now() + Duration::from_secs(s));
         for seat in &mut self.seats {
             seat.feedback_given = false;
         }
         info!(room = %self.code, players = self.seats.len(), "game started");
 
         let remaining = self.time_remaining_secs();
-        let turn_seconds = self.turn_timeout.map(|d| d.as_secs());
+        let turn_seconds = self.settings.turn_seconds;
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::GameStarted {
                 view: Box::new(ClientView::for_seat(&state, seat)),
@@ -578,6 +651,7 @@ impl Room {
             .collect();
         self.phase = Phase::Active(state);
         self.send_per_seat(msgs);
+        true
     }
 
     /// Seconds left before the game clock ends the game, if time-boxed.
@@ -719,7 +793,8 @@ impl Room {
 
     fn broadcast_lobby(&mut self) {
         let players = self.seat_infos();
-        self.broadcast(ServerMessage::Lobby { players });
+        let settings = self.settings.clone();
+        self.broadcast(ServerMessage::Lobby { players, settings });
     }
 
     fn broadcast(&mut self, msg: ServerMessage) {
@@ -1376,6 +1451,11 @@ mod tests {
 
     fn test_room(content: Arc<ResolvedContent>) -> Room {
         let engine = Engine::new(Arc::new(content.content.clone())).expect("engine builds");
+        let settings = RoomSettings {
+            game_seconds: None,
+            turn_seconds: None,
+            rules: content.content.rules.clone(),
+        };
         Room {
             code: "TESTS".into(),
             content,
@@ -1383,8 +1463,7 @@ mod tests {
             seats: Vec::new(),
             phase: Phase::Lobby,
             history: Arc::new(MemoryHistory::new()),
-            turn_timeout: None,
-            game_timeout: None,
+            settings,
             game_deadline: None,
             bot_counter: 0,
         }
@@ -1478,6 +1557,53 @@ mod tests {
         assert_eq!(room.seats.iter().filter(|s| s.is_bot).count(), 1);
         room.handle_remove_bot("guest:host");
         assert!(room.seats.iter().all(|s| !s.is_bot), "host removed the bot");
+    }
+
+    /// Only the host may change settings, and the server clamps absurd wire
+    /// values (ADR-0015).
+    #[test]
+    fn configure_is_host_gated_and_clamped() {
+        let mut room = test_room(base_content());
+        room.seats.push(human_seat("guest:host"));
+        room.seats.push(human_seat("guest:other"));
+        let before = room.settings.rules.starting_balance;
+
+        let mut s = room.settings.clone();
+        s.rules.starting_balance = 5000;
+        room.handle_configure("guest:other", s); // not the host
+        assert_eq!(
+            room.settings.rules.starting_balance, before,
+            "a non-host must not change settings"
+        );
+
+        let mut s = room.settings.clone();
+        s.rules.starting_balance = i64::MAX;
+        s.rules.max_houses_per_property = 200;
+        s.game_seconds = Some(1); // below the 60s floor
+        s.turn_seconds = Some(25);
+        room.handle_configure("guest:host", s);
+        assert_eq!(room.settings.rules.starting_balance, 1_000_000, "clamped");
+        assert_eq!(room.settings.rules.max_houses_per_property, 5, "house cap");
+        assert_eq!(room.settings.game_seconds, Some(60), "game floor");
+        assert_eq!(room.settings.turn_seconds, Some(25));
+    }
+
+    /// The game starts with the host's chosen rules: a rebuilt engine deals
+    /// the configured starting balance (ADR-0015).
+    #[test]
+    fn start_game_applies_the_host_rules() {
+        let mut room = test_room(base_content());
+        room.seats.push(human_seat("guest:host"));
+        room.seats.push(human_seat("guest:bob"));
+        room.settings.rules.starting_balance = 777;
+        assert!(room.start_game("guest:host"), "game must start");
+        let Phase::Active(st) = &room.phase else {
+            panic!("game should be active");
+        };
+        assert!(
+            st.players.iter().all(|p| p.cash == 777),
+            "every player starts with the host's balance"
+        );
     }
 
     /// With a paused clock and zero player input, the room task must play

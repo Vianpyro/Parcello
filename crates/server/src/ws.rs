@@ -175,6 +175,16 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 }
             }
 
+            (ClientMessage::Configure { settings }, Some(s)) => {
+                let cmd = RoomCmd::Configure {
+                    player_id: s.player_id.clone(),
+                    settings,
+                };
+                if s.room.send(cmd).await.is_err() {
+                    break;
+                }
+            }
+
             (ClientMessage::Leave, Some(s)) => {
                 let _ = s
                     .room
@@ -212,6 +222,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 | ClientMessage::PlayAgain
                 | ClientMessage::AddBot
                 | ClientMessage::RemoveBot
+                | ClientMessage::Configure { .. }
                 | ClientMessage::Cmd { .. }
                 | ClientMessage::Feedback { .. },
                 None,

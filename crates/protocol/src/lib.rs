@@ -4,9 +4,28 @@
 //! client mirrors these shapes in Dart). Externally tagged with `type` in
 //! snake_case, matching the engine's command/event wire format.
 
-use parcello_engine::{ClientView, CommandError, CommandKind, Event};
+use parcello_engine::{ClientView, CommandError, CommandKind, Event, RuleParams};
 use parcello_mods::ResolvedContent;
 use serde::{Deserialize, Serialize};
+
+/// Per-room game settings the host edits in the lobby (ADR-0015): the two
+/// time limits plus the full effective rule set. Initialised from the room's
+/// mod content and the server's default timers, then overridden live. The
+/// server clamps every field before applying it - the wire values are
+/// untrusted host input.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoomSettings {
+    /// Total game length in seconds; `None` = untimed (no game clock).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_seconds: Option<u64>,
+    /// Per-turn limit in seconds; `None` = no turn limit (never auto-skip a
+    /// connected player). A disconnected player is still skipped after the
+    /// fixed grace regardless.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_seconds: Option<u64>,
+    /// The effective rule scalars used when the game starts.
+    pub rules: RuleParams,
+}
 
 /// Identity presented on connect. MVP (ADR-0003): guest names only unless
 /// the server is started with a JWT secret.
@@ -47,6 +66,12 @@ pub enum ClientMessage {
     AddBot,
     /// Host only, from the Lobby: drop the most recently added bot seat.
     RemoveBot,
+    /// Host only, from the Lobby: replace the room's settings (timers +
+    /// rules, ADR-0015). The server clamps and broadcasts the applied values
+    /// back in `Lobby`.
+    Configure {
+        settings: RoomSettings,
+    },
     /// Host only, from the Lobby: start the game.
     Start,
     /// After a game ends, replay in the same room: the first sender restarts
@@ -110,10 +135,15 @@ pub enum ServerMessage {
         /// per-turn countdown, reset on each Update.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_seconds: Option<u64>,
+        /// Current room settings (timers + rules) for the lobby UI (ADR-0015).
+        settings: RoomSettings,
     },
-    /// Broadcast on lobby membership or connection changes.
+    /// Broadcast on lobby membership, connection, or settings changes.
     Lobby {
         players: Vec<SeatInfo>,
+        /// Current room settings so joiners see them and the host's edits
+        /// propagate live (ADR-0015).
+        settings: RoomSettings,
     },
     GameStarted {
         view: Box<ClientView>,
@@ -201,6 +231,24 @@ mod tests {
         assert!(matches!(add, ClientMessage::AddBot));
         let rm: ClientMessage = serde_json::from_str(r#"{"type":"remove_bot"}"#).unwrap();
         assert!(matches!(rm, ClientMessage::RemoveBot));
+
+        // Configure carries the timers plus a full rule set; omitted timers
+        // deserialize to None (untimed / no per-turn limit).
+        let cfg: ClientMessage = serde_json::from_str(
+            r#"{"type":"configure","settings":{"turn_seconds":25,"rules":{
+                "starting_balance":1500,"go_salary":200,"jail_fine":50,
+                "max_houses_per_property":5,"bankruptcy_threshold":0,
+                "auction_on_decline":true,"expropriation":200,"rent_boost":50,
+                "win_full_groups":3}}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            cfg,
+            ClientMessage::Configure { settings }
+                if settings.turn_seconds == Some(25)
+                    && settings.game_seconds.is_none()
+                    && settings.rules.win_full_groups == 3
+        ));
 
         let fb: ClientMessage =
             serde_json::from_str(r#"{"type":"feedback","rating":4,"comment":"gg"}"#).unwrap();

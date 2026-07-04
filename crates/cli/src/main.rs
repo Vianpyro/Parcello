@@ -1,7 +1,7 @@
 //! Terminal test client. Not a product surface: exists to exercise the
 //! server end-to-end until the Flutter client lands.
 //!
-//! Commands (stdin): start | addbot | rmbot | roll | buy | no | bid <amount> | pass
+//! Commands (stdin): start | addbot | rmbot | set <field> <value> | roll | buy | no | bid <amount> | pass
 //! | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
 //! | offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
 //! | accept <id> | refuse <id> | cancel <id> | pay | card | end | resign | quit.
@@ -10,7 +10,7 @@ use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use parcello_engine::{ClientView, CommandKind, DeckKind, Event, GamePhase, TileKind, TurnPhase};
 use parcello_mods::ResolvedContent;
-use parcello_protocol::{AuthPayload, ClientMessage, SeatInfo, ServerMessage};
+use parcello_protocol::{AuthPayload, ClientMessage, RoomSettings, SeatInfo, ServerMessage};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -162,6 +162,12 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
         ("leave", None) => return Some(ClientMessage::Leave),
         ("addbot", None) => return Some(ClientMessage::AddBot),
         ("rmbot", None) => return Some(ClientMessage::RemoveBot),
+        ("set", Some(field)) => {
+            let value = parts.next()?;
+            let mut settings = ctx.settings.clone()?;
+            apply_setting(&mut settings, field, value)?;
+            return Some(ClientMessage::Configure { settings });
+        }
         ("roll", None) => CommandKind::Roll,
         ("buy", None) => CommandKind::Buy,
         ("no", None) => CommandKind::Decline,
@@ -237,6 +243,35 @@ fn parse_tile_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Applies one `set <field> <value>` edit to a settings copy (ADR-0015).
+/// `None` on an unknown field or unparseable value. The server clamps.
+fn apply_setting(s: &mut RoomSettings, field: &str, value: &str) -> Option<()> {
+    // `off`/`none` disables a timer; anything else is a seconds count.
+    let opt_secs = |v: &str| -> Option<Option<u64>> {
+        if v == "off" || v == "none" {
+            Some(None)
+        } else {
+            Some(Some(v.parse().ok()?))
+        }
+    };
+    let r = &mut s.rules;
+    match field {
+        "game" => s.game_seconds = opt_secs(value)?,
+        "turn" => s.turn_seconds = opt_secs(value)?,
+        "starting_balance" => r.starting_balance = value.parse().ok()?,
+        "go_salary" => r.go_salary = value.parse().ok()?,
+        "jail_fine" => r.jail_fine = value.parse().ok()?,
+        "max_houses" => r.max_houses_per_property = value.parse().ok()?,
+        "bankruptcy_threshold" => r.bankruptcy_threshold = value.parse().ok()?,
+        "auction" => r.auction_on_decline = value.parse().ok()?,
+        "expropriation" => r.expropriation = value.parse().ok()?,
+        "rent_boost" => r.rent_boost = value.parse().ok()?,
+        "win_full_groups" => r.win_full_groups = value.parse().ok()?,
+        _ => return None,
+    }
+    Some(())
+}
+
 /// Everything needed to print human-readable output: resolved content for
 /// tile names, latest seat list for player names, our own seat index.
 #[derive(Default)]
@@ -248,6 +283,8 @@ struct Ctx {
     my_seat: Option<usize>,
     /// Latest authoritative view; what the bot decides on.
     view: Option<Box<ClientView>>,
+    /// Latest room settings (ADR-0015); the `set` command edits a copy.
+    settings: Option<RoomSettings>,
 }
 
 impl Ctx {
@@ -265,9 +302,11 @@ impl Ctx {
                 reconnect,
                 time_remaining,
                 turn_seconds,
+                settings,
             } => {
                 self.my_seat = Some(seat);
                 self.content = Some(*content);
+                self.settings = Some(settings);
                 println!("* joined room {code} as seat {seat}");
                 if let Some(token) = reconnect {
                     println!("* reconnect token: {token} (rejoin with --reconnect {token})");
@@ -279,13 +318,22 @@ impl Ctx {
                     println!("* turn timer: {secs}s per turn");
                 }
                 self.print_lobby(&players);
+                self.print_settings();
                 if let Some(view) = view {
                     println!("* game in progress:");
                     self.print_view(&view);
                     self.view = Some(view);
                 }
             }
-            ServerMessage::Lobby { players } => self.print_lobby(&players),
+            ServerMessage::Lobby { players, settings } => {
+                // Keep effective rules current for the --bot heuristic.
+                if let Some(content) = &mut self.content {
+                    content.content.rules = settings.rules.clone();
+                }
+                self.settings = Some(settings);
+                self.print_lobby(&players);
+                self.print_settings();
+            }
             ServerMessage::GameStarted {
                 view,
                 time_remaining,
@@ -330,6 +378,29 @@ impl Ctx {
             })
             .collect();
         println!("* lobby: [{}]", list.join(", "));
+    }
+
+    /// Dumps the current room settings; the field names double as `set` keys.
+    fn print_settings(&self) {
+        let Some(s) = &self.settings else { return };
+        let r = &s.rules;
+        let secs = |v: Option<u64>| v.map_or("off".to_string(), |n| format!("{n}s"));
+        println!(
+            "* settings: game={} turn={} | starting_balance={} go_salary={} jail_fine={} \
+             max_houses={} bankruptcy_threshold={} auction_on_decline={} expropriation={} \
+             rent_boost={} win_full_groups={}",
+            secs(s.game_seconds),
+            secs(s.turn_seconds),
+            r.starting_balance,
+            r.go_salary,
+            r.jail_fine,
+            r.max_houses_per_property,
+            r.bankruptcy_threshold,
+            r.auction_on_decline,
+            r.expropriation,
+            r.rent_boost,
+            r.win_full_groups,
+        );
     }
 
     fn print_view(&mut self, view: &ClientView) {

@@ -57,14 +57,17 @@ struct Args {
     #[arg(long)]
     history: Option<PathBuf>,
 
-    /// Auto-play the canonical action (roll/decline/pass/end turn) for the
-    /// acting player after this many seconds without progress. 0 disables.
-    #[arg(long, default_value_t = 0)]
+    /// Default per-turn limit for new rooms (seconds): auto-play the
+    /// canonical action (roll/decline/pass/end turn) for the acting player
+    /// after this long without progress. 0 disables. The host can change it
+    /// per room in the lobby (ADR-0015).
+    #[arg(long, default_value_t = 25)]
     turn_timeout: u64,
 
-    /// Time-box games: after this many seconds the game ends and the
-    /// richest player (by net worth) wins (ADR-0010). 0 disables.
-    #[arg(long, default_value_t = 0)]
+    /// Default game length for new rooms (seconds): the game ends and the
+    /// richest player (by net worth) wins (ADR-0010). 0 = untimed. The host
+    /// can change it per room in the lobby (ADR-0015).
+    #[arg(long, default_value_t = 3600)]
     game_timeout: u64,
 }
 
@@ -77,6 +80,8 @@ pub struct AppState {
     pub mods_dir: Arc<PathBuf>,
     pub verifier: Arc<dyn IdentityVerifier>,
     pub history: Arc<dyn GameHistory>,
+    /// Default timers for new rooms; the host overrides them per room in the
+    /// lobby (ADR-0015). `None` = disabled by default.
     pub turn_timeout: Option<std::time::Duration>,
     pub game_timeout: Option<std::time::Duration>,
 }
