@@ -578,6 +578,10 @@ impl Ctx {
             Event::TimeUp { winner } => {
                 format!("time's up! {} wins on net worth", self.player(*winner))
             }
+            Event::WonByGroups { winner, groups } => format!(
+                "{} wins by controlling {groups} colour groups!",
+                self.player(*winner)
+            ),
         }
     }
 

@@ -189,4 +189,9 @@ pub enum Event {
     TimeUp {
         winner: usize,
     },
+    /// Instant win by controlling `groups` complete colour groups (ADR-0013).
+    WonByGroups {
+        winner: usize,
+        groups: u8,
+    },
 }

@@ -38,7 +38,7 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Stations (gares) | 4 group-scaled tiles | removed, or repurposed as "resorts" | DONE - two resorts on `base` |
 | Mortgages | full mortgage/redeem flow | removed (slows games) | **rules-flag** (`rules.mortgage`; today the 4 commands are always available - add a disable branch) |
 | Jail | jail tile, fine, doubles, cards | "blocked several turns" island | keep the mechanic, **rename** (mod cosmetic); tuning turn count is small **engine** |
-| Win condition | last player standing + richest at time limit | also: own all resorts, control all cities of N colours, own a whole side | partly DONE (time-limit wealth win, ADR-0010); the rest is a `WinCondition` set in the engine |
+| Win condition | last player standing + richest at time limit + control N full groups | also: own all resorts, own a whole side | mostly DONE (time-limit wealth win ADR-0010, domination win ADR-0013); resorts need a string rule, a "side" needs ring geometry - both deferred |
 | Time-boxed game | `--game-timeout`: richest by net worth wins at the buzzer | 15/30 min presets, host-chosen | DONE (ADR-0010); host-chosen per-room duration is a follow-up |
 | Expropriation | `rules.expropriation`: seize a rival's unimproved property at a premium (owner compensated) | tune cost / allow improved targets | DONE (ADR-0011) |
 | Rent multiplier boost | `rules.rent_boost`: pay to raise an owned tile's rent +50%/step, cap 3 | theme it ("championships"), tie to a board event | DONE (ADR-0012) |

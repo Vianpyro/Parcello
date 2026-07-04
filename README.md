@@ -228,8 +228,9 @@ are allowlist-validated server-side. Examples: play the long game with
 
 V1 hook points: `rules.{starting_balance, go_salary, jail_fine,
 max_houses_per_property, bankruptcy_threshold, auction_on_decline,
-expropriation, rent_boost}` (booleans as 0/1; `expropriation`/`rent_boost`
-are cost percents, 0 = mechanic off), `cards.chance[*]`,
+expropriation, rent_boost, win_full_groups}` (booleans as 0/1;
+`expropriation`/`rent_boost` are cost percents and `win_full_groups` a
+group count, 0 = off), `cards.chance[*]`,
 `cards.community[*]`, `properties[*]` (including per-tile `rent_model`:
 `houses` (default), `group_scaled` for stations, `dice_scaled` for
 utilities; the scaled models need no `house_cost` and cannot be built on).
@@ -267,7 +268,10 @@ returned tiles), resignation, last-player-standing win. Optional time-boxed game
 mechanics for swingy games: expropriation (seize a rival's unimproved
 property at a premium; the owner is compensated, ADR-0011) and rent boosts
 (pay to raise an owned tile's rent one step, capped, ADR-0012) - both on by
-default in the base fast board.
+default in the base fast board. Multiple win conditions: last player
+standing, richest at the time limit (ADR-0010), and a domination win -
+control N complete colour groups (`rules.win_full_groups`, 3 in the base
+fast board, ADR-0013).
 
 Deliberate V1 simplifications: no immediate interest charge when mortgaged
 tiles change hands (trades and bankruptcy transfer them as-is);
@@ -300,7 +304,8 @@ collapsed); 0007 private trade offers via per-seat `ClientView`s;
 0008 per-seat reconnect tokens (guest seat hijack protection);
 0009 Identity Service design (EdDSA JWT + JWKS, self-hosted and
 redundant, accounts always optional); 0010 time-boxed games end by net
-worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts.
+worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts;
+0013 domination win (control N full colour groups).
 
 ## Roadmap
 

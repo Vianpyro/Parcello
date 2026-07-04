@@ -13,7 +13,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0012` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0013` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
@@ -55,7 +55,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 70 tests, all must pass
+cargo test  --workspace --locked          # 72 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -167,8 +167,9 @@ creditor (mortgages carry as-is; bank refurbishes); **trading**
 exempt from turn check like Resign; re-validated at acceptance - stale
 offers reject without mutation; purged on bankruptcy; max 4 open per
 proposer; offers and their lifecycle events are private to the two
-parties, ADR-0007); resign; last-player-standing win; optional time-boxed
-games (richest by net worth wins, `--game-timeout`, ADR-0010); optional
+parties, ADR-0007); resign; win conditions: last-player-standing, richest
+at the time limit (`--game-timeout`, ADR-0010), domination
+(`rules.win_full_groups` complete groups, ADR-0013, 3 in base); optional
 expropriation (`rules.expropriation`, seize a rival's unimproved property
 at a premium, owner compensated, ADR-0011) and rent boosts
 (`rules.rent_boost`, +50%/step, cap 3, reset on transfer, ADR-0012) - both

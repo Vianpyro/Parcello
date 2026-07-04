@@ -74,6 +74,7 @@ impl RegistryBuilder {
                 "auction_on_decline" => rules.auction_on_decline = *value != 0,
                 "expropriation" => rules.expropriation = *value,
                 "rent_boost" => rules.rent_boost = *value,
+                "win_full_groups" => rules.win_full_groups = *value,
                 _ => warn!(key, value, "unknown rule key ignored"),
             }
         }

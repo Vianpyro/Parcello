@@ -16,3 +16,5 @@ auction_on_decline = 1
 # (they get 100% back); rent_boost = pay 100% of price per +50% rent step.
 expropriation = 200
 rent_boost = 100
+# Domination win (ADR-0013): control 3 complete colour groups to win.
+win_full_groups = 3

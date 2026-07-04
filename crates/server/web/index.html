@@ -681,6 +681,7 @@ function describe(e) {
     case "player_resigned": return `${P(e.player)} resigned`;
     case "game_ended": return `Game over — ${P(e.winner)} wins!`;
     case "time_up": return `Time's up! ${P(e.winner)} wins on net worth.`;
+    case "won_by_groups": return `${P(e.winner)} wins by controlling ${e.groups} colour groups!`;
     default: return JSON.stringify(e);
   }
 }

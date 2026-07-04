@@ -895,6 +895,60 @@ fn rent_boost_is_gated_and_bounded() {
 }
 
 #[test]
+fn win_by_controlling_full_groups() {
+    // Two full groups win. p0 owns brown (ave_a, ave_b); seizing blvd (the
+    // singleton navy group) completes a second group -> instant win.
+    let engine = engine_with_rules(&[], |r| {
+        r.win_full_groups = 2;
+        r.expropriation = 100;
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[6].owner = Some(1);
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Expropriate {
+                tile: "blvd".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::WonByGroups {
+            winner: 0,
+            groups: 2
+        }
+    )));
+    assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
+}
+
+#[test]
+fn group_win_is_off_by_default() {
+    // Same holdings, but no win threshold: seizing must not end the game.
+    let engine = engine_with_rules(&[], |r| r.expropriation = 100);
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[6].owner = Some(1);
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Expropriate {
+                tile: "blvd".into(),
+            },
+        ),
+    );
+    assert!(!ev.iter().any(|e| matches!(e, Event::WonByGroups { .. })));
+    assert_eq!(st.phase, GamePhase::Active);
+}
+
+#[test]
 fn view_hides_rng_and_deck_order() {
     let engine = engine_with(plain_board(), &[]);
     let st = two_players(&engine);

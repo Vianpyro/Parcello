@@ -122,6 +122,10 @@ pub struct RuleParams {
     /// fixed step, capped.
     #[serde(default)]
     pub rent_boost: i64,
+    /// Instant win by owning this many complete colour groups (ADR-0013);
+    /// 0 disables. "Control all cities of N colours."
+    #[serde(default)]
+    pub win_full_groups: i64,
 }
 
 impl Default for RuleParams {
@@ -135,6 +139,7 @@ impl Default for RuleParams {
             auction_on_decline: true,
             expropriation: 0,
             rent_boost: 0,
+            win_full_groups: 0,
         }
     }
 }

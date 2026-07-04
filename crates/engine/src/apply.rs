@@ -101,6 +101,10 @@ pub(crate) fn apply(
         exec.advance_turn();
     }
 
+    // Instant win by controlling enough full groups (ADR-0013), checked
+    // after any holdings-changing command.
+    exec.check_group_win();
+
     Ok((exec.st, exec.ev))
 }
 
@@ -1192,6 +1196,29 @@ impl<'e> Exec<'e> {
         if let Some(winner) = winner {
             self.st.phase = GamePhase::Finished { winner };
             self.ev.push(Event::GameEnded { winner });
+        }
+    }
+
+    /// Instant win by controlling `rules.win_full_groups` complete colour
+    /// groups (ADR-0013). Lowest seat wins if two qualify at once (a trade).
+    fn check_group_win(&mut self) {
+        if !matches!(self.st.phase, GamePhase::Active) {
+            return;
+        }
+        let need = self.content.rules.win_full_groups;
+        if need <= 0 {
+            return;
+        }
+        for p in self.st.alive_players().collect::<Vec<_>>() {
+            let owned = self.st.full_groups_owned(self.content, p);
+            if owned as i64 >= need {
+                self.st.phase = GamePhase::Finished { winner: p };
+                self.ev.push(Event::WonByGroups {
+                    winner: p,
+                    groups: owned.min(u8::MAX as usize) as u8,
+                });
+                return;
+            }
         }
     }
 }

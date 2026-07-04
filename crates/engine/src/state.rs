@@ -193,6 +193,25 @@ impl GameState {
         !tiles.is_empty() && tiles.iter().all(|&t| self.tiles[t].owner == Some(player))
     }
 
+    /// Number of distinct colour groups `player` owns completely (ADR-0013).
+    /// Mortgaged tiles still count for ownership.
+    pub fn full_groups_owned(&self, content: &GameContent, player: usize) -> usize {
+        let mut groups: Vec<&str> = content
+            .board
+            .iter()
+            .filter_map(|t| match &t.kind {
+                crate::content::TileKind::Property(p) => Some(p.group.as_str()),
+                _ => None,
+            })
+            .collect();
+        groups.sort_unstable();
+        groups.dedup();
+        groups
+            .iter()
+            .filter(|g| self.owns_full_group(content, player, g))
+            .count()
+    }
+
     /// Total assets of `player`: cash plus property equity. An unmortgaged
     /// property counts its full price; a mortgaged one counts price/2 (the
     /// owner already took the other half in cash, so mortgaging is net-worth

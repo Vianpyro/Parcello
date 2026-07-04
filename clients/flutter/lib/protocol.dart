@@ -240,6 +240,8 @@ String describeEvent(
       return "Game over -- ${p(e['winner'])} wins!";
     case 'time_up':
       return "Time's up! ${p(e['winner'])} wins on net worth.";
+    case 'won_by_groups':
+      return "${p(e['winner'])} wins by controlling ${e['groups']} colour groups!";
     default:
       return e.toString();
   }
