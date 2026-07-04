@@ -364,7 +364,7 @@ class GameScreen extends StatelessWidget {
         if (mine) {
           if (def.rentModel == 'houses' && !ts.mortgaged) {
             items.add(ListTile(
-                title: const Text('Build house'),
+                title: Text('Build house (\$${def.houseCost})'),
                 onTap: () {
                   s.sendCmd({'type': 'build', 'tile': def.id});
                   close();
@@ -431,14 +431,27 @@ class _CenterPanel extends StatelessWidget {
               style: TextStyle(
                   fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
           const Spacer(),
-          if (s.gameEndsAt != null && s.view?.finished != true) ...[
+          // Shown for the whole game, end included: the final time left is
+          // part of the result (a bankruptcy win keeps time on the clock).
+          if (s.gameEndsAt != null) ...[
             _Countdown(endsAt: s.gameEndsAt!),
             const SizedBox(width: 8),
           ],
           const _MuteButton(),
         ]),
         const SizedBox(height: 4),
-        Text(_status(), style: const TextStyle(fontWeight: FontWeight.w600)),
+        Row(children: [
+          Expanded(
+              child: Text(_status(),
+                  style: const TextStyle(fontWeight: FontWeight.w600))),
+          if (s.turnEndsAt != null && s.view?.finished == false) ...[
+            const SizedBox(width: 6),
+            _Countdown(
+                endsAt: s.turnEndsAt!,
+                icon: Icons.hourglass_bottom,
+                warnSecs: 10),
+          ],
+        ]),
         const SizedBox(height: 6),
         _Actions(s: s),
         const SizedBox(height: 6),
@@ -472,11 +485,14 @@ class _CenterPanel extends StatelessWidget {
   }
 }
 
-/// Ticking countdown to the timed-game deadline (ADR-0010). Turns amber
-/// under a minute so players feel the pressure.
+/// Ticking countdown to a deadline. Used for both the timed-game clock
+/// (ADR-0010) and the per-turn AFK timer; turns red under `warnSecs`.
 class _Countdown extends StatefulWidget {
   final DateTime endsAt;
-  const _Countdown({required this.endsAt});
+  final IconData icon;
+  final int warnSecs;
+  const _Countdown(
+      {required this.endsAt, this.icon = Icons.timer, this.warnSecs = 60});
 
   @override
   State<_Countdown> createState() => _CountdownState();
@@ -503,17 +519,17 @@ class _CountdownState extends State<_Countdown> {
     final secs = left.isNegative ? 0 : left.inSeconds;
     final mmss =
         '${(secs ~/ 60).toString().padLeft(2, '0')}:${(secs % 60).toString().padLeft(2, '0')}';
+    final warn = secs <= widget.warnSecs;
+    final color =
+        warn ? const Color(0xFFC0564F) : const Color(0xFF2A2A2A);
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.timer,
-          size: 18,
-          color: secs <= 60 ? const Color(0xFFC0564F) : const Color(0xFF2A2A2A)),
+      Icon(widget.icon, size: 18, color: color),
       const SizedBox(width: 4),
       Text(mmss,
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontFeatures: const [FontFeature.tabularFigures()],
-            color:
-                secs <= 60 ? const Color(0xFFC0564F) : const Color(0xFF2A2A2A),
+            color: color,
           )),
     ]);
   }
@@ -823,6 +839,23 @@ class _SidePanel extends StatelessWidget {
               const SizedBox(height: 8),
               wideButton('Start game',
                   s.seat == 0 && s.seats.length >= 2 ? s.sendStart : null),
+              // Host-only bot controls. Bots fill empty seats but yield to
+              // humans, so they never block a join (ADR-0014).
+              if (s.seat == 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(children: [
+                    Expanded(
+                        child: wideButton('Add bot',
+                            s.seats.length < 6 ? s.addBot : null,
+                            primary: false)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                        child: wideButton('Remove bot',
+                            s.seats.any((x) => x.isBot) ? s.removeBot : null,
+                            primary: false)),
+                  ]),
+                ),
               if (s.code != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
@@ -881,7 +914,10 @@ class _SidePanel extends StatelessWidget {
         if (i == s.seat) '(you)',
         if (p?.inJail == true) '[jail]',
         if ((p?.jailCards ?? 0) > 0) '[${p!.jailCards} jail card]',
-        if (seatInfo?.connected == false) '(offline)',
+        if (seatInfo?.isBot == true)
+          '\u{1F916} bot'
+        else if (seatInfo?.connected == false)
+          '(offline)',
       ].join(' ');
       rows.add(Opacity(
         opacity: p?.bankrupt == true ? 0.4 : 1,

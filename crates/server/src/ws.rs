@@ -157,6 +157,24 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 }
             }
 
+            (ClientMessage::AddBot, Some(s)) => {
+                let cmd = RoomCmd::AddBot {
+                    player_id: s.player_id.clone(),
+                };
+                if s.room.send(cmd).await.is_err() {
+                    break;
+                }
+            }
+
+            (ClientMessage::RemoveBot, Some(s)) => {
+                let cmd = RoomCmd::RemoveBot {
+                    player_id: s.player_id.clone(),
+                };
+                if s.room.send(cmd).await.is_err() {
+                    break;
+                }
+            }
+
             (ClientMessage::Leave, Some(s)) => {
                 let _ = s
                     .room
@@ -192,6 +210,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
             (
                 ClientMessage::Start
                 | ClientMessage::PlayAgain
+                | ClientMessage::AddBot
+                | ClientMessage::RemoveBot
                 | ClientMessage::Cmd { .. }
                 | ClientMessage::Feedback { .. },
                 None,

@@ -41,6 +41,12 @@ pub enum ClientMessage {
         code: String,
         auth: AuthPayload,
     },
+    /// Host only, from the Lobby: add a server-driven bot seat. Bots fill
+    /// empty seats but yield to humans - joining a full room evicts one
+    /// (ADR-0014).
+    AddBot,
+    /// Host only, from the Lobby: drop the most recently added bot seat.
+    RemoveBot,
     /// Host only, from the Lobby: start the game.
     Start,
     /// After a game ends, replay in the same room: the first sender restarts
@@ -71,6 +77,10 @@ pub struct SeatInfo {
     pub player_id: String,
     pub name: String,
     pub connected: bool,
+    /// A server-driven bot seat (ADR-0014), not a human connection. Clients
+    /// label it as such instead of showing it as an offline player.
+    #[serde(default)]
+    pub is_bot: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -95,6 +105,11 @@ pub enum ServerMessage {
         /// (ADR-0010); absent for untimed games. Set only mid-game.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         time_remaining: Option<u64>,
+        /// Per-turn time limit in seconds when the server enables the AFK
+        /// timer (`--turn-timeout`); absent when off. Clients show a local
+        /// per-turn countdown, reset on each Update.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_seconds: Option<u64>,
     },
     /// Broadcast on lobby membership or connection changes.
     Lobby {
@@ -106,6 +121,11 @@ pub enum ServerMessage {
         /// absent for untimed games. Clients run a local countdown.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         time_remaining: Option<u64>,
+        /// Per-turn time limit in seconds when the server enables the AFK
+        /// timer (`--turn-timeout`); absent when off. Clients show a local
+        /// per-turn countdown, reset on each Update.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_seconds: Option<u64>,
     },
     /// Broadcast after every accepted command: what happened, then the new
     /// authoritative projection.
@@ -176,6 +196,11 @@ mod tests {
 
         let leave: ClientMessage = serde_json::from_str(r#"{"type":"leave"}"#).unwrap();
         assert!(matches!(leave, ClientMessage::Leave));
+
+        let add: ClientMessage = serde_json::from_str(r#"{"type":"add_bot"}"#).unwrap();
+        assert!(matches!(add, ClientMessage::AddBot));
+        let rm: ClientMessage = serde_json::from_str(r#"{"type":"remove_bot"}"#).unwrap();
+        assert!(matches!(rm, ClientMessage::RemoveBot));
 
         let fb: ClientMessage =
             serde_json::from_str(r#"{"type":"feedback","rating":4,"comment":"gg"}"#).unwrap();

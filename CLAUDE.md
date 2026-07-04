@@ -88,7 +88,10 @@ architecture doc section 5; dependencies point downward only):
   (`DicePolicy`, `RentCalculator`, `BankruptcyResolver` as `Box<dyn>`);
   `apply.rs` is the whole command pipeline (validate -> mutate clone ->
   emit events); `state.rs` (GameState, TurnPhase incl. `Auction` variant,
-  TradeOffer), `content.rs` (GameContent, RentModel), `view.rs`.
+  TradeOffer), `content.rs` (GameContent, RentModel), `view.rs`. `bot.rs`
+  is the shared autopilot heuristic (`bot::decide(content, view, seat) ->
+  Option<CommandKind>`): pure like everything here, used by both the
+  server's bot seats and the CLI `--bot` (ADR-0014).
 - `crates/mods` - TOML mod bundles. `RegistryBuilder` merges
   last-loaded-wins per key (tiles/cards replace in place by id, rule
   scalars override; conflicts logged WARN). Base game content is itself a
@@ -107,7 +110,12 @@ architecture doc section 5; dependencies point downward only):
   connection can create/join again - the Flutter client's connect/menu
   split relies on this); host = seat 0; 2..=6 players; rejoin
   by identity, last connection wins, but spoofable (guest) seats require
-  the per-seat reconnect token issued in `Joined` (ADR-0008); rooms with
+  the per-seat reconnect token issued in `Joined` (ADR-0008); host
+  `AddBot`/`RemoveBot` (lobby only) add server-driven bot seats (`is_bot`,
+  synthetic `bot:N` identity, `tx: None`) that the room task plays via
+  `next_bot_action` -> `bot::decide` at `BOT_THINK` = 800ms/move; bots
+  yield to humans - joining a full room evicts the newest bot instead of
+  rejecting; `SeatInfo.is_bot` labels them (ADR-0014); rooms with
   zero connected seats
   dissolve after `IDLE_TIMEOUT` = 30 min; smart per-turn AFK timer
   (`afk_deadline`, recomputed each loop so a mid-turn disconnect shortens
@@ -118,8 +126,10 @@ architecture doc section 5; dependencies point downward only):
   `--game-timeout <secs>` ends a time-boxed game via
   `Engine::finish_on_time` - richest by `GameState::net_worth` wins, ties to
   lowest seat, `Event::TimeUp` (ADR-0010); `GameStarted`/`Joined` carry
-  `time_remaining` for the client countdown, clients mirror the net-worth
-  formula; post-game survey `feedback` message:
+  `time_remaining` for the game countdown (clients mirror the net-worth
+  formula) and `turn_seconds` (the `--turn-timeout` value, absent when off)
+  for a per-turn countdown the clients reset on each Update; post-game
+  survey `feedback` message:
   Finished phase only, once per seat, rating 1-5 + comment capped at 500
   chars, stored via `GameHistory::record_feedback` - the client UI must
   stay non-blocking, side card not modal), `auth.rs` + `eddsa.rs`
@@ -132,10 +142,11 @@ architecture doc section 5; dependencies point downward only):
   ADR-0005), `web/index.html` (embedded via `include_str!` - the server
   binary is the whole deployment).
 - `crates/cli` - terminal test harness; keep it in sync with new commands
-  (it is the cheapest end-to-end protocol check). `--bot` turns it into an
-  autopilot seat (`bot.rs`: pure `decide(content, view, seat)` heuristics
-  - buy/bid/build/jail-card, declines trades) so games can be playtested
-  without volunteers; soak it with 3 bots when touching turn flow.
+  (it is the cheapest end-to-end protocol check; `addbot`/`rmbot` stdin
+  commands too). `--bot` turns it into an autopilot seat using the shared
+  `parcello_engine::bot::decide` (buy/bid/build/jail-card, declines trades)
+  so games can be playtested without volunteers; soak it with 3 bots when
+  touching turn flow. Server-side bots (ADR-0014) reuse the same heuristic.
 - `clients/flutter` - Flutter client (Windows desktop first; Dart, not part
   of the cargo workspace). Mirrors the web client feature-for-feature; see
   its README. Requires the Flutter SDK (`flutter analyze && flutter test`).

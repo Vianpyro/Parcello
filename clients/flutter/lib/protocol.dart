@@ -9,12 +9,14 @@ class SeatInfo {
   final String playerId;
   final String name;
   final bool connected;
+  final bool isBot;
 
   SeatInfo.fromJson(Map<String, dynamic> j)
       : seat = j['seat'] as int,
         playerId = j['player_id'] as String,
         name = j['name'] as String,
-        connected = j['connected'] as bool;
+        connected = j['connected'] as bool,
+        isBot = j['is_bot'] as bool? ?? false;
 }
 
 /// One board tile definition. Property fields are null for non-properties;

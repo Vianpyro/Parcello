@@ -70,6 +70,13 @@ class GameSession extends ChangeNotifier {
   /// (ADR-0010); the UI shows a local countdown. Null for untimed games.
   DateTime? gameEndsAt;
 
+  /// Per-turn time limit in seconds when the server runs with
+  /// `--turn-timeout`; null when the AFK timer is off. `turnEndsAt` is the
+  /// current turn's deadline, reset on every Update (server resets its AFK
+  /// clock on each accepted command).
+  int? turnSeconds;
+  DateTime? turnEndsAt;
+
   /// Latest dice roll for the center-of-board display. `diceSeq` bumps on
   /// every roll so the overlay re-triggers even on a repeated value.
   int diceSeq = 0;
@@ -183,6 +190,7 @@ class GameSession extends ChangeNotifier {
     view = null;
     code = null;
     gameEndsAt = null;
+    turnEndsAt = null;
     loginMessage = '';
     notifyListeners();
   }
@@ -219,6 +227,14 @@ class GameSession extends ChangeNotifier {
     _ws?.sink.add(jsonEncode({'type': 'start'}));
   }
 
+  void addBot() {
+    _ws?.sink.add(jsonEncode({'type': 'add_bot'}));
+  }
+
+  void removeBot() {
+    _ws?.sink.add(jsonEncode({'type': 'remove_bot'}));
+  }
+
   /// Post-game survey answer; `rating` 1-5, empty comment omitted.
   void sendFeedback(int rating, String comment) {
     _ws?.sink.add(jsonEncode({
@@ -248,6 +264,8 @@ class GameSession extends ChangeNotifier {
           _saveToken(code!, msg['reconnect'] as String);
         }
         gameEndsAt = _deadlineFrom(msg['time_remaining']);
+        turnSeconds = msg['turn_seconds'] as int?;
+        turnEndsAt = _deadlineFrom(turnSeconds);
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
@@ -260,9 +278,12 @@ class GameSession extends ChangeNotifier {
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         feedbackDone = false;
         gameEndsAt = _deadlineFrom(msg['time_remaining']);
+        turnSeconds = msg['turn_seconds'] as int?;
+        turnEndsAt = _deadlineFrom(turnSeconds);
         _log('Game started.');
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
+        turnEndsAt = _deadlineFrom(turnSeconds);
         for (final e in msg['events'] as List) {
           final ev = e as Map<String, dynamic>;
           if (ev['type'] == 'dice_rolled') {

@@ -35,6 +35,9 @@ pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// its reconnect token, ADR-0008).
 // ponytail: fixed 30s; make it a flag only if operators ask to tune it.
 pub const DISCONNECTED_GRACE: Duration = Duration::from_secs(30);
+/// A bot seat pauses this long before each move so humans can follow the
+/// action; without it a table of bots would resolve instantly (ADR-0014).
+const BOT_THINK: Duration = Duration::from_millis(800);
 
 pub type Rooms = Arc<RwLock<HashMap<String, mpsc::Sender<RoomCmd>>>>;
 pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;
@@ -55,6 +58,14 @@ pub enum RoomCmd {
         player_id: PlayerId,
     },
     PlayAgain {
+        player_id: PlayerId,
+    },
+    /// Host adds a server-driven bot seat (ADR-0014).
+    AddBot {
+        player_id: PlayerId,
+    },
+    /// Host drops the most recently added bot seat.
+    RemoveBot {
         player_id: PlayerId,
     },
     Game {
@@ -101,6 +112,7 @@ pub async fn create_room(
         turn_timeout,
         game_timeout,
         game_deadline: None,
+        bot_counter: 0,
     };
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
@@ -157,12 +169,16 @@ fn token_eq(a: &str, b: &str) -> bool {
 
 struct Seat {
     identity: Identity,
-    /// `None` while disconnected; the seat survives for rejoin.
+    /// `None` while disconnected; the seat survives for rejoin. Bot seats
+    /// keep this `None` for their whole life (nobody connects as a bot).
     tx: Option<ClientTx>,
     /// Issued in `Joined`; proves seat ownership on rejoin (ADR-0008).
     reconnect: String,
     /// One post-game survey answer per seat.
     feedback_given: bool,
+    /// A server-driven bot (ADR-0014): the room task plays its turns and it
+    /// is evicted to make room for a joining human.
+    is_bot: bool,
 }
 
 enum Phase {
@@ -187,6 +203,9 @@ struct Room {
     /// set when the game starts.
     game_timeout: Option<Duration>,
     game_deadline: Option<tokio::time::Instant>,
+    /// Monotonic counter for bot seat names ("Bot 1", "Bot 2", ...), so a
+    /// removed-then-readded bot never reuses a `player_id`.
+    bot_counter: usize,
 }
 
 impl Room {
@@ -207,6 +226,12 @@ impl Room {
             let game_armed = self.game_deadline.is_some() && matches!(self.phase, Phase::Active(_));
             let now = tokio::time::Instant::now();
             let game = tokio::time::sleep_until(self.game_deadline.unwrap_or(now + IDLE_TIMEOUT));
+            // Bot seats (ADR-0014): if any bot has a move to make, play it
+            // after a short think delay, anchored to the last progress so
+            // moves stay evenly paced.
+            let bot_action = self.next_bot_action();
+            let bot_armed = bot_action.is_some();
+            let bot = tokio::time::sleep_until(last_progress + BOT_THINK);
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
@@ -225,6 +250,14 @@ impl Room {
                         }
                         RoomCmd::Start { player_id } => self.handle_start(&player_id),
                         RoomCmd::PlayAgain { player_id } => self.handle_play_again(&player_id),
+                        RoomCmd::AddBot { player_id } => {
+                            self.handle_add_bot(&player_id);
+                            false
+                        }
+                        RoomCmd::RemoveBot { player_id } => {
+                            self.handle_remove_bot(&player_id);
+                            false
+                        }
                         RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
                         RoomCmd::Feedback { player_id, rating, comment } => {
                             self.handle_feedback(&player_id, rating, comment);
@@ -246,6 +279,15 @@ impl Room {
                 }
                 _ = game, if game_armed => {
                     self.handle_game_timeout();
+                }
+                _ = bot, if bot_armed => {
+                    // Safety net: if a bot's smart move keeps getting
+                    // rejected the afk timer still auto-plays a canonical
+                    // action, so this never spins the game.
+                    if let Some((player, kind)) = bot_action {
+                        self.handle_game(&player, kind);
+                    }
+                    last_progress = tokio::time::Instant::now();
                 }
                 _ = idle => {
                     if self.seats.iter().all(|s| s.tx.is_none()) {
@@ -306,6 +348,75 @@ impl Room {
         Some((st.players[seat].id.clone(), kind))
     }
 
+    /// The first bot seat with something to do right now and the command it
+    /// wants, using the shared engine heuristic over that seat's own view
+    /// (ADR-0014). `None` when no bot is waiting - covers turns, auctions,
+    /// and declining trades offered to a bot.
+    fn next_bot_action(&self) -> Option<(PlayerId, CommandKind)> {
+        let Phase::Active(st) = &self.phase else {
+            return None;
+        };
+        for (i, seat) in self.seats.iter().enumerate() {
+            if !seat.is_bot {
+                continue;
+            }
+            let view = ClientView::for_seat(st, i);
+            if let Some(kind) = parcello_engine::bot::decide(&self.content.content, &view, i) {
+                return Some((st.players[i].id.clone(), kind));
+            }
+        }
+        None
+    }
+
+    fn is_host(&self, player_id: &str) -> bool {
+        self.seats
+            .first()
+            .is_some_and(|s| s.identity.player_id == player_id)
+    }
+
+    /// Host adds a bot seat in the lobby (ADR-0014). Bots fill up to
+    /// `MAX_PLAYERS` but are evicted again when a human joins a full room.
+    fn handle_add_bot(&mut self, player_id: &str) {
+        if !matches!(self.phase, Phase::Lobby) {
+            return self.send_error(player_id, "bots can only be added in the lobby");
+        }
+        if !self.is_host(player_id) {
+            return self.send_error(player_id, "only the host can add bots");
+        }
+        if self.seats.len() >= MAX_PLAYERS {
+            return self.send_error(player_id, "room is full");
+        }
+        self.bot_counter += 1;
+        let n = self.bot_counter;
+        self.seats.push(Seat {
+            identity: Identity {
+                player_id: format!("bot:{n}"),
+                name: format!("Bot {n}"),
+                spoofable: false,
+            },
+            tx: None,
+            reconnect: String::new(),
+            feedback_given: false,
+            is_bot: true,
+        });
+        info!(room = %self.code, bot = n, "bot added");
+        self.broadcast_lobby();
+    }
+
+    /// Host drops the most recently added bot seat (lobby only).
+    fn handle_remove_bot(&mut self, player_id: &str) {
+        if !matches!(self.phase, Phase::Lobby) {
+            return self.send_error(player_id, "bots can only be removed in the lobby");
+        }
+        if !self.is_host(player_id) {
+            return self.send_error(player_id, "only the host can remove bots");
+        }
+        if let Some(i) = self.seats.iter().rposition(|s| s.is_bot) {
+            self.seats.remove(i);
+            self.broadcast_lobby();
+        }
+    }
+
     fn handle_join(
         &mut self,
         identity: Identity,
@@ -334,13 +445,21 @@ impl Room {
                     return Err("game already started".into());
                 }
                 if self.seats.len() >= MAX_PLAYERS {
-                    return Err("room is full".into());
+                    // Bots yield to humans (ADR-0014): drop one to seat the
+                    // newcomer; only genuinely full-of-humans rooms reject.
+                    match self.seats.iter().rposition(|s| s.is_bot) {
+                        Some(bot_i) => {
+                            self.seats.remove(bot_i);
+                        }
+                        None => return Err("room is full".into()),
+                    }
                 }
                 self.seats.push(Seat {
                     identity,
                     tx: Some(tx.clone()),
                     reconnect: new_reconnect_token(),
                     feedback_given: false,
+                    is_bot: false,
                 });
                 self.seats.len() - 1
             }
@@ -360,6 +479,7 @@ impl Room {
             view,
             reconnect: Some(self.seats[seat_index].reconnect.clone()),
             time_remaining: self.time_remaining_secs(),
+            turn_seconds: self.turn_timeout.map(|d| d.as_secs()),
         };
         if tx.send(joined).is_err() {
             self.seats[seat_index].tx = None;
@@ -393,11 +513,7 @@ impl Room {
             self.send_error(player_id, "game already started");
             return false;
         }
-        let is_host = self
-            .seats
-            .first()
-            .is_some_and(|s| s.identity.player_id == player_id);
-        if !is_host {
+        if !self.is_host(player_id) {
             self.send_error(player_id, "only the host can start the game");
             return false;
         }
@@ -452,10 +568,12 @@ impl Room {
         info!(room = %self.code, players = self.seats.len(), "game started");
 
         let remaining = self.time_remaining_secs();
+        let turn_seconds = self.turn_timeout.map(|d| d.as_secs());
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::GameStarted {
                 view: Box::new(ClientView::for_seat(&state, seat)),
                 time_remaining: remaining,
+                turn_seconds,
             })
             .collect();
         self.phase = Phase::Active(state);
@@ -594,6 +712,7 @@ impl Room {
                 player_id: s.identity.player_id.clone(),
                 name: s.identity.name.clone(),
                 connected: s.tx.is_some(),
+                is_bot: s.is_bot,
             })
             .collect()
     }
@@ -1175,6 +1294,190 @@ mod tests {
         .await
         .expect("a rejection must arrive");
         assert!(rejected, "the game must be finished after the time limit");
+    }
+
+    /// `--turn-timeout` is surfaced to clients as `turn_seconds` on
+    /// GameStarted so they can show a per-turn countdown; off by default.
+    #[tokio::test(start_paused = true)]
+    async fn game_started_carries_turn_seconds() {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
+        let code = create_room(
+            &rooms,
+            content,
+            history,
+            Some(Duration::from_secs(30)),
+            None,
+        )
+        .await
+        .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let mut client_rxs = Vec::new();
+        for name in ["alice", "bob"] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (reply, joined) = oneshot::channel();
+            room.send(RoomCmd::Join {
+                identity: Identity {
+                    player_id: format!("guest:{name}"),
+                    name: name.to_string(),
+                    spoofable: true,
+                },
+                reconnect: None,
+                tx,
+                reply,
+            })
+            .await
+            .expect("room task alive");
+            joined.await.expect("reply sent").expect("join accepted");
+            client_rxs.push(rx);
+        }
+        room.send(RoomCmd::Start {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+
+        let started = tokio::time::timeout(Duration::from_secs(60), async {
+            while let Some(msg) = client_rxs[1].recv().await {
+                if let ServerMessage::GameStarted {
+                    turn_seconds,
+                    time_remaining,
+                    ..
+                } = msg
+                {
+                    return (turn_seconds, time_remaining);
+                }
+            }
+            (None, None)
+        })
+        .await
+        .expect("GameStarted must arrive");
+        assert_eq!(started.0, Some(30), "turn timer must reach the client");
+        assert_eq!(started.1, None, "untimed game carries no game clock");
+    }
+
+    fn base_content() -> Arc<ResolvedContent> {
+        Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        )
+    }
+
+    fn test_room(content: Arc<ResolvedContent>) -> Room {
+        let engine = Engine::new(Arc::new(content.content.clone())).expect("engine builds");
+        Room {
+            code: "TESTS".into(),
+            content,
+            engine,
+            seats: Vec::new(),
+            phase: Phase::Lobby,
+            history: Arc::new(MemoryHistory::new()),
+            turn_timeout: None,
+            game_timeout: None,
+            game_deadline: None,
+            bot_counter: 0,
+        }
+    }
+
+    fn human_seat(id: &str) -> Seat {
+        Seat {
+            identity: Identity {
+                player_id: id.into(),
+                name: id.into(),
+                spoofable: true,
+            },
+            tx: None,
+            reconnect: String::new(),
+            feedback_given: false,
+            is_bot: false,
+        }
+    }
+
+    /// A bot seat produces the engine heuristic's move for its own turn: a
+    /// fresh game opens on seat 0 with a roll (ADR-0014).
+    #[test]
+    fn bot_seat_acts_on_its_turn() {
+        let content = base_content();
+        let engine = Engine::new(Arc::new(content.content.clone())).unwrap();
+        let state = engine.new_game(
+            vec![
+                ("bot:1".into(), "Bot 1".into()),
+                ("guest:al".into(), "Al".into()),
+            ],
+            7,
+        );
+        let mut room = test_room(content);
+        room.seats = vec![human_seat("bot:1"), human_seat("guest:al")];
+        room.seats[0].is_bot = true;
+        room.phase = Phase::Active(state);
+        assert!(matches!(
+            room.next_bot_action(),
+            Some((id, CommandKind::Roll)) if id == "bot:1"
+        ));
+    }
+
+    /// Bots fill a room but never lock a human out: joining a full room
+    /// evicts a bot to seat the newcomer (ADR-0014).
+    #[test]
+    fn bots_yield_their_seat_to_a_joining_human() {
+        let mut room = test_room(base_content());
+        room.seats.push(human_seat("guest:host"));
+        while room.seats.len() < MAX_PLAYERS {
+            room.handle_add_bot("guest:host");
+        }
+        assert_eq!(room.seats.len(), MAX_PLAYERS);
+        let bots_before = room.seats.iter().filter(|s| s.is_bot).count();
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        room.handle_join(
+            Identity {
+                player_id: "guest:new".into(),
+                name: "New".into(),
+                spoofable: true,
+            },
+            None,
+            tx,
+        )
+        .expect("a human must displace a bot in a full room");
+
+        assert_eq!(room.seats.len(), MAX_PLAYERS, "room stays at capacity");
+        assert!(
+            room.seats
+                .iter()
+                .any(|s| s.identity.player_id == "guest:new"),
+            "the human took a seat"
+        );
+        assert_eq!(
+            room.seats.iter().filter(|s| s.is_bot).count(),
+            bots_before - 1,
+            "exactly one bot yielded"
+        );
+        assert!(!room.seats[0].is_bot, "the host keeps seat 0");
+    }
+
+    /// Only the host may add bots, and only in the lobby.
+    #[test]
+    fn add_bot_is_host_and_lobby_gated() {
+        let mut room = test_room(base_content());
+        room.seats.push(human_seat("guest:host"));
+        room.seats.push(human_seat("guest:other"));
+        room.handle_add_bot("guest:other"); // not the host
+        assert!(room.seats.iter().all(|s| !s.is_bot), "non-host cannot add");
+        room.handle_add_bot("guest:host");
+        assert_eq!(room.seats.iter().filter(|s| s.is_bot).count(), 1);
+        room.handle_remove_bot("guest:host");
+        assert!(room.seats.iter().all(|s| !s.is_bot), "host removed the bot");
     }
 
     /// With a paused clock and zero player input, the room task must play

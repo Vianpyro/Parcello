@@ -1,8 +1,11 @@
-//! Autopilot for playtesting without volunteers (`--bot`): simple, safe
-//! heuristics over the public `ClientView`. The server stays authoritative,
-//! so a buggy bot can at worst get its commands rejected.
+//! Autopilot heuristics for playtesting and server-side bot seats: simple,
+//! safe decisions over the public `ClientView`. Pure and synchronous like
+//! the rest of the engine (no I/O, no rand, no clock) - it only reads a view
+//! and the content and returns a command, so the server stays authoritative
+//! and a buggy bot can at worst get its commands rejected. See ADR-0014 for
+//! why this lives in the engine rather than a client.
 
-use parcello_engine::{ClientView, CommandKind, GameContent, GamePhase, TileKind, TurnPhase};
+use crate::{ClientView, CommandKind, GameContent, GamePhase, TileKind, TurnPhase};
 
 /// Cash the bot refuses to dip under when buying or bidding.
 const RESERVE: i64 = 100;
@@ -79,7 +82,7 @@ fn buildable_tile(
         let TileKind::Property(prop) = &def.kind else {
             continue;
         };
-        if prop.rent_model != parcello_engine::RentModel::Houses
+        if prop.rent_model != crate::RentModel::Houses
             || view.tiles[i].owner != Some(me)
             || view.tiles[i].houses >= cap
             || cash - prop.house_cost < BUILD_RESERVE
@@ -108,9 +111,7 @@ fn buildable_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parcello_engine::{
-        GameContent, PlayerView, PropertyDef, RentModel, RuleParams, TileDef, TileState,
-    };
+    use crate::{GameContent, PlayerView, PropertyDef, RentModel, RuleParams, TileDef, TileState};
 
     fn content() -> GameContent {
         let prop = |group: &str| {
@@ -229,7 +230,7 @@ mod tests {
         let mut v = view(1000, TurnPhase::AwaitRoll);
         v.current = 1;
         assert!(decide(&c, &v, 0).is_none());
-        v.pending_trades.push(parcello_engine::TradeOffer {
+        v.pending_trades.push(crate::TradeOffer {
             id: 7,
             from: 1,
             to: 0,

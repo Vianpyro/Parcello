@@ -192,7 +192,8 @@ the room, ADR-0006; omit for the server default), `join {code, auth}`,
 `start`, `play_again` (after a game ends, restart it in the same room for
 whoever is still connected; first sender wins), `leave` (leave the room but
 keep the socket open, so the same connection can create/join another room),
-`cmd {cmd}`,
+`add_bot` / `remove_bot` (host, lobby: add or drop a server-driven bot
+seat, ADR-0014), `cmd {cmd}`,
 `feedback {rating, comment?}` (post-game survey: 1-5 plus an optional
 comment, stored in the server history; one per player per game, fully
 optional and never blocking), `ping`. Server -> client: `room_created`, `joined`
@@ -297,7 +298,14 @@ deck rotation once drawn.
 - A disconnected player's turn is auto-played after a 30s grace so an AFK
   player never stalls the table (they keep their seat and can rejoin). The
   `--turn-timeout` flag extends this to connected-but-idle players; it is
-  off by default, so a present but slow player is never forced.
+  off by default, so a present but slow player is never forced. When set,
+  its value rides `GameStarted`/`Joined` as `turn_seconds` and clients show
+  a per-turn countdown (reset on each accepted command); absent when off.
+- The host can add bots from the lobby (an "Add bot" button; `addbot` in the
+  CLI). Bots are server-driven seats that play the shared autopilot
+  heuristic at ~0.8s/move. They fill empty seats but yield to humans: a
+  player joining a full room evicts the newest bot instead of being turned
+  away (ADR-0014). Removed via "Remove bot" / `rmbot`.
 
 ## Deviations from the architecture doc
 
@@ -311,7 +319,8 @@ collapsed); 0007 private trade offers via per-seat `ClientView`s;
 0009 Identity Service design (EdDSA JWT + JWKS, self-hosted and
 redundant, accounts always optional); 0010 time-boxed games end by net
 worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts;
-0013 domination win (control N full colour groups).
+0013 domination win (control N full colour groups); 0014 server-side bot
+seats (host-added, yield to humans, shared `bot::decide` heuristic).
 
 ## Roadmap
 

@@ -126,8 +126,10 @@
       <h3>Room <span id="roomcode" title="Click to copy" style="cursor:pointer;color:var(--accent);letter-spacing:2px"></span>
         <span id="copiedmsg" class="muted" style="font-size:12px"></span></h3>
       <div id="players"></div>
-      <div id="lobbyctl" style="margin-top:8px; display:flex; gap:6px;">
+      <div id="lobbyctl" style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
         <button id="start">Start game</button>
+        <button id="addbot" class="secondary" title="Bots yield their seat when a player joins">Add bot</button>
+        <button id="rmbot" class="secondary">Remove bot</button>
       </div>
     </div>
     <div class="card" id="tradecard">
@@ -254,6 +256,8 @@ function handle(msg) {
       st.seats = msg.players;
       if (msg.reconnect) localStorage.setItem(`parcello_tok_${msg.code}`, msg.reconnect);
       st.gameEndsAt = deadlineFrom(msg.time_remaining);
+      st.turnSeconds = msg.turn_seconds ?? null;
+      st.turnEndsAt = deadlineFrom(st.turnSeconds);
       location.hash = msg.code;
       $("#login").style.display = "none";
       $("#app").style.display = "grid";
@@ -270,11 +274,14 @@ function handle(msg) {
     case "game_started":
       st.view = msg.view;
       st.gameEndsAt = deadlineFrom(msg.time_remaining);
+      st.turnSeconds = msg.turn_seconds ?? null;
+      st.turnEndsAt = deadlineFrom(st.turnSeconds);
       log("Game started.");
       render();
       break;
     case "update":
       st.view = msg.view;
+      st.turnEndsAt = deadlineFrom(st.turnSeconds);
       msg.events.forEach(ev => {
         if (ev.type === "dice_rolled") showDice(ev.d1, ev.d2);
         log(describe(ev));
@@ -328,13 +335,33 @@ function showDice(d1, d2) {
   _diceTimer = setTimeout(() => { el.style.opacity = "0"; }, 2500);
 }
 
+function fmtClock(deadline) {
+  const secs = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+  return [secs, `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`];
+}
 function tickCountdown() {
-  const el = $("#countdown"); if (!el) return;
-  if (!st.gameEndsAt || st.view?.phase.type === "finished") { el.textContent = ""; return; }
-  const secs = Math.max(0, Math.round((st.gameEndsAt - Date.now()) / 1000));
-  const mmss = `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
-  el.textContent = `⏱ ${mmss}`;
-  el.style.color = secs <= 60 ? "var(--danger)" : "inherit";
+  const finished = st.view?.phase.type === "finished";
+  const gel = $("#countdown");
+  if (gel) {
+    // Kept visible for the whole game, end included (the final time left is
+    // part of a bankruptcy-before-timeout result).
+    if (!st.gameEndsAt) { gel.textContent = ""; }
+    else {
+      const [secs, mmss] = fmtClock(st.gameEndsAt);
+      gel.textContent = `⏱ ${mmss}`;
+      gel.style.color = secs <= 60 ? "var(--danger)" : "inherit";
+    }
+  }
+  // Per-turn AFK timer, shown only when the server enables --turn-timeout.
+  const tel = $("#turntimer");
+  if (tel) {
+    if (!st.turnEndsAt || finished) { tel.textContent = ""; }
+    else {
+      const [secs, mmss] = fmtClock(st.turnEndsAt);
+      tel.textContent = `⏳ ${mmss}`;
+      tel.style.color = secs <= 10 ? "var(--danger)" : "inherit";
+    }
+  }
 }
 setInterval(tickCountdown, 1000);
 
@@ -389,7 +416,7 @@ function buildBoard() {
     center.id = "center";
     // Interior spans the (d-2) x (d-2) inner cells.
     center.style.gridArea = `2 / 2 / ${d} / ${d}`;
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   } else {
     // Non-ring boards (mods): linear fallback, panel below.
@@ -397,7 +424,7 @@ function buildBoard() {
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");
     center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   }
 }
@@ -467,9 +494,9 @@ function renderPlayers() {
   const rows = st.view
     ? st.view.players.map((p, i) => ({ i, name: p.name, cash: p.cash, dead: p.bankrupt,
         extra: (p.in_jail ? " [jail]" : "") + (p.jail_cards ? ` [${p.jail_cards} jail card${p.jail_cards > 1 ? "s" : ""}]` : ""),
-        connected: st.seats[i]?.connected ?? true }))
+        connected: st.seats[i]?.connected ?? true, bot: st.seats[i]?.is_bot ?? false }))
     : st.seats.map(s => ({ i: s.seat, name: s.name, cash: null, dead: false,
-        extra: "", connected: s.connected }));
+        extra: "", connected: s.connected, bot: s.is_bot }));
   rows.forEach(r => {
     const d = document.createElement("div");
     d.className = "player"
@@ -479,13 +506,19 @@ function renderPlayers() {
     // Net worth decides a timed game (ADR-0010), so surface it then.
     const nw = (r.cash !== null && st.gameEndsAt)
       ? ` <span class="muted">NW $${netWorth(r.i)}</span>` : "";
+    const label = r.bot ? " \u{1F916}" : (r.connected ? "" : " (offline)");
     d.innerHTML = `<div class="dot" style="background:${PAWN_COLORS[r.i % 6]}"></div>
-      <span class="nm">${escapeHtml(r.name)}${r.extra}${r.connected ? "" : " (offline)"}</span>
+      <span class="nm">${escapeHtml(r.name)}${r.extra}${label}</span>
       ${r.cash === null ? "" : `<span class="cash">$${r.cash}${nw}</span>`}`;
     el.appendChild(d);
   });
   $("#lobbyctl").style.display = st.view ? "none" : "flex";
-  $("#start").disabled = st.seat !== 0 || st.seats.length < 2;
+  const host = st.seat === 0;
+  const full = st.seats.length >= 6;
+  const bots = st.seats.filter(s => s.is_bot).length;
+  $("#start").disabled = !host || st.seats.length < 2;
+  $("#addbot").disabled = !host || full;
+  $("#rmbot").disabled = !host || bots === 0;
 }
 
 function setStatus(text) { const s = $("#status"); if (s) s.textContent = text; }
@@ -565,7 +598,7 @@ function tileMenu(i, evt) {
   const rules = st.content.rules;
   const actions = [];
   if (ts.owner === st.seat) {
-    if (isHousesModel(i) && !ts.mortgaged) actions.push(["Build house", { type: "build", tile: id }]);
+    if (isHousesModel(i) && !ts.mortgaged) actions.push([`Build house ($${prop(i).house_cost ?? 0})`, { type: "build", tile: id }]);
     if (ts.houses > 0) actions.push(["Sell house", { type: "sell_house", tile: id }]);
     // Rent boost (ADR-0012): raise this tile's rent one step.
     if (rules.rent_boost > 0 && !ts.mortgaged && (ts.boosts ?? 0) < 3)
@@ -679,6 +712,8 @@ function renderOffers() {
 
 // -- misc controls ------------------------------------------------------------------
 $("#start").onclick = () => ws?.send(JSON.stringify({ type: "start" }));
+$("#addbot").onclick = () => ws?.send(JSON.stringify({ type: "add_bot" }));
+$("#rmbot").onclick = () => ws?.send(JSON.stringify({ type: "remove_bot" }));
 $("#resign").onclick = () => { if (confirm("Resign from the game?")) send({ type: "resign" }); };
 $("#roomcode").onclick = () => {
   if (!st.code) return;

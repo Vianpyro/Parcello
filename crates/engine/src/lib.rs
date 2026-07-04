@@ -6,6 +6,7 @@
 //! returns the same result. Randomness comes from a PRNG seed stored inside
 //! `GameState`, which makes full games replayable from a command log.
 
+pub mod bot;
 pub mod command;
 pub mod content;
 pub mod error;

@@ -1,12 +1,10 @@
 //! Terminal test client. Not a product surface: exists to exercise the
 //! server end-to-end until the Flutter client lands.
 //!
-//! Commands (stdin): start | roll | buy | no | bid <amount> | pass
+//! Commands (stdin): start | addbot | rmbot | roll | buy | no | bid <amount> | pass
 //! | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
 //! | offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
 //! | accept <id> | refuse <id> | cancel <id> | pay | card | end | resign | quit.
-
-mod bot;
 
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
@@ -121,7 +119,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if args.bot && fresh_view
                             && let (Some(content), Some(view), Some(me)) =
                                 (&ctx.content, &ctx.view, ctx.my_seat)
-                            && let Some(kind) = bot::decide(&content.content, view, me)
+                            && let Some(kind) =
+                                parcello_engine::bot::decide(&content.content, view, me)
                         {
                             // Pace bot actions so a watching client has time
                             // to play out the pawn-movement animation.
@@ -161,6 +160,8 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
         ("start", None) => return Some(ClientMessage::Start),
         ("again", None) => return Some(ClientMessage::PlayAgain),
         ("leave", None) => return Some(ClientMessage::Leave),
+        ("addbot", None) => return Some(ClientMessage::AddBot),
+        ("rmbot", None) => return Some(ClientMessage::RemoveBot),
         ("roll", None) => CommandKind::Roll,
         ("buy", None) => CommandKind::Buy,
         ("no", None) => CommandKind::Decline,
@@ -263,6 +264,7 @@ impl Ctx {
                 view,
                 reconnect,
                 time_remaining,
+                turn_seconds,
             } => {
                 self.my_seat = Some(seat);
                 self.content = Some(*content);
@@ -272,6 +274,9 @@ impl Ctx {
                 }
                 if let Some(secs) = time_remaining {
                     println!("* timed game: {secs}s left (richest wins)");
+                }
+                if let Some(secs) = turn_seconds {
+                    println!("* turn timer: {secs}s per turn");
                 }
                 self.print_lobby(&players);
                 if let Some(view) = view {
@@ -284,10 +289,14 @@ impl Ctx {
             ServerMessage::GameStarted {
                 view,
                 time_remaining,
+                turn_seconds,
             } => {
                 println!("* game started");
                 if let Some(secs) = time_remaining {
                     println!("* timed game: {secs}s (richest wins)");
+                }
+                if let Some(secs) = turn_seconds {
+                    println!("* turn timer: {secs}s per turn");
                 }
                 self.print_view(&view);
                 self.view = Some(view);
@@ -310,7 +319,13 @@ impl Ctx {
         let list: Vec<String> = players
             .iter()
             .map(|p| {
-                let status = if p.connected { "" } else { " (offline)" };
+                let status = if p.is_bot {
+                    " (bot)"
+                } else if p.connected {
+                    ""
+                } else {
+                    " (offline)"
+                };
                 format!("{}:{}{}", p.seat, p.name, status)
             })
             .collect();
