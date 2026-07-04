@@ -209,47 +209,76 @@ class GameScreen extends StatelessWidget {
     );
   }
 
-  /// Owner actions on a tap of one of my tiles (build/sell/mortgage/redeem).
+  /// Tile actions: build/sell/boost/mortgage on my tiles (ADR-0012),
+  /// expropriate a rival's raw property (ADR-0011).
   void _tileMenu(BuildContext context, int i) {
     final v = s.view;
-    if (v == null || v.tiles[i].owner != s.seat) return;
-    final def = s.content!.board[i];
+    final c = s.content;
+    if (v == null || c == null) return;
+    final def = c.board[i];
     final ts = v.tiles[i];
+    final mine = ts.owner == s.seat;
+    final rival = ts.owner != null && ts.owner != s.seat;
+    final price = def.price ?? 0;
+
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) {
-        void run(Map<String, dynamic> cmd) {
-          s.sendCmd(cmd);
-          Navigator.pop(ctx);
-        }
-
-        return SafeArea(
-          child: Wrap(children: [
-            ListTile(
-                title: Text(def.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold))),
-            if (def.rentModel == 'houses' && !ts.mortgaged)
-              ListTile(
+        void close() => Navigator.pop(ctx);
+        final items = <Widget>[
+          ListTile(
+              title: Text(def.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+        ];
+        if (mine) {
+          if (def.rentModel == 'houses' && !ts.mortgaged) {
+            items.add(ListTile(
                 title: const Text('Build house'),
-                onTap: () => run({'type': 'build', 'tile': def.id}),
-              ),
-            if (ts.houses > 0)
-              ListTile(
+                onTap: () {
+                  s.sendCmd({'type': 'build', 'tile': def.id});
+                  close();
+                }));
+          }
+          if (ts.houses > 0) {
+            items.add(ListTile(
                 title: const Text('Sell house'),
-                onTap: () => run({'type': 'sell_house', 'tile': def.id}),
-              ),
-            if (!ts.mortgaged)
-              ListTile(
-                title: const Text('Mortgage'),
-                onTap: () => run({'type': 'mortgage', 'tile': def.id}),
-              )
-            else
-              ListTile(
-                title: const Text('Redeem mortgage'),
-                onTap: () => run({'type': 'unmortgage', 'tile': def.id}),
-              ),
-          ]),
-        );
+                onTap: () {
+                  s.sendCmd({'type': 'sell_house', 'tile': def.id});
+                  close();
+                }));
+          }
+          if (c.rentBoost > 0 && !ts.mortgaged && ts.boosts < 3) {
+            items.add(ListTile(
+                title: Text('Boost rent (\$${price * c.rentBoost ~/ 100})'),
+                onTap: () {
+                  s.sendCmd({'type': 'boost_rent', 'tile': def.id});
+                  close();
+                }));
+          }
+          items.add(ListTile(
+              title: Text(ts.mortgaged ? 'Redeem mortgage' : 'Mortgage'),
+              onTap: () {
+                s.sendCmd({
+                  'type': ts.mortgaged ? 'unmortgage' : 'mortgage',
+                  'tile': def.id
+                });
+                close();
+              }));
+        } else if (rival &&
+            def.isProperty &&
+            c.expropriation > 0 &&
+            ts.houses == 0 &&
+            !ts.mortgaged) {
+          items.add(ListTile(
+              title: Text('Seize (\$${price * c.expropriation ~/ 100})'),
+              subtitle: const Text('take this tile from its owner'),
+              onTap: () {
+                s.sendCmd({'type': 'expropriate', 'tile': def.id});
+                close();
+              }));
+        }
+        if (items.length == 1) return const SizedBox.shrink();
+        return SafeArea(child: Wrap(children: items));
       },
     );
   }

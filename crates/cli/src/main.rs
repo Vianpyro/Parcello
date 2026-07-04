@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.name.as_deref().unwrap_or("(identity token)")
     );
     println!(
-        "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
+        "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | seize <t> | boost <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
     );
     println!(
         "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
@@ -169,6 +169,12 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
             tile: tile.to_string(),
         },
         ("sell", Some(tile)) => CommandKind::SellHouse {
+            tile: tile.to_string(),
+        },
+        ("seize", Some(tile)) => CommandKind::Expropriate {
+            tile: tile.to_string(),
+        },
+        ("boost", Some(tile)) => CommandKind::BoostRent {
             tile: tile.to_string(),
         },
         ("mortgage", Some(tile)) => CommandKind::Mortgage {
@@ -500,6 +506,27 @@ impl Ctx {
                 refund,
             } => format!(
                 "{} sold a house on {} (now {houses}) for ${refund}",
+                self.player(*player),
+                self.tile_name(*tile)
+            ),
+            Event::Expropriated {
+                player,
+                from,
+                tile,
+                cost,
+            } => format!(
+                "{} seized {} from {} for ${cost}",
+                self.player(*player),
+                self.tile_name(*tile),
+                self.player(*from)
+            ),
+            Event::RentBoosted {
+                player,
+                tile,
+                boosts,
+                cost,
+            } => format!(
+                "{} boosted {} rent to level {boosts} for ${cost}",
                 self.player(*player),
                 self.tile_name(*tile)
             ),

@@ -46,10 +46,18 @@ class GameContent {
   final List<TileDef> board;
   final List<String> modIds;
 
+  /// Rule knobs the clients need to gate UI (ADR-0011/0012): cost percents,
+  /// 0 = mechanic disabled.
+  final int expropriation;
+  final int rentBoost;
+
   GameContent.fromJson(Map<String, dynamic> resolved)
       : board = (resolved['content']['board'] as List)
             .map((t) => TileDef.fromJson(t as Map<String, dynamic>))
             .toList(),
+        expropriation =
+            resolved['content']['rules']['expropriation'] as int? ?? 0,
+        rentBoost = resolved['content']['rules']['rent_boost'] as int? ?? 0,
         modIds = (resolved['mods'] as List)
             .map((m) => m['id'] as String)
             .toList();
@@ -78,11 +86,13 @@ class TileState {
   final int? owner;
   final int houses;
   final bool mortgaged;
+  final int boosts;
 
   TileState.fromJson(Map<String, dynamic> j)
       : owner = j['owner'] as int?,
         houses = j['houses'] as int,
-        mortgaged = j['mortgaged'] as bool? ?? false;
+        mortgaged = j['mortgaged'] as bool? ?? false,
+        boosts = j['boosts'] as int? ?? 0;
 }
 
 /// Flattened turn phase: `type` selects which of the nullable fields apply
@@ -192,6 +202,10 @@ String describeEvent(
       return "${p(e['player'])} built on ${t(e['tile'])} (now ${e['houses']})";
     case 'house_sold':
       return "${p(e['player'])} sold a house on ${t(e['tile'])} (+\$${e['refund']})";
+    case 'expropriated':
+      return "${p(e['player'])} seized ${t(e['tile'])} from ${p(e['from'])} for \$${e['cost']}";
+    case 'rent_boosted':
+      return "${p(e['player'])} boosted ${t(e['tile'])} rent to level ${e['boosts']} for \$${e['cost']}";
     case 'property_mortgaged':
       return "${p(e['player'])} mortgaged ${t(e['tile'])} for \$${e['value']}";
     case 'property_unmortgaged':

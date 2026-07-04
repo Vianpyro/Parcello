@@ -112,6 +112,16 @@ pub struct RuleParams {
     /// When true (default), declining a purchase starts an auction among all
     /// solvent players instead of leaving the tile with the bank.
     pub auction_on_decline: bool,
+    /// Expropriation cost as a percent of the target's price (ADR-0011);
+    /// 0 disables the mechanic. E.g. 200 = pay 2x price to seize a rival's
+    /// unimproved property; the former owner is compensated its price.
+    #[serde(default)]
+    pub expropriation: i64,
+    /// Rent-boost cost as a percent of the tile's price, per boost
+    /// (ADR-0012); 0 disables. Each boost raises that tile's rent by a
+    /// fixed step, capped.
+    #[serde(default)]
+    pub rent_boost: i64,
 }
 
 impl Default for RuleParams {
@@ -123,6 +133,8 @@ impl Default for RuleParams {
             max_houses_per_property: 5,
             bankruptcy_threshold: 0,
             auction_on_decline: true,
+            expropriation: 0,
+            rent_boost: 0,
         }
     }
 }

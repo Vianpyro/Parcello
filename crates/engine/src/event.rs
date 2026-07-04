@@ -124,6 +124,21 @@ pub enum Event {
         houses: u8,
         refund: i64,
     },
+    /// A rival's property was seized (ADR-0011). `from` is the former
+    /// owner, `player` the new one; `cost` is what the seizer paid.
+    Expropriated {
+        player: usize,
+        from: usize,
+        tile: usize,
+        cost: i64,
+    },
+    /// A tile's rent was boosted one step (ADR-0012).
+    RentBoosted {
+        player: usize,
+        tile: usize,
+        boosts: u8,
+        cost: i64,
+    },
     PropertyMortgaged {
         player: usize,
         tile: usize,

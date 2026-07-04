@@ -59,6 +59,14 @@ pub enum CommandError {
     NotInJail,
     #[error("no get-out-of-jail card held")]
     NoJailCard,
+    #[error("expropriation is disabled in this game")]
+    ExpropriationDisabled,
+    #[error("tile is not a rival's seizable property")]
+    NotExpropriable,
+    #[error("rent boosting is disabled in this game")]
+    RentBoostDisabled,
+    #[error("this tile's rent boost is already maxed out")]
+    BoostLimit,
 }
 
 /// Content invariant violations, detected once at room creation.

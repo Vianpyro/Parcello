@@ -252,6 +252,7 @@ class BoardWidget extends StatelessWidget {
     if (ts != null && ts.houses > 0) {
       parts.add(ts.houses == 5 ? 'HOTEL' : '▪' * ts.houses);
     }
+    if (ts != null && ts.boosts > 0) parts.add('⚡${ts.boosts}');
     if (ts?.mortgaged == true) parts.add('MORT.');
     return parts.join(' ');
   }

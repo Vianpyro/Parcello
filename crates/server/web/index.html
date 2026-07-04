@@ -372,7 +372,10 @@ function render() {
     ownerEl.style.background = ts.owner === null ? "transparent" : PAWN_COLORS[ts.owner % 6];
     el.classList.toggle("mine", ts.owner === st.seat);
     const h = el.querySelector(".houses");
-    if (h) h.textContent = ts.houses === 0 ? "" : ts.houses === 5 ? "HOTEL" : "\u25AA".repeat(ts.houses);
+    if (h) {
+      h.textContent = ts.houses === 0 ? "" : ts.houses === 5 ? "HOTEL" : "\u25AA".repeat(ts.houses);
+      if (ts.boosts) h.textContent += ` \u26A1${ts.boosts}`; // rent boost (ADR-0012)
+    }
     const m = el.querySelector(".mort");
     if (m) m.textContent = ts.mortgaged ? "MORT." : "";
     el.querySelector(".pawns").innerHTML = "";
@@ -510,20 +513,32 @@ function tileMenu(i, evt) {
   const menu = $("#tilemenu");
   menu.style.display = "none";
   const v = st.view;
-  if (!v || v.tiles[i].owner !== st.seat) return;
+  if (!v) return;
   const ts = v.tiles[i];
   const id = board()[i].id;
+  const rules = st.content.rules;
+  const actions = [];
+  if (ts.owner === st.seat) {
+    if (isHousesModel(i) && !ts.mortgaged) actions.push(["Build house", { type: "build", tile: id }]);
+    if (ts.houses > 0) actions.push(["Sell house", { type: "sell_house", tile: id }]);
+    // Rent boost (ADR-0012): raise this tile's rent one step.
+    if (rules.rent_boost > 0 && !ts.mortgaged && (ts.boosts ?? 0) < 3)
+      actions.push([`Boost rent ($${Math.floor(prop(i).price * rules.rent_boost / 100)})`, { type: "boost_rent", tile: id }]);
+    actions.push(ts.mortgaged
+      ? ["Redeem mortgage", { type: "unmortgage", tile: id }]
+      : ["Mortgage", { type: "mortgage", tile: id }]);
+  } else if (ts.owner !== null && prop(i) && rules.expropriation > 0 && ts.houses === 0 && !ts.mortgaged) {
+    // Expropriation (ADR-0011): seize a rival's raw property.
+    actions.push([`Seize ($${Math.floor(prop(i).price * rules.expropriation / 100)})`, { type: "expropriate", tile: id }]);
+  }
+  if (!actions.length) return;
   menu.innerHTML = `<div class="muted">${escapeHtml(tileName(i))}</div>`;
-  const add = (label, cmd) => {
+  actions.forEach(([label, cmd]) => {
     const b = document.createElement("button");
     b.className = "secondary"; b.textContent = label;
     b.onclick = () => { send(cmd); menu.style.display = "none"; };
     menu.appendChild(b);
-  };
-  if (isHousesModel(i) && !ts.mortgaged) add("Build house", { type: "build", tile: id });
-  if (ts.houses > 0) add("Sell house", { type: "sell_house", tile: id });
-  if (!ts.mortgaged) add("Mortgage", { type: "mortgage", tile: id });
-  else add("Redeem mortgage", { type: "unmortgage", tile: id });
+  });
   menu.style.display = "flex";
   menu.style.left = Math.min(evt.clientX, innerWidth - 180) + "px";
   menu.style.top = Math.min(evt.clientY, innerHeight - 160) + "px";
@@ -645,6 +660,8 @@ function describe(e) {
       return `${P(e.player)} ${e.delta >= 0 ? "received" : "paid"} $${Math.abs(e.delta)} (${e.reason})`;
     case "house_built": return `${P(e.player)} built on ${T(e.tile)} (now ${e.houses})`;
     case "house_sold": return `${P(e.player)} sold a house on ${T(e.tile)} (+$${e.refund})`;
+    case "expropriated": return `${P(e.player)} seized ${T(e.tile)} from ${P(e.from)} for $${e.cost}`;
+    case "rent_boosted": return `${P(e.player)} boosted ${T(e.tile)} rent to level ${e.boosts} for $${e.cost}`;
     case "property_mortgaged": return `${P(e.player)} mortgaged ${T(e.tile)} for $${e.value}`;
     case "property_unmortgaged": return `${P(e.player)} redeemed ${T(e.tile)} for $${e.cost}`;
     case "went_to_jail": return `${P(e.player)} went to jail`;

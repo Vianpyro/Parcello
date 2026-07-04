@@ -40,8 +40,8 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Jail | jail tile, fine, doubles, cards | "blocked several turns" island | keep the mechanic, **rename** (mod cosmetic); tuning turn count is small **engine** |
 | Win condition | last player standing + richest at time limit | also: own all resorts, control all cities of N colours, own a whole side | partly DONE (time-limit wealth win, ADR-0010); the rest is a `WinCondition` set in the engine |
 | Time-boxed game | `--game-timeout`: richest by net worth wins at the buzzer | 15/30 min presets, host-chosen | DONE (ADR-0010); host-chosen per-room duration is a follow-up |
-| Expropriation | none | take a city from an opponent | **engine** (new command + rules: cost, cooldown) - big, ADR |
-| Rent multiplier boost | none | "championships" raise a city's rent | **engine** (per-tile multiplier in `TileState`, consumed by `RentCalculator`) |
+| Expropriation | `rules.expropriation`: seize a rival's unimproved property at a premium (owner compensated) | tune cost / allow improved targets | DONE (ADR-0011) |
+| Rent multiplier boost | `rules.rent_boost`: pay to raise an owned tile's rent +50%/step, cap 3 | theme it ("championships"), tie to a board event | DONE (ADR-0012) |
 | Free-destination move | `MoveTo`/`MoveBy` cards only | "world tour": choose your next landing | **engine** (a choose-destination phase/command) |
 | Auctions on decline | on by default | keep - it sustains momentum | already implemented (`rules.auction_on_decline`) |
 
@@ -58,10 +58,11 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
    game at the buzzer; the richest player by net worth wins. The clients
    show a countdown and a live net-worth ranking. Host-chosen per-room
    durations are the natural next step.
-4. **Dynamic mechanics (each its own ADR).** Expropriation, rent-multiplier
-   boosts, free-destination moves, and the multi-condition win set. These
-   are the "nervous, tactical" differentiators; add them one at a time,
-   behind the Strategy/command seams, with tests.
+4. **Dynamic mechanics (each its own ADR).** Expropriation (ADR-0011) and
+   rent-multiplier boosts (ADR-0012) are DONE and on in the base fast mod.
+   Still ahead: free-destination moves and the multi-condition win set
+   (own all resorts / all cities of N colours / a whole side). Add them one
+   at a time, behind the Strategy/command seams, with tests.
 
 Keep every step data-driven where possible: the mod layer is the right home
 for board shape, decks, and rule scalars; only genuinely new *mechanics*

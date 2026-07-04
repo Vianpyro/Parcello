@@ -109,6 +109,10 @@ pub struct TileState {
     /// Mortgaged tiles collect no rent; ownership still counts for groups.
     #[serde(default)]
     pub mortgaged: bool,
+    /// Rent-boost level (ADR-0012): each step raises this tile's rent by a
+    /// fixed percent. Reset when the tile changes hands.
+    #[serde(default)]
+    pub boosts: u8,
 }
 
 /// Cyclic deck: cards are drawn in shuffled order and recycled without

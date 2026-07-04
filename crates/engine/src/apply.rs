@@ -17,6 +17,9 @@ use crate::{Engine, Strategies};
 const MAX_CARD_CHAIN_DEPTH: u8 = 4;
 /// Anti-spam cap on standing offers per proposer.
 const MAX_OPEN_TRADES_PER_PLAYER: usize = 4;
+/// Rent-boost cap and per-step rent increase (ADR-0012).
+const MAX_RENT_BOOSTS: u8 = 3;
+const RENT_BOOST_STEP_PCT: i64 = 50;
 
 pub(crate) fn apply(
     engine: &Engine,
@@ -82,6 +85,8 @@ pub(crate) fn apply(
         CommandKind::CancelTrade { trade } => exec.cancel_trade(player, *trade)?,
         CommandKind::Build { tile } => exec.build(player, tile)?,
         CommandKind::SellHouse { tile } => exec.sell_house(player, tile)?,
+        CommandKind::Expropriate { tile } => exec.expropriate(player, tile)?,
+        CommandKind::BoostRent { tile } => exec.boost_rent(player, tile)?,
         CommandKind::Mortgage { tile } => exec.mortgage(player, tile)?,
         CommandKind::Unmortgage { tile } => exec.unmortgage(player, tile)?,
         CommandKind::PayJailFine => exec.pay_jail_fine(player)?,
@@ -302,6 +307,7 @@ impl<'e> Exec<'e> {
         self.st.players[offer.to].cash += offer.give_cash - offer.receive_cash;
         for &tile in &offer.give_tiles {
             self.st.tiles[tile].owner = Some(offer.to);
+            self.st.tiles[tile].boosts = 0;
             self.ev.push(Event::PropertyTransferred {
                 tile,
                 from: offer.from,
@@ -310,6 +316,7 @@ impl<'e> Exec<'e> {
         }
         for &tile in &offer.receive_tiles {
             self.st.tiles[tile].owner = Some(offer.from);
+            self.st.tiles[tile].boosts = 0;
             self.ev.push(Event::PropertyTransferred {
                 tile,
                 from: offer.to,
@@ -624,6 +631,81 @@ impl<'e> Exec<'e> {
         Ok(())
     }
 
+    /// Seize a rival's unimproved, unmortgaged property for a premium
+    /// (ADR-0011). The former owner is compensated (min of price and what
+    /// was paid); the bank keeps any premium above that.
+    fn expropriate(&mut self, p: usize, tile_id: &str) -> Result<(), CommandError> {
+        if !matches!(self.st.turn, TurnPhase::AwaitRoll | TurnPhase::AwaitEnd) {
+            return Err(CommandError::WrongPhase);
+        }
+        let pct = self.content.rules.expropriation;
+        if pct <= 0 {
+            return Err(CommandError::ExpropriationDisabled);
+        }
+        let tile = self
+            .content
+            .tile_index(tile_id)
+            .ok_or_else(|| CommandError::UnknownTile {
+                tile: tile_id.to_string(),
+            })?;
+        let prop = self
+            .content
+            .property(tile)
+            .ok_or(CommandError::NotAProperty)?;
+        let ts = self.st.tiles[tile];
+        // Must be a rival's raw property: owned by someone else, no houses,
+        // not mortgaged.
+        let from = match ts.owner {
+            Some(o) if o != p && !ts.mortgaged && ts.houses == 0 => o,
+            _ => return Err(CommandError::NotExpropriable),
+        };
+        let cost = prop.price * pct / 100;
+        if self.st.players[p].cash < cost {
+            return Err(CommandError::InsufficientFunds);
+        }
+        let compensation = prop.price.min(cost);
+        self.st.players[p].cash -= cost;
+        self.st.players[from].cash += compensation;
+        self.st.tiles[tile].owner = Some(p);
+        self.st.tiles[tile].boosts = 0;
+        self.ev.push(Event::Expropriated {
+            player: p,
+            from,
+            tile,
+            cost,
+        });
+        Ok(())
+    }
+
+    /// Raise an owned tile's rent one step for a fee (ADR-0012), up to
+    /// `MAX_RENT_BOOSTS`. Mortgaged tiles cannot be boosted.
+    fn boost_rent(&mut self, p: usize, tile_id: &str) -> Result<(), CommandError> {
+        let (tile, prop) = self.owned_property(p, tile_id)?;
+        let pct = self.content.rules.rent_boost;
+        if pct <= 0 {
+            return Err(CommandError::RentBoostDisabled);
+        }
+        if self.st.tiles[tile].mortgaged {
+            return Err(CommandError::AlreadyMortgaged);
+        }
+        if self.st.tiles[tile].boosts >= MAX_RENT_BOOSTS {
+            return Err(CommandError::BoostLimit);
+        }
+        let cost = prop.price * pct / 100;
+        if self.st.players[p].cash < cost {
+            return Err(CommandError::InsufficientFunds);
+        }
+        self.st.players[p].cash -= cost;
+        self.st.tiles[tile].boosts += 1;
+        self.ev.push(Event::RentBoosted {
+            player: p,
+            tile,
+            boosts: self.st.tiles[tile].boosts,
+            cost,
+        });
+        Ok(())
+    }
+
     fn mortgage(&mut self, p: usize, tile_id: &str) -> Result<(), CommandError> {
         let (tile, prop) = self.owned_property(p, tile_id)?;
         if self.st.tiles[tile].mortgaged {
@@ -830,6 +912,12 @@ impl<'e> Exec<'e> {
         self.ev.push(Event::WentToJail { player: p });
     }
 
+    /// Applies a tile's rent-boost level to a base rent (ADR-0012):
+    /// `+RENT_BOOST_STEP_PCT%` per boost.
+    fn boosted_rent(base: i64, boosts: u8) -> i64 {
+        base * (100 + RENT_BOOST_STEP_PCT * boosts as i64) / 100
+    }
+
     // -- Landing resolution -----------------------------------------------------
 
     fn resolve_landing(&mut self, p: usize, dice_total: u8, depth: u8) {
@@ -872,10 +960,11 @@ impl<'e> Exec<'e> {
                     self.st.turn = TurnPhase::AwaitEnd;
                 }
                 Some(owner) => {
-                    let rent = self
+                    let base = self
                         .strat
                         .rent
                         .rent(self.content, &self.st, tile, dice_total);
+                    let rent = Self::boosted_rent(base, self.st.tiles[tile].boosts);
                     self.ev.push(Event::RentPaid {
                         from: p,
                         to: owner,
@@ -1047,6 +1136,7 @@ impl<'e> Exec<'e> {
             if self.st.tiles[tile].owner == Some(p) {
                 self.st.tiles[tile].owner = creditor;
                 self.st.tiles[tile].houses = 0;
+                self.st.tiles[tile].boosts = 0;
                 if creditor.is_none() {
                     // Returned to the bank: sold clean next time.
                     self.st.tiles[tile].mortgaged = false;

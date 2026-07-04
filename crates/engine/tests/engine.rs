@@ -689,6 +689,211 @@ fn finish_on_time_awards_the_richest_and_breaks_ties_low() {
     assert!(ev2.is_empty());
 }
 
+fn engine_with_rules(rolls: &[(u8, u8)], set: impl FnOnce(&mut RuleParams)) -> Engine {
+    let mut content = plain_board();
+    set(&mut content.rules);
+    Engine::new(Arc::new(content))
+        .expect("valid content")
+        .with_dice(FixedDice::new(rolls))
+}
+
+#[test]
+fn expropriation_transfers_and_compensates() {
+    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Expropriate {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Expropriated {
+            player: 0,
+            from: 1,
+            tile: 2,
+            cost: 120
+        }
+    )));
+    assert_eq!(st.tiles[2].owner, Some(0), "the tile changes hands");
+    assert_eq!(st.players[0].cash, 1500 - 120, "seizer pays 2x price");
+    assert_eq!(st.players[1].cash, 1500 + 60, "former owner gets 1x price");
+}
+
+#[test]
+fn expropriation_is_gated() {
+    // Disabled by default.
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1);
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Expropriate {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::ExpropriationDisabled
+    );
+
+    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let mut st = two_players(&engine);
+    // Own tile, improved tile, and broke seizer all reject.
+    st.tiles[2].owner = Some(0);
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Expropriate {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::NotExpropriable
+    );
+    st.tiles[2].owner = Some(1);
+    st.tiles[2].houses = 1;
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Expropriate {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::NotExpropriable
+    );
+    st.tiles[2].houses = 0;
+    st.players[0].cash = 10;
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Expropriate {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::InsufficientFunds
+    );
+}
+
+#[test]
+fn rent_boost_raises_rent_and_is_capped() {
+    let engine = engine_with_rules(&[(1, 2)], |r| r.rent_boost = 100);
+    let mut st = two_players(&engine);
+    st.tiles[6].owner = Some(0); // blvd, singleton navy -> full group, rent 20
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::BoostRent {
+                tile: "blvd".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::RentBoosted {
+            tile: 6,
+            boosts: 1,
+            cost: 100,
+            ..
+        }
+    )));
+    assert_eq!(st.players[0].cash, 1500 - 100);
+
+    // p1 lands on blvd (pos 3 + 3 = 6) and pays boosted rent: 20 * 1.5 = 30.
+    let mut st = st;
+    st.current = 1;
+    st.players[1].position = 3;
+    st.turn = TurnPhase::AwaitRoll;
+    let (_st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentPaid { amount: 30, .. })),
+        "20 base rent x1.5 boost"
+    );
+}
+
+#[test]
+fn rent_boost_is_gated_and_bounded() {
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = two_players(&engine);
+    st.tiles[6].owner = Some(0);
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::BoostRent {
+                        tile: "blvd".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::RentBoostDisabled
+    );
+
+    let engine = engine_with_rules(&[], |r| r.rent_boost = 10);
+    let mut st = two_players(&engine);
+    st.tiles[6].owner = Some(0);
+    // Three boosts allowed, the fourth is capped.
+    for _ in 0..3 {
+        st = step(
+            &engine,
+            &st,
+            cmd(
+                "p0",
+                CommandKind::BoostRent {
+                    tile: "blvd".into(),
+                },
+            ),
+        )
+        .0;
+    }
+    assert_eq!(st.tiles[6].boosts, 3);
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::BoostRent {
+                        tile: "blvd".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::BoostLimit
+    );
+}
+
 #[test]
 fn view_hides_rng_and_deck_order() {
     let engine = engine_with(plain_board(), &[]);

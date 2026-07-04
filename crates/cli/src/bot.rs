@@ -206,12 +206,12 @@ mod tests {
         v.tiles[1] = TileState {
             owner: Some(0),
             houses: 1,
-            mortgaged: false,
+            ..Default::default()
         };
         v.tiles[2] = TileState {
             owner: Some(0),
             houses: 0,
-            mortgaged: false,
+            ..Default::default()
         };
         // Even rule: the 0-house tile of the group must come first.
         assert!(matches!(

@@ -61,6 +61,16 @@ pub enum CommandKind {
     SellHouse {
         tile: String,
     },
+    /// Seize a rival's unimproved property for a premium (ADR-0011); the
+    /// former owner is compensated. Enabled by `rules.expropriation`.
+    Expropriate {
+        tile: String,
+    },
+    /// Raise an owned tile's rent one step for a fee (ADR-0012). Enabled by
+    /// `rules.rent_boost`.
+    BoostRent {
+        tile: String,
+    },
     /// Mortgage an owned tile for half its price (group must be house-free).
     Mortgage {
         tile: String,

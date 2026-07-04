@@ -72,6 +72,8 @@ impl RegistryBuilder {
                 }
                 "bankruptcy_threshold" => rules.bankruptcy_threshold = *value,
                 "auction_on_decline" => rules.auction_on_decline = *value != 0,
+                "expropriation" => rules.expropriation = *value,
+                "rent_boost" => rules.rent_boost = *value,
                 _ => warn!(key, value, "unknown rule key ignored"),
             }
         }

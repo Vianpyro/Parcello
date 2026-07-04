@@ -11,3 +11,8 @@ jail_fine = 50
 max_houses_per_property = 5
 bankruptcy_threshold = 0
 auction_on_decline = 1
+# Aggressive mechanics for swingy games (ADR-0011/0012):
+# expropriation = pay 200% of a rival's unimproved property to seize it
+# (they get 100% back); rent_boost = pay 100% of price per +50% rent step.
+expropriation = 200
+rent_boost = 100
