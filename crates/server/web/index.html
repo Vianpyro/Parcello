@@ -35,10 +35,10 @@
   }
   #login h1 { margin: 0 0 4px; color: var(--accent); }
   #app { display: none; grid-template-columns: minmax(560px, 1fr) 340px; gap: 12px; padding: 12px; }
-  /* Board: 11x11 grid, corners span 1 cell, classic counter-clockwise walk. */
+  /* Board: a d x d grid ring (32 -> 9x9, 40 -> 11x11); grid-template is set
+     dynamically in buildBoard(). Corners span 1 cell, counter-clockwise. */
   #board {
     display: grid; aspect-ratio: 1; max-height: calc(100vh - 24px);
-    grid-template: repeat(11, 1fr) / repeat(11, 1fr);
     gap: 2px; background: var(--line); padding: 2px; border-radius: 6px;
   }
   .tile {
@@ -163,7 +163,7 @@ const PAWN_COLORS = ["#c0564f","#3d7dc0","#4d9e5a","#c8963f","#8a5fb3","#4fa3a8"
 const GROUP_COLORS = {
   brown:"#8a5a3b", lightblue:"#8fc7e8", pink:"#d76fa3", orange:"#e08a3c",
   red:"#c0564f", yellow:"#e0c93c", green:"#4d9e5a", navy:"#3b5a8a",
-  transit:"#444", works:"#999",
+  resort:"#2a9d8f", transit:"#444", works:"#999",
 };
 
 // -- connection state ---------------------------------------------------------
@@ -268,53 +268,60 @@ const isHousesModel = i => (prop(i)?.rent_model ?? "houses") === "houses";
 const myTurn = () => st.view && st.view.current === st.seat;
 
 // -- board rendering ------------------------------------------------------------
-// Classic 40-tile walk: 0 bottom-right corner, counter-clockwise.
-function cellOf(i) {
-  if (i <= 10) return { r: 11, c: 11 - i };
-  if (i <= 20) return { r: 11 - (i - 10), c: 1 };
-  if (i <= 30) return { r: 1, c: i - 19 };
-  return { r: i - 29, c: 11 };
+// A board of n tiles is a d x d ring when n = 4*(d-1) (32 -> 9, 40 -> 11).
+// Tile 0 is the bottom-right corner, walking counter-clockwise.
+const isRing = n => n >= 8 && n % 4 === 0;
+const ringSide = n => n / 4 + 1;
+function cellOf(i, d) {
+  if (i <= d - 1) return { r: d, c: d - i };
+  if (i <= 2 * d - 2) return { r: 2 * d - 1 - i, c: 1 };
+  if (i <= 3 * d - 3) return { r: 1, c: i - 2 * d + 3 };
+  return { r: i - 3 * d + 4, c: d };
 }
 
 function buildBoard() {
   const el = $("#board");
   el.innerHTML = "";
   const n = board().length;
-  const classic = n === 40;
+  const classic = isRing(n);
+  const d = ringSide(n);
+  if (classic) el.style.gridTemplate = `repeat(${d}, 1fr) / repeat(${d}, 1fr)`;
   board().forEach((t, i) => {
-    const d = document.createElement("div");
-    d.className = "tile";
-    d.id = `tile-${i}`;
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    tile.id = `tile-${i}`;
     if (classic) {
-      const { r, c } = cellOf(i);
-      d.style.gridArea = `${r} / ${c}`;
+      const { r, c } = cellOf(i, d);
+      tile.style.gridArea = `${r} / ${c}`;
     }
     const p = prop(i);
     const band = document.createElement("div");
     band.className = "band";
     band.style.background = p ? (GROUP_COLORS[p.group] ?? "#777") : "#b9c2b0";
-    d.appendChild(band);
+    tile.appendChild(band);
     const name = document.createElement("div");
     name.className = "name";
     name.textContent = t.name;
-    d.appendChild(name);
+    tile.appendChild(name);
     const meta = document.createElement("div");
     meta.className = "meta";
     if (p) meta.innerHTML = `<span>$${p.price}</span><span class="houses"></span><span class="mort"></span>`;
     if (t.kind.type === "tax") meta.textContent = `pay $${t.kind.amount}`;
-    d.appendChild(meta);
-    const owner = document.createElement("div"); owner.className = "owner"; d.appendChild(owner);
-    const pawns = document.createElement("div"); pawns.className = "pawns"; d.appendChild(pawns);
-    d.onclick = e => tileMenu(i, e);
-    el.appendChild(d);
+    tile.appendChild(meta);
+    const owner = document.createElement("div"); owner.className = "owner"; tile.appendChild(owner);
+    const pawns = document.createElement("div"); pawns.className = "pawns"; tile.appendChild(pawns);
+    tile.onclick = e => tileMenu(i, e);
+    el.appendChild(tile);
   });
   if (classic) {
     const center = document.createElement("div");
     center.id = "center";
+    // Interior spans the (d-2) x (d-2) inner cells.
+    center.style.gridArea = `2 / 2 / ${d} / ${d}`;
     center.innerHTML = `<h2>PARCELLO</h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
     el.appendChild(center);
   } else {
-    // Non-40 boards (mods): linear fallback, panel below.
+    // Non-ring boards (mods): linear fallback, panel below.
     el.style.display = "flex"; el.style.flexWrap = "wrap"; el.style.aspectRatio = "auto";
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");

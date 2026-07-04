@@ -1,7 +1,10 @@
 # CLAUDE.md
 
-Parcello: open-source multiplayer board game (Business Tour / Monopoly
-style). Authoritative Rust server, thin clients, community-hosted servers
+Parcello: open-source multiplayer board game. Design goal is Business-Tour
+style - fast, dynamic games, NOT Monopoly's slow accumulation - but the
+implemented rules are still Monopoly-close today; the target and the gap
+are in `docs/business-tour-direction.md` (read it before proposing new
+rules). Authoritative Rust server, thin clients, community-hosted servers
 (Minecraft model), data-driven TOML mods. This repo is the complete,
 playable backend V1: pure engine, mod layer, WebSocket server with an
 embedded browser client, terminal test client, SQLite history.
@@ -133,7 +136,11 @@ architecture doc section 5; dependencies point downward only):
 Mods: the server resolves a default set at boot (`--mod`), and each room
 may override it at creation via the optional `mods` field on Create
 (ADR-0006; ids are allowlist-validated in `ws.rs` because they become
-filesystem paths). `mods/highroller` is a rules-only example mod.
+filesystem paths). Default `mods/base` is the 32-tile fast board (9x9
+ring, no Community Chest, two resorts, `docs/business-tour-direction.md`);
+`mods/classic` is the 40-tile Monopoly-like long game; `mods/highroller`
+is a rules-only example. Clients render any `4*(d-1)` square ring (32, 40,
+...); other tile counts fall back to a wrap layout.
 
 ## Game rules snapshot (what exists)
 

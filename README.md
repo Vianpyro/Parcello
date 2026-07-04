@@ -1,8 +1,10 @@
 # Parcello
 
-Open-source multiplayer board game in the spirit of Business Tour / Monopoly.
-Authoritative Rust server, thin clients, community-hosted servers
-(Minecraft model), data-driven mods.
+Open-source multiplayer board game in the spirit of Business Tour: fast,
+dynamic games rather than Monopoly's slow accumulation. Authoritative Rust
+server, thin clients, community-hosted servers (Minecraft model),
+data-driven mods. The current rules are still Monopoly-close; the target
+design and the gap are tracked in `docs/business-tour-direction.md`.
 
 This repository holds the complete, playable game: pure game engine, TOML
 mod layer, WebSocket server with an embedded browser client, a terminal
@@ -206,7 +208,10 @@ mods/<id>/
   data/rules.toml        # [rules] named scalar overrides
 ```
 
-Base game content is itself a mod (`mods/base`), loaded first. Merge is
+The default `mods/base` is the **32-tile fast board** (a 9x9 ring, no
+Community Chest, two "resorts" instead of four stations; the design goal is
+fast, dynamic games). `mods/classic` preserves the 40-tile Monopoly-like
+long game for players who want it. Base is loaded first; merge is
 last-loaded-wins per key: tiles and cards replace in place by id, rule
 scalars override by name; every conflict is logged at WARN. Unknown rule
 keys are ignored with a warning. The resolved bundle is pushed to clients
@@ -215,8 +220,9 @@ on join, so clients never need mod files locally.
 Each room can pick its own ordered mod list at creation (ADR-0006): the
 clients expose a "mods" field on create (CLI: repeatable `--mod`), and an
 omitted or empty list selects the server's boot-time default set. Mod ids
-are allowlist-validated server-side. `mods/highroller` is a rules-only
-example (richer, faster games): create a room with `base, highroller`.
+are allowlist-validated server-side. Examples: play the long game with
+`--mod classic`, or `mods/highroller` (rules-only: richer, faster) with
+`base, highroller`.
 
 V1 hook points: `rules.{starting_balance, go_salary, jail_fine,
 max_houses_per_property, bankruptcy_threshold, auction_on_decline}`

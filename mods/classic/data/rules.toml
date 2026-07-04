@@ -1,11 +1,8 @@
 # V1 rule hook points. Mods loaded after `base` override these per key
 # (last-loaded-wins). Unknown keys are ignored with a warning.
-#
-# Fast-board tuning: a bit less starting cash than the classic long game
-# so pressure builds sooner; auctions stay on to keep momentum.
 
 [rules]
-starting_balance = 1200
+starting_balance = 1500
 go_salary = 200
 jail_fine = 50
 max_houses_per_property = 5

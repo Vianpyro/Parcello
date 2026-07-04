@@ -29,17 +29,23 @@ const _groupColors = <String, Color>{
   'yellow': Color(0xFFE0C93C),
   'green': Color(0xFF4D9E5A),
   'navy': Color(0xFF3B5A8A),
+  'resort': Color(0xFF2A9D8F),
   'transit': Color(0xFF444444),
   'works': Color(0xFF999999),
 };
 
-/// Grid cell (1-based row/col) of tile `i` on the classic 40-tile ring:
-/// 0 is the bottom-right corner, walking counter-clockwise.
-({int r, int c}) cellOf(int i) {
-  if (i <= 10) return (r: 11, c: 11 - i);
-  if (i <= 20) return (r: 11 - (i - 10), c: 1);
-  if (i <= 30) return (r: 1, c: i - 19);
-  return (r: i - 29, c: 11);
+/// A board of `n` tiles renders as a square ring when `n` is `4*(d-1)`
+/// for a `d`x`d` grid (32 -> 9x9, 40 -> 11x11, ...).
+bool isSquareRing(int n) => n >= 8 && n % 4 == 0;
+int ringSide(int n) => n ~/ 4 + 1; // the `d` above
+
+/// Grid cell (1-based row/col) of tile `i` on a `d`x`d` ring of `4*(d-1)`
+/// tiles: 0 is the bottom-right corner, walking counter-clockwise.
+({int r, int c}) cellOf(int i, int d) {
+  if (i <= d - 1) return (r: d, c: d - i); // bottom row (d tiles)
+  if (i <= 2 * d - 2) return (r: 2 * d - 1 - i, c: 1); // left column up
+  if (i <= 3 * d - 3) return (r: 1, c: i - 2 * d + 3); // top row
+  return (r: i - 3 * d + 4, c: d); // right column down
 }
 
 class BoardWidget extends StatelessWidget {
@@ -78,17 +84,18 @@ class BoardWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final n = content.board.length;
-    if (n != 40) return _wrapLayout();
+    if (!isSquareRing(n)) return _wrapLayout();
+    final d = ringSide(n); // grid is d x d
     return AspectRatio(
       aspectRatio: 1,
       child: LayoutBuilder(builder: (context, box) {
-        final w = box.maxWidth / 11, h = box.maxHeight / 11;
+        final w = box.maxWidth / d, h = box.maxHeight / d;
         return Stack(children: [
           Positioned(
             left: w,
             top: h,
-            width: w * 9,
-            height: h * 9,
+            width: w * (d - 2),
+            height: h * (d - 2),
             child: Container(
               margin: const EdgeInsets.all(2),
               padding: const EdgeInsets.all(8),
@@ -96,17 +103,17 @@ class BoardWidget extends StatelessWidget {
               child: center,
             ),
           ),
-          for (var i = 0; i < 40; i++)
+          for (var i = 0; i < n; i++)
             Positioned(
-              left: (cellOf(i).c - 1) * w,
-              top: (cellOf(i).r - 1) * h,
+              left: (cellOf(i, d).c - 1) * w,
+              top: (cellOf(i, d).r - 1) * h,
               width: w,
               height: h,
               child: _tile(i, cellW: w),
             ),
           // Animated pawns ride on top of the tiles.
           Positioned.fill(
-            child: _PawnLayer(cellW: w, cellH: h, pawns: _pawns()),
+            child: _PawnLayer(side: d, cellW: w, cellH: h, pawns: _pawns()),
           ),
         ]);
       }),
@@ -267,9 +274,15 @@ class PawnData {
 /// A normal roll (short forward distance) hops tile by tile around the
 /// ring; a teleport (card, jail, backward) slides straight to the target.
 class _PawnLayer extends StatefulWidget {
+  final int side; // ring grid dimension (d)
   final double cellW, cellH;
   final List<PawnData> pawns;
-  const _PawnLayer({required this.cellW, required this.cellH, required this.pawns});
+  const _PawnLayer({
+    required this.side,
+    required this.cellW,
+    required this.cellH,
+    required this.pawns,
+  });
 
   @override
   State<_PawnLayer> createState() => _PawnLayerState();
@@ -283,7 +296,7 @@ class _PawnAnim {
 }
 
 class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
-  static const _boardLen = 40;
+  int get _boardLen => 4 * (widget.side - 1);
   final Map<int, _PawnAnim> _anims = {};
 
   @override
@@ -325,7 +338,7 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
   }
 
   Offset _center(int i) {
-    final c = cellOf(i);
+    final c = cellOf(i, widget.side);
     return Offset((c.c - 0.5) * widget.cellW, (c.r - 0.5) * widget.cellH);
   }
 

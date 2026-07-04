@@ -1,5 +1,6 @@
-# Base decks. Draw order is shuffled per game from the room seed; decks
-# cycle when exhausted. Card ids are the mod override keys.
+# Default deck: Chance only (no Community Chest on the fast board). Draw
+# order is shuffled per game from the room seed; the deck cycles when
+# exhausted. Card ids are the mod override keys.
 
 [[chance]]
 id = "ch_advance_go"
@@ -18,11 +19,11 @@ tile = "crown_heights"
 collect_go = true
 
 [[chance]]
-id = "ch_advance_station"
-text = "Catch the next train at North Station."
+id = "ch_advance_resort"
+text = "A weekend at North Resort awaits."
 [chance.effect]
 type = "move_to"
-tile = "north_station"
+tile = "north_resort"
 collect_go = true
 
 [[chance]]
@@ -77,80 +78,4 @@ amount = 25
 id = "ch_jail_free"
 text = "Get out of jail free. Keep this card until needed."
 [chance.effect]
-type = "get_out_of_jail"
-
-[[community]]
-id = "cm_advance_go"
-text = "Advance to Go and collect your salary."
-[community.effect]
-type = "move_to"
-tile = "go"
-collect_go = true
-
-[[community]]
-id = "cm_bank_error"
-text = "Bank error in your favor: collect 200."
-[community.effect]
-type = "money"
-amount = 200
-
-[[community]]
-id = "cm_doctor_fee"
-text = "Doctor's fee: pay 50."
-[community.effect]
-type = "money"
-amount = -50
-
-[[community]]
-id = "cm_tax_refund"
-text = "Income tax refund: collect 20."
-[community.effect]
-type = "money"
-amount = 20
-
-[[community]]
-id = "cm_birthday"
-text = "It is your birthday: collect 10 from every player."
-[community.effect]
-type = "collect_from_each"
-amount = 10
-
-[[community]]
-id = "cm_hospital"
-text = "Hospital fees: pay 100."
-[community.effect]
-type = "money"
-amount = -100
-
-[[community]]
-id = "cm_school_fees"
-text = "School fees: pay 50."
-[community.effect]
-type = "money"
-amount = -50
-
-[[community]]
-id = "cm_consultancy"
-text = "Consultancy fee: collect 25."
-[community.effect]
-type = "money"
-amount = 25
-
-[[community]]
-id = "cm_inheritance"
-text = "You inherit 100."
-[community.effect]
-type = "money"
-amount = 100
-
-[[community]]
-id = "cm_go_to_jail"
-text = "Go directly to Jail. Do not pass Go."
-[community.effect]
-type = "go_to_jail"
-
-[[community]]
-id = "cm_jail_free"
-text = "Get out of jail free. Keep this card until needed."
-[community.effect]
 type = "get_out_of_jail"
