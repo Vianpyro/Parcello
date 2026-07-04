@@ -89,7 +89,9 @@ Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
 canonical action - roll/decline/pass/end turn - for a *connected* player
 who stalls that long; 0 = disabled, the default - a *disconnected* player
-is always skipped after a 30s grace regardless), `--identity-url <jwks-url>`
+is always skipped after a 30s grace regardless), `--game-timeout <secs>`
+(time-box games: at the buzzer the richest player by net worth wins,
+ADR-0010; 0 = off), `--identity-url <jwks-url>`
 (repeatable; accept EdDSA identity tokens from an OIDC provider such as
 Rauthy, ADR-0009) with optional `--identity-audience <client-id>`.
 `PARCELLO_JWT_SECRET` (HS256, ADR-0003) still works but is deprecated.
@@ -258,7 +260,9 @@ cards never leave the rotation), doubles grant an extra roll and three consecuti
 doubles jail you, partial-payment bankruptcy with liquidation (houses at
 half cost first, then automatic mortgages, highest value first) and asset
 transfer to the creditor (mortgages carry over as-is; the bank refurbishes
-returned tiles), resignation, last-player-standing win.
+returned tiles), resignation, last-player-standing win. Optional time-boxed games
+(`--game-timeout`): at the buzzer the richest player by net worth wins
+(cash + property equity + houses), ADR-0010.
 
 Deliberate V1 simplifications: no immediate interest charge when mortgaged
 tiles change hands (trades and bankruptcy transfer them as-is);
@@ -290,7 +294,8 @@ See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside
 collapsed); 0007 private trade offers via per-seat `ClientView`s;
 0008 per-seat reconnect tokens (guest seat hijack protection);
 0009 Identity Service design (EdDSA JWT + JWKS, self-hosted and
-redundant, accounts always optional).
+redundant, accounts always optional); 0010 time-boxed games end by net
+worth (server clock, engine rule).
 
 ## Roadmap
 

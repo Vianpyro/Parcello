@@ -253,12 +253,16 @@ impl Ctx {
                 content,
                 view,
                 reconnect,
+                time_remaining,
             } => {
                 self.my_seat = Some(seat);
                 self.content = Some(*content);
                 println!("* joined room {code} as seat {seat}");
                 if let Some(token) = reconnect {
                     println!("* reconnect token: {token} (rejoin with --reconnect {token})");
+                }
+                if let Some(secs) = time_remaining {
+                    println!("* timed game: {secs}s left (richest wins)");
                 }
                 self.print_lobby(&players);
                 if let Some(view) = view {
@@ -268,8 +272,14 @@ impl Ctx {
                 }
             }
             ServerMessage::Lobby { players } => self.print_lobby(&players),
-            ServerMessage::GameStarted { view } => {
+            ServerMessage::GameStarted {
+                view,
+                time_remaining,
+            } => {
                 println!("* game started");
+                if let Some(secs) = time_remaining {
+                    println!("* timed game: {secs}s (richest wins)");
+                }
                 self.print_view(&view);
                 self.view = Some(view);
             }
@@ -538,6 +548,9 @@ impl Ctx {
             },
             Event::PlayerResigned { player } => format!("{} resigned", self.player(*player)),
             Event::GameEnded { winner } => format!("game ended, {} wins", self.player(*winner)),
+            Event::TimeUp { winner } => {
+                format!("time's up! {} wins on net worth", self.player(*winner))
+            }
         }
     }
 

@@ -648,6 +648,48 @@ fn same_seed_produces_identical_games() {
 }
 
 #[test]
+fn net_worth_counts_cash_property_and_houses() {
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = two_players(&engine);
+    // p0: 1500 cash + ave_a (60) unmortgaged + ave_b (60) with 2 houses (50 each).
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[3].houses = 2;
+    // p0 also has blvd (100) mortgaged -> counts price/2 = 50.
+    st.tiles[6].owner = Some(0);
+    st.tiles[6].mortgaged = true;
+    let content = plain_board();
+    // 1500 + 60 + 60 + 2*50 + 50 = 1770.
+    assert_eq!(st.net_worth(&content, 0), 1770);
+    assert_eq!(st.net_worth(&content, 1), 1500, "p1 owns nothing yet");
+    // Mortgaging is net-worth neutral: cash up price/2, property down price/2.
+    st.players[0].cash += 30; // as if ave_a (60) were just mortgaged
+    st.tiles[2].mortgaged = true;
+    assert_eq!(st.net_worth(&content, 0), 1770 + 30 - 30);
+}
+
+#[test]
+fn finish_on_time_awards_the_richest_and_breaks_ties_low() {
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = two_players(&engine);
+    st.players[0].cash = 900;
+    st.players[1].cash = 1200;
+    let (done, ev) = engine.finish_on_time(&st);
+    assert_eq!(done.phase, GamePhase::Finished { winner: 1 });
+    assert!(ev.iter().any(|e| matches!(e, Event::TimeUp { winner: 1 })));
+
+    // Tie -> lowest seat wins.
+    st.players[1].cash = 900;
+    let (tie, _) = engine.finish_on_time(&st);
+    assert_eq!(tie.phase, GamePhase::Finished { winner: 0 });
+
+    // Already finished -> no-op, no event.
+    let (again, ev2) = engine.finish_on_time(&done);
+    assert_eq!(again.phase, done.phase);
+    assert!(ev2.is_empty());
+}
+
+#[test]
 fn view_hides_rng_and_deck_order() {
     let engine = engine_with(plain_board(), &[]);
     let st = two_players(&engine);

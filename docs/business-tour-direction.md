@@ -38,8 +38,8 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Stations (gares) | 4 group-scaled tiles | removed, or repurposed as "resorts" | DONE - two resorts on `base` |
 | Mortgages | full mortgage/redeem flow | removed (slows games) | **rules-flag** (`rules.mortgage`; today the 4 commands are always available - add a disable branch) |
 | Jail | jail tile, fine, doubles, cards | "blocked several turns" island | keep the mechanic, **rename** (mod cosmetic); tuning turn count is small **engine** |
-| Win condition | last player standing only | multiple: richest at time limit, own all resorts, control all cities of N colours, own a whole side | **engine** (a `WinCondition` set checked in `check_win`; today only bankruptcy) |
-| Time-boxed game | none | 15/30 min, richest wins at expiry | **engine** (game clock in state + wealth tiebreak) + server drives the timer |
+| Win condition | last player standing + richest at time limit | also: own all resorts, control all cities of N colours, own a whole side | partly DONE (time-limit wealth win, ADR-0010); the rest is a `WinCondition` set in the engine |
+| Time-boxed game | `--game-timeout`: richest by net worth wins at the buzzer | 15/30 min presets, host-chosen | DONE (ADR-0010); host-chosen per-room duration is a follow-up |
 | Expropriation | none | take a city from an opponent | **engine** (new command + rules: cost, cooldown) - big, ADR |
 | Rent multiplier boost | none | "championships" raise a city's rent | **engine** (per-tile multiplier in `TileState`, consumed by `RentCalculator`) |
 | Free-destination move | `MoveTo`/`MoveBy` cards only | "world tour": choose your next landing | **engine** (a choose-destination phase/command) |
@@ -54,9 +54,10 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 2. **Rule flags for the slow mechanics.** Add `rules.mortgage` (and
    consider gating jail complexity) so a fast mod can turn them off. Small,
    isolated engine branches behind existing seams.
-3. **Time limit + wealth win.** The single biggest lever for "fast": a
-   game clock and "richest wins at expiry". Needs an engine win-condition
-   concept and a server-driven timer (the room already owns timers).
+3. **Time limit + wealth win (DONE, ADR-0010).** `--game-timeout` ends the
+   game at the buzzer; the richest player by net worth wins. The clients
+   show a countdown and a live net-worth ranking. Host-chosen per-room
+   durations are the natural next step.
 4. **Dynamic mechanics (each its own ADR).** Expropriation, rent-multiplier
    boosts, free-destination moves, and the multi-condition win set. These
    are the "nervous, tactical" differentiators; add them one at a time,

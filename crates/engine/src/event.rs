@@ -169,4 +169,9 @@ pub enum Event {
     GameEnded {
         winner: usize,
     },
+    /// A time-boxed game hit its limit; `winner` has the highest net worth
+    /// (ties break to the lowest seat). Followed by the game being Finished.
+    TimeUp {
+        winner: usize,
+    },
 }

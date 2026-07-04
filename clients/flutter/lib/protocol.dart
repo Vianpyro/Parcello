@@ -25,6 +25,7 @@ class TileDef {
   final String kind; // go | property | chance | community | tax | jail | ...
   final String? group;
   final int? price;
+  final int houseCost;
   final String rentModel; // meaningful only when kind == property
   final int? amount;
 
@@ -34,6 +35,7 @@ class TileDef {
         kind = j['kind']['type'] as String,
         group = j['kind']['group'] as String?,
         price = j['kind']['price'] as int?,
+        houseCost = j['kind']['house_cost'] as int? ?? 0,
         rentModel = j['kind']['rent_model'] as String? ?? 'houses',
         amount = j['kind']['amount'] as int?;
 
@@ -222,6 +224,8 @@ String describeEvent(
       return "${p(e['player'])} resigned";
     case 'game_ended':
       return "Game over -- ${p(e['winner'])} wins!";
+    case 'time_up':
+      return "Time's up! ${p(e['winner'])} wins on net worth.";
     default:
       return e.toString();
   }

@@ -188,4 +188,28 @@ impl GameState {
         let tiles = content.group_tiles(group);
         !tiles.is_empty() && tiles.iter().all(|&t| self.tiles[t].owner == Some(player))
     }
+
+    /// Total assets of `player`: cash plus property equity. An unmortgaged
+    /// property counts its full price; a mortgaged one counts price/2 (the
+    /// owner already took the other half in cash, so mortgaging is net-worth
+    /// neutral); each house counts its build cost. Clients mirror this to
+    /// rank players in timed games - keep the two in step. See
+    /// `docs/business-tour-direction.md`.
+    pub fn net_worth(&self, content: &GameContent, player: usize) -> i64 {
+        let mut worth = self.players[player].cash;
+        for (i, tile) in self.tiles.iter().enumerate() {
+            if tile.owner != Some(player) {
+                continue;
+            }
+            if let Some(prop) = content.property(i) {
+                worth += if tile.mortgaged {
+                    prop.price / 2
+                } else {
+                    prop.price
+                };
+                worth += tile.houses as i64 * prop.house_cost;
+            }
+        }
+        worth
+    }
 }

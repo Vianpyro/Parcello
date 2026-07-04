@@ -72,6 +72,7 @@ pub async fn create_room(
     content: Arc<ResolvedContent>,
     history: Arc<dyn GameHistory>,
     turn_timeout: Option<Duration>,
+    game_timeout: Option<Duration>,
 ) -> Result<String, String> {
     let engine = Engine::new(Arc::new(content.content.clone()))
         .map_err(|e| format!("invalid room content: {e}"))?;
@@ -95,6 +96,8 @@ pub async fn create_room(
         phase: Phase::Lobby,
         history,
         turn_timeout,
+        game_timeout,
+        game_deadline: None,
     };
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
@@ -163,6 +166,11 @@ struct Room {
     /// `d` (AFK protection). Disconnected players are always skipped after
     /// `DISCONNECTED_GRACE`, independent of this.
     turn_timeout: Option<Duration>,
+    /// `Some(d)`: the game ends after `d` and the richest player wins
+    /// (net worth, ADR-0010). `game_deadline` is the absolute instant,
+    /// set when the game starts.
+    game_timeout: Option<Duration>,
+    game_deadline: Option<tokio::time::Instant>,
 }
 
 impl Room {
@@ -179,6 +187,10 @@ impl Room {
             let deadline = self.afk_deadline();
             let afk_armed = deadline.is_some();
             let afk = tokio::time::sleep_until(last_progress + deadline.unwrap_or(IDLE_TIMEOUT));
+            // Game clock (ADR-0010): fires once at the absolute deadline.
+            let game_armed = self.game_deadline.is_some() && matches!(self.phase, Phase::Active(_));
+            let now = tokio::time::Instant::now();
+            let game = tokio::time::sleep_until(self.game_deadline.unwrap_or(now + IDLE_TIMEOUT));
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
@@ -214,6 +226,9 @@ impl Room {
                         self.handle_game(&player, kind);
                     }
                     last_progress = tokio::time::Instant::now();
+                }
+                _ = game, if game_armed => {
+                    self.handle_game_timeout();
                 }
                 _ = idle => {
                     if self.seats.iter().all(|s| s.tx.is_none()) {
@@ -327,6 +342,7 @@ impl Room {
             content: Box::new((*self.content).clone()),
             view,
             reconnect: Some(self.seats[seat_index].reconnect.clone()),
+            time_remaining: self.time_remaining_secs(),
         };
         if tx.send(joined).is_err() {
             self.seats[seat_index].tx = None;
@@ -385,16 +401,54 @@ impl Room {
             &players.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
             seed,
         );
+        // Start the game clock now, if the room is time-boxed (ADR-0010).
+        self.game_deadline = self.game_timeout.map(|d| tokio::time::Instant::now() + d);
         info!(room = %self.code, players = self.seats.len(), "game started");
 
+        let remaining = self.time_remaining_secs();
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::GameStarted {
                 view: Box::new(ClientView::for_seat(&state, seat)),
+                time_remaining: remaining,
             })
             .collect();
         self.phase = Phase::Active(state);
         self.send_per_seat(msgs);
         true
+    }
+
+    /// Seconds left before the game clock ends the game, if time-boxed.
+    fn time_remaining_secs(&self) -> Option<u64> {
+        self.game_deadline.map(|d| {
+            d.saturating_duration_since(tokio::time::Instant::now())
+                .as_secs()
+        })
+    }
+
+    /// Game clock expired: the richest player wins by net worth (ADR-0010).
+    fn handle_game_timeout(&mut self) {
+        let Phase::Active(state) = &self.phase else {
+            return;
+        };
+        let (next, events) = self.engine.finish_on_time(state);
+        let GamePhase::Finished { winner } = next.phase else {
+            return;
+        };
+        let msgs: Vec<ServerMessage> = (0..self.seats.len())
+            .map(|seat| ServerMessage::Update {
+                events: events.clone(), // TimeUp is public
+                view: Box::new(ClientView::for_seat(&next, seat)),
+            })
+            .collect();
+        self.phase = Phase::Finished(next);
+        self.game_deadline = None;
+        self.send_per_seat(msgs);
+        let winner_id = self
+            .seats
+            .get(winner)
+            .map(|s| s.identity.player_id.as_str());
+        self.history.record_end(&self.code, winner_id);
+        info!(room = %self.code, winner = ?winner_id, "game finished on time (richest wins)");
     }
 
     /// Returns true when the command was accepted (turn clock should reset).
@@ -574,7 +628,7 @@ mod tests {
         let rooms = Rooms::default();
         let memory = Arc::new(MemoryHistory::new());
         let history: Arc<dyn GameHistory> = memory.clone();
-        let code = create_room(&rooms, content, history, None)
+        let code = create_room(&rooms, content, history, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -662,7 +716,7 @@ mod tests {
         );
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
-        let code = create_room(&rooms, content, history, None)
+        let code = create_room(&rooms, content, history, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -720,7 +774,7 @@ mod tests {
         );
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
-        let code = create_room(&rooms, content, history, None)
+        let code = create_room(&rooms, content, history, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -815,7 +869,7 @@ mod tests {
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
         // No --turn-timeout: the smart grace alone must skip the AFK seat.
-        let code = create_room(&rooms, content, history, None)
+        let code = create_room(&rooms, content, history, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -871,6 +925,104 @@ mod tests {
         );
     }
 
+    /// A time-boxed game ends on its own when the clock expires: both
+    /// players start equal (net worth tie), so seat 0 wins, and the game
+    /// becomes Finished (ADR-0010).
+    #[tokio::test(start_paused = true)]
+    async fn game_clock_finishes_by_net_worth() {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
+        let code = create_room(
+            &rooms,
+            content,
+            history,
+            None,
+            Some(Duration::from_secs(60)),
+        )
+        .await
+        .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let mut client_rxs = Vec::new();
+        for name in ["alice", "bob"] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (reply, joined) = oneshot::channel();
+            room.send(RoomCmd::Join {
+                identity: Identity {
+                    player_id: format!("guest:{name}"),
+                    name: name.to_string(),
+                    spoofable: true,
+                },
+                reconnect: None,
+                tx,
+                reply,
+            })
+            .await
+            .expect("room task alive");
+            joined.await.expect("reply sent").expect("join accepted");
+            client_rxs.push(rx);
+        }
+        // Confirm the countdown reaches the clients on GameStarted.
+        room.send(RoomCmd::Start {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+
+        let outcome = tokio::time::timeout(Duration::from_secs(600), async {
+            let mut saw_countdown = false;
+            while let Some(msg) = client_rxs[1].recv().await {
+                match msg {
+                    ServerMessage::GameStarted { time_remaining, .. } => {
+                        saw_countdown = time_remaining == Some(60);
+                    }
+                    ServerMessage::Update { events, .. } => {
+                        if let Some(Event::TimeUp { winner }) =
+                            events.iter().find(|e| matches!(e, Event::TimeUp { .. }))
+                        {
+                            return (saw_countdown, *winner);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (saw_countdown, usize::MAX)
+        })
+        .await
+        .expect("the game clock must fire before the mock-clock timeout");
+        assert!(outcome.0, "GameStarted must carry the 60s countdown");
+        assert_eq!(
+            outcome.1, 0,
+            "an equal-net-worth tie awards the lowest seat"
+        );
+
+        // The game is now finished: further play is rejected.
+        room.send(RoomCmd::Game {
+            player_id: "guest:alice".into(),
+            cmd: CommandKind::Roll,
+        })
+        .await
+        .expect("room task alive");
+        let rejected = tokio::time::timeout(Duration::from_secs(60), async {
+            while let Some(msg) = client_rxs[0].recv().await {
+                if matches!(msg, ServerMessage::Rejected { .. }) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("a rejection must arrive");
+        assert!(rejected, "the game must be finished after the time limit");
+    }
+
     /// With a paused clock and zero player input, the room task must play
     /// canonical actions on its own once the per-turn deadline passes.
     #[tokio::test(start_paused = true)]
@@ -884,9 +1036,15 @@ mod tests {
         );
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
-        let code = create_room(&rooms, content, history, Some(Duration::from_secs(30)))
-            .await
-            .expect("room created");
+        let code = create_room(
+            &rooms,
+            content,
+            history,
+            Some(Duration::from_secs(30)),
+            None,
+        )
+        .await
+        .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
 
         let mut client_rxs = Vec::new();

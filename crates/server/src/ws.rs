@@ -83,16 +83,21 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                         continue;
                     }
                 };
-                let code =
-                    match create_room(&app.rooms, content, app.history.clone(), app.turn_timeout)
-                        .await
-                    {
-                        Ok(code) => code,
-                        Err(message) => {
-                            send(&tx, ServerMessage::Error { message });
-                            continue;
-                        }
-                    };
+                let code = match create_room(
+                    &app.rooms,
+                    content,
+                    app.history.clone(),
+                    app.turn_timeout,
+                    app.game_timeout,
+                )
+                .await
+                {
+                    Ok(code) => code,
+                    Err(message) => {
+                        send(&tx, ServerMessage::Error { message });
+                        continue;
+                    }
+                };
                 send(&tx, ServerMessage::RoomCreated { code: code.clone() });
                 let room = app
                     .rooms

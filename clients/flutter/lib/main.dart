@@ -2,6 +2,8 @@
 /// client feature-for-feature; the server stays the only authority.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'board.dart';
@@ -264,9 +266,14 @@ class _CenterPanel extends StatelessWidget {
     return DefaultTextStyle(
       style: const TextStyle(color: Color(0xFF2A2A2A), fontSize: 13),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('PARCELLO',
-            style: TextStyle(
-                fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
+        Row(children: [
+          const Text('PARCELLO',
+              style: TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
+          const Spacer(),
+          if (s.gameEndsAt != null && s.view?.finished != true)
+            _Countdown(endsAt: s.gameEndsAt!),
+        ]),
         const SizedBox(height: 4),
         Text(_status(), style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 6),
@@ -299,6 +306,53 @@ class _CenterPanel extends StatelessWidget {
       default:
         return "${s.playerName(v.current)}'s turn";
     }
+  }
+}
+
+/// Ticking countdown to the timed-game deadline (ADR-0010). Turns amber
+/// under a minute so players feel the pressure.
+class _Countdown extends StatefulWidget {
+  final DateTime endsAt;
+  const _Countdown({required this.endsAt});
+
+  @override
+  State<_Countdown> createState() => _CountdownState();
+}
+
+class _CountdownState extends State<_Countdown> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final left = widget.endsAt.difference(DateTime.now());
+    final secs = left.isNegative ? 0 : left.inSeconds;
+    final mmss =
+        '${(secs ~/ 60).toString().padLeft(2, '0')}:${(secs % 60).toString().padLeft(2, '0')}';
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.timer,
+          size: 18,
+          color: secs <= 60 ? const Color(0xFFC0564F) : const Color(0xFF2A2A2A)),
+      const SizedBox(width: 4),
+      Text(mmss,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontFeatures: const [FontFeature.tabularFigures()],
+            color:
+                secs <= 60 ? const Color(0xFFC0564F) : const Color(0xFF2A2A2A),
+          )),
+    ]);
   }
 }
 
@@ -504,7 +558,15 @@ class _SidePanel extends StatelessWidget {
                       p?.bankrupt == true ? TextDecoration.lineThrough : null,
                 )),
           ),
-          if (p != null) Text('\$${p.cash}'),
+          if (p != null)
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('\$${p.cash}'),
+              // Net worth decides a timed game (ADR-0010), so surface it then.
+              if (s.gameEndsAt != null)
+                Text('NW \$${s.netWorth(i)}',
+                    style: const TextStyle(
+                        fontSize: 11, color: Color(0xFF9AA3B2))),
+            ]),
         ]),
       ));
     }

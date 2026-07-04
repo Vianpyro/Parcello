@@ -96,6 +96,27 @@ impl Engine {
     ) -> Result<(GameState, Vec<Event>), CommandError> {
         apply::apply(self, state, cmd)
     }
+
+    /// Ends a time-boxed game: the richest surviving player (by net worth,
+    /// ties to the lowest seat) wins. This is NOT a player command - the
+    /// session layer calls it when the game clock expires. Pure and
+    /// deterministic from the state, so a replay reconstructs it from the
+    /// final Active state (ADR-0010). A no-op on an already-finished game.
+    pub fn finish_on_time(&self, state: &GameState) -> (GameState, Vec<Event>) {
+        if !matches!(state.phase, GamePhase::Active) {
+            return (state.clone(), Vec::new());
+        }
+        // Strict `>` keeps the earlier seat on ties; `alive_players` yields
+        // in seat order, so this is the lowest-seat tie-break.
+        let winner = state
+            .alive_players()
+            .map(|p| (p, state.net_worth(&self.content, p)))
+            .reduce(|best, cur| if cur.1 > best.1 { cur } else { best })
+            .map_or(0, |(p, _)| p);
+        let mut next = state.clone();
+        next.phase = GamePhase::Finished { winner };
+        (next, vec![Event::TimeUp { winner }])
+    }
 }
 
 pub(crate) struct Strategies<'e> {

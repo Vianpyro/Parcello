@@ -61,6 +61,11 @@ struct Args {
     /// acting player after this many seconds without progress. 0 disables.
     #[arg(long, default_value_t = 0)]
     turn_timeout: u64,
+
+    /// Time-box games: after this many seconds the game ends and the
+    /// richest player (by net worth) wins (ADR-0010). 0 disables.
+    #[arg(long, default_value_t = 0)]
+    game_timeout: u64,
 }
 
 #[derive(Clone)]
@@ -73,6 +78,7 @@ pub struct AppState {
     pub verifier: Arc<dyn IdentityVerifier>,
     pub history: Arc<dyn GameHistory>,
     pub turn_timeout: Option<std::time::Duration>,
+    pub game_timeout: Option<std::time::Duration>,
 }
 
 #[tokio::main]
@@ -135,6 +141,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(std::time::Duration::from_secs(secs))
         }
     };
+    let game_timeout = match args.game_timeout {
+        0 => None,
+        secs => {
+            info!(seconds = secs, "time-boxed games enabled (richest wins)");
+            Some(std::time::Duration::from_secs(secs))
+        }
+    };
     let state = AppState {
         rooms: Rooms::default(),
         content: Arc::new(resolved),
@@ -142,6 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         verifier,
         history,
         turn_timeout,
+        game_timeout,
     };
 
     let app = Router::new()

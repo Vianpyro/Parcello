@@ -57,6 +57,28 @@ class GameSession extends ChangeNotifier {
   /// Post-game survey shown once per game; answering or dismissing hides it.
   bool feedbackDone = false;
 
+  /// When set, the game is time-boxed and ends at this wall-clock instant
+  /// (ADR-0010); the UI shows a local countdown. Null for untimed games.
+  DateTime? gameEndsAt;
+
+  /// Net worth of a seat, mirroring `GameState::net_worth` on the server so
+  /// the shown ranking predicts the timed-game winner: cash + property
+  /// equity (price, or price/2 mortgaged) + houses at build cost.
+  int netWorth(int seat) {
+    final v = view, c = content;
+    if (v == null || c == null || seat >= v.players.length) return 0;
+    var worth = v.players[seat].cash;
+    for (var i = 0; i < c.board.length && i < v.tiles.length; i++) {
+      if (v.tiles[i].owner != seat) continue;
+      final def = c.board[i];
+      if (!def.isProperty) continue;
+      final price = def.price ?? 0;
+      worth += v.tiles[i].mortgaged ? price ~/ 2 : price;
+      worth += v.tiles[i].houses * def.houseCost;
+    }
+    return worth;
+  }
+
   bool get myTurn => view != null && seat != null && view!.current == seat;
 
   String playerName(int i) =>
@@ -154,6 +176,7 @@ class GameSession extends ChangeNotifier {
         if (msg['reconnect'] != null) {
           _saveToken(code!, msg['reconnect'] as String);
         }
+        gameEndsAt = _deadlineFrom(msg['time_remaining']);
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
@@ -165,6 +188,7 @@ class GameSession extends ChangeNotifier {
       case 'game_started':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         feedbackDone = false;
+        gameEndsAt = _deadlineFrom(msg['time_remaining']);
         _log('Game started.');
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
@@ -180,6 +204,9 @@ class GameSession extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  DateTime? _deadlineFrom(dynamic secs) =>
+      secs == null ? null : DateTime.now().add(Duration(seconds: secs as int));
 
   List<SeatInfo> _seatList(dynamic players) => (players as List)
       .map((s) => SeatInfo.fromJson(s as Map<String, dynamic>))

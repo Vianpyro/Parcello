@@ -168,7 +168,7 @@ const GROUP_COLORS = {
 
 // -- connection state ---------------------------------------------------------
 let ws = null;
-const st = { seat: null, code: null, content: null, view: null, seats: [] };
+const st = { seat: null, code: null, content: null, view: null, seats: [], gameEndsAt: null };
 
 function send(cmd) { ws?.send(JSON.stringify({ type: "cmd", cmd })); }
 function log(text) {
@@ -226,6 +226,7 @@ function handle(msg) {
       st.content = msg.content.content;
       st.seats = msg.players;
       if (msg.reconnect) localStorage.setItem(`parcello_tok_${msg.code}`, msg.reconnect);
+      st.gameEndsAt = deadlineFrom(msg.time_remaining);
       location.hash = msg.code;
       $("#login").style.display = "none";
       $("#app").style.display = "grid";
@@ -241,6 +242,7 @@ function handle(msg) {
       break;
     case "game_started":
       st.view = msg.view;
+      st.gameEndsAt = deadlineFrom(msg.time_remaining);
       log("Game started.");
       render();
       break;
@@ -266,6 +268,30 @@ const playerName = i => st.view?.players[i]?.name ?? st.seats[i]?.name ?? `seat 
 const prop = i => board()[i].kind.type === "property" ? board()[i].kind : null;
 const isHousesModel = i => (prop(i)?.rent_model ?? "houses") === "houses";
 const myTurn = () => st.view && st.view.current === st.seat;
+
+// Timed games (ADR-0010): local countdown + net worth, mirroring the
+// server's GameState::net_worth so the shown ranking predicts the winner.
+const deadlineFrom = secs => secs == null ? null : Date.now() + secs * 1000;
+function netWorth(seat) {
+  const v = st.view; if (!v) return 0;
+  let w = v.players[seat].cash;
+  board().forEach((t, i) => {
+    if (v.tiles[i].owner !== seat || t.kind.type !== "property") return;
+    const price = t.kind.price ?? 0;
+    w += v.tiles[i].mortgaged ? Math.floor(price / 2) : price;
+    w += v.tiles[i].houses * (t.kind.house_cost ?? 0);
+  });
+  return w;
+}
+function tickCountdown() {
+  const el = $("#countdown"); if (!el) return;
+  if (!st.gameEndsAt || st.view?.phase.type === "finished") { el.textContent = ""; return; }
+  const secs = Math.max(0, Math.round((st.gameEndsAt - Date.now()) / 1000));
+  const mmss = `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+  el.textContent = `⏱ ${mmss}`;
+  el.style.color = secs <= 60 ? "var(--danger)" : "inherit";
+}
+setInterval(tickCountdown, 1000);
 
 // -- board rendering ------------------------------------------------------------
 // A board of n tiles is a d x d ring when n = 4*(d-1) (32 -> 9, 40 -> 11).
@@ -318,7 +344,7 @@ function buildBoard() {
     center.id = "center";
     // Interior spans the (d-2) x (d-2) inner cells.
     center.style.gridArea = `2 / 2 / ${d} / ${d}`;
-    center.innerHTML = `<h2>PARCELLO</h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
     el.appendChild(center);
   } else {
     // Non-ring boards (mods): linear fallback, panel below.
@@ -326,7 +352,7 @@ function buildBoard() {
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");
     center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
-    center.innerHTML = `<h2>PARCELLO</h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div>`;
     el.appendChild(center);
   }
 }
@@ -363,6 +389,7 @@ function render() {
   renderActions();
   renderOffers();
   renderFeedback();
+  tickCountdown();
 }
 
 // -- post-game survey ---------------------------------------------------------
@@ -400,9 +427,12 @@ function renderPlayers() {
       + (st.view && r.i === st.view.current ? " current" : "")
       + (r.i === st.seat ? " me" : "")
       + (r.dead ? " dead" : "");
+    // Net worth decides a timed game (ADR-0010), so surface it then.
+    const nw = (r.cash !== null && st.gameEndsAt)
+      ? ` <span class="muted">NW $${netWorth(r.i)}</span>` : "";
     d.innerHTML = `<div class="dot" style="background:${PAWN_COLORS[r.i % 6]}"></div>
       <span class="nm">${escapeHtml(r.name)}${r.extra}${r.connected ? "" : " (offline)"}</span>
-      ${r.cash === null ? "" : `<span class="cash">$${r.cash}</span>`}`;
+      ${r.cash === null ? "" : `<span class="cash">$${r.cash}${nw}</span>`}`;
     el.appendChild(d);
   });
   $("#lobbyctl").style.display = st.view ? "none" : "flex";
@@ -633,6 +663,7 @@ function describe(e) {
     case "player_bankrupt": return `${P(e.player)} went bankrupt`;
     case "player_resigned": return `${P(e.player)} resigned`;
     case "game_ended": return `Game over — ${P(e.winner)} wins!`;
+    case "time_up": return `Time's up! ${P(e.winner)} wins on net worth.`;
     default: return JSON.stringify(e);
   }
 }

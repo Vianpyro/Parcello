@@ -85,6 +85,10 @@ pub enum ServerMessage {
         /// Keep this to rejoin the seat after a disconnect (ADR-0008).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reconnect: Option<String>,
+        /// Seconds left before a time-boxed game ends by net worth
+        /// (ADR-0010); absent for untimed games. Set only mid-game.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_remaining: Option<u64>,
     },
     /// Broadcast on lobby membership or connection changes.
     Lobby {
@@ -92,6 +96,10 @@ pub enum ServerMessage {
     },
     GameStarted {
         view: Box<ClientView>,
+        /// Total game length in seconds for a time-boxed game (ADR-0010);
+        /// absent for untimed games. Clients run a local countdown.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_remaining: Option<u64>,
     },
     /// Broadcast after every accepted command: what happened, then the new
     /// authoritative projection.

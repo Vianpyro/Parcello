@@ -13,7 +13,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0009` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0010` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
@@ -55,7 +55,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 63 tests, all must pass
+cargo test  --workspace --locked          # 66 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code)
 cargo run -p parcello-cli -- --name alice --create
@@ -109,8 +109,12 @@ architecture doc section 5; dependencies point downward only):
   it): a disconnected acting seat is auto-played the canonical action
   Roll/Decline/Pass/EndTurn after `DISCONNECTED_GRACE` = 30s always, a
   connected-but-idle seat only when `--turn-timeout <secs>` is set (0 = off
-  default); any accepted command resets the clock; post-game survey
-  `feedback` message:
+  default); any accepted command resets the clock; optional game clock
+  `--game-timeout <secs>` ends a time-boxed game via
+  `Engine::finish_on_time` - richest by `GameState::net_worth` wins, ties to
+  lowest seat, `Event::TimeUp` (ADR-0010); `GameStarted`/`Joined` carry
+  `time_remaining` for the client countdown, clients mirror the net-worth
+  formula; post-game survey `feedback` message:
   Finished phase only, once per seat, rating 1-5 + comment capped at 500
   chars, stored via `GameHistory::record_feedback` - the client UI must
   stay non-blocking, side card not modal), `auth.rs` + `eddsa.rs`
