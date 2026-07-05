@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'session.dart';
+import 'sfx.dart';
 
 /// Simple LAN browser that listens for multicase announcements and shows
 /// discovered Parcello servers. Defaults match the server defaults.
@@ -113,7 +114,7 @@ class _LanBrowserState extends State<LanBrowser> {
                 return ListTile(
                   title: Text(label),
                   subtitle: Text('announced ${e['ts']}'),
-                  trailing: FilledButton(
+                  trailing: hoverSfx(FilledButton(
                     child: const Text('Connect'),
                     onPressed: () {
                       final url = bind.isNotEmpty && bind.contains(':')
@@ -123,7 +124,7 @@ class _LanBrowserState extends State<LanBrowser> {
                           token: widget.session.authToken);
                       Navigator.pop(context);
                     },
-                  ),
+                  )),
                 );
               },
             ),

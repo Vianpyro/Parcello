@@ -8,20 +8,17 @@ with exactly these names:
 | `dice-roll.mp3` | a player rolls the dice |
 | `move-pawn-01.mp3` .. `move-pawn-11.mp3` | a pawn hops from tile to tile (one per step, cycling / random) |
 | `stop-pawn-1.mp3` .. `stop-pawn-3.mp3` | a pawn lands on its destination (random) |
+| `button-hover-0.mp3` .. `button-hover-9.mp3` | mouse hovers any button in the app (random) |
+| `button-yes.mp3` | the affirmative choice in a confirm dialog (e.g. "Resign" in the resign prompt) |
+| `button-no.mp3` | the negative choice in a confirm dialog (e.g. "Cancel" in the resign prompt) |
+| `error.mp3` | the server rejects a command, or reports a connection error |
+| `game-start.mp3` | the game starts (`game_started`) |
+| `player-join.mp3` | a seat appears in the lobby (player or bot joins) |
+| `player-leave.mp3` | a seat disappears from the lobby (player leaves, bot removed) |
+| `timer-0.mp3` .. `timer-7.mp3` | a countdown milestone on the game or turn clock (60/30/10/5/4/3/2/1/0s remaining); cycled, no meaningful order |
+| `toggle-on.mp3` / `toggle-off.mp3` | a lobby settings switch is flipped on/off ("Auction on decline") |
 
 This directory is already registered in `pubspec.yaml` under
 `flutter: assets:`, so any file you add here is bundled into the app.
-
-## To actually play them
-
-Playback is not wired yet because the audio plugin needs a system setting
-on this machine:
-
-1. Enable **Windows Developer Mode** (native-plugin symlinks):
-   `start ms-settings:developers`.
-2. Add the dependency: `flutter pub add audioplayers`.
-3. Ask me to wire the playback — the intended mapping is the table above:
-   `dice-roll` on the `dice_rolled` event, a `move-pawn-NN` per hop during
-   the board's pawn glide animation, and a random `stop-pawn-N` on landing.
-
-Keep the exact filenames above; the wiring will reference them directly.
+Playback is already wired (`lib/sfx.dart`); just drop files with the exact
+names above.

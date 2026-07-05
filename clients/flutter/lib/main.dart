@@ -62,9 +62,9 @@ Widget wideButton(String label, VoidCallback? onPressed, {bool primary = true}) 
     textStyle: WidgetStateProperty.all(
         const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
   );
-  return primary
+  return hoverSfx(primary
       ? FilledButton(onPressed: onPressed, style: style, child: Text(label))
-      : OutlinedButton(onPressed: onPressed, style: style, child: Text(label));
+      : OutlinedButton(onPressed: onPressed, style: style, child: Text(label)));
 }
 
 // -- connect -------------------------------------------------------------------
@@ -102,12 +102,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
               hintText: 'https://auth.example.com'),
         ),
         actions: [
-          TextButton(
+          hoverSfx(TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
+              child: const Text('Cancel'))),
+          hoverSfx(FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Open browser')),
+              child: const Text('Open browser'))),
         ],
       ),
     );
@@ -518,12 +518,36 @@ class _Countdown extends StatefulWidget {
 }
 
 class _CountdownState extends State<_Countdown> {
+  // Seconds-remaining values worth a countdown cue: the final stretch plus
+  // the "heads up" marks further out.
+  static const _milestones = {60, 30, 10, 5, 4, 3, 2, 1, 0};
+
   Timer? _timer;
+  int? _lastTicked;
+
+  int _secsLeft() {
+    final left = widget.endsAt.difference(DateTime.now());
+    return left.isNegative ? 0 : left.inSeconds;
+  }
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final secs = _secsLeft();
+      if (secs != _lastTicked && _milestones.contains(secs)) {
+        _lastTicked = secs;
+        sfx.timerTick();
+      }
+      setState(() {});
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _Countdown old) {
+    super.didUpdateWidget(old);
+    // A new deadline (next turn, restarted game clock) resets the cues.
+    if (old.endsAt != widget.endsAt) _lastTicked = null;
   }
 
   @override
@@ -534,8 +558,7 @@ class _CountdownState extends State<_Countdown> {
 
   @override
   Widget build(BuildContext context) {
-    final left = widget.endsAt.difference(DateTime.now());
-    final secs = left.isNegative ? 0 : left.inSeconds;
+    final secs = _secsLeft();
     final mmss =
         '${(secs ~/ 60).toString().padLeft(2, '0')}:${(secs % 60).toString().padLeft(2, '0')}';
     final warn = secs <= widget.warnSecs;
@@ -565,7 +588,7 @@ class _MuteButton extends StatefulWidget {
 class _MuteButtonState extends State<_MuteButton> {
   @override
   Widget build(BuildContext context) {
-    return IconButton(
+    return hoverSfx(IconButton(
       iconSize: 18,
       padding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
@@ -574,7 +597,7 @@ class _MuteButtonState extends State<_MuteButton> {
       icon: Icon(sfx.enabled ? Icons.volume_up : Icons.volume_off,
           color: const Color(0xFF2A2A2A)),
       onPressed: () => setState(() => sfx.enabled = !sfx.enabled),
-    );
+    ));
   }
 }
 
@@ -708,11 +731,11 @@ class _ActionsState extends State<_Actions> {
       textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 15)),
     );
     Widget btn(String label, Map<String, dynamic> cmd, {bool primary = true}) {
-      return primary
+      return hoverSfx(primary
           ? FilledButton(
               onPressed: () => s.sendCmd(cmd), style: touch, child: Text(label))
           : OutlinedButton(
-              onPressed: () => s.sendCmd(cmd), style: touch, child: Text(label));
+              onPressed: () => s.sendCmd(cmd), style: touch, child: Text(label)));
     }
 
     final children = <Widget>[];
@@ -729,11 +752,11 @@ class _ActionsState extends State<_Actions> {
             decoration: const InputDecoration(isDense: true),
           ),
         ),
-        FilledButton(
+        hoverSfx(FilledButton(
           onPressed: () => s
               .sendCmd({'type': 'bid', 'amount': int.tryParse(_bid.text) ?? 0}),
           child: const Text('Bid'),
-        ),
+        )),
         btn('Pass', {'type': 'pass'}, primary: false),
       ]);
     } else if (s.myTurn) {
@@ -844,13 +867,13 @@ class _SidePanel extends StatelessWidget {
                         letterSpacing: 2)),
               ),
               if (s.code != null)
-                IconButton(
+                hoverSfx(IconButton(
                   iconSize: 18,
                   visualDensity: VisualDensity.compact,
                   tooltip: 'Copy room code',
                   icon: const Icon(Icons.copy, color: Color(0xFF9AA3B2)),
                   onPressed: () => copyCode(context, s.code!),
-                ),
+                )),
             ]),
             const SizedBox(height: 6),
             _players(),
@@ -895,7 +918,7 @@ class _SidePanel extends StatelessWidget {
       Card(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: OutlinedButton(
+          child: hoverSfx(OutlinedButton(
             style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFC0564F)),
             onPressed: () async {
@@ -904,19 +927,25 @@ class _SidePanel extends StatelessWidget {
                 builder: (ctx) => AlertDialog(
                   title: const Text('Resign from the game?'),
                   actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel')),
-                    TextButton(
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Resign')),
+                    hoverSfx(TextButton(
+                        onPressed: () {
+                          sfx.buttonNo();
+                          Navigator.pop(ctx, false);
+                        },
+                        child: const Text('Cancel'))),
+                    hoverSfx(TextButton(
+                        onPressed: () {
+                          sfx.buttonYes();
+                          Navigator.pop(ctx, true);
+                        },
+                        child: const Text('Resign'))),
                   ],
                 ),
               );
               if (ok == true) s.sendCmd({'type': 'resign'});
             },
             child: const Text('Resign'),
-          ),
+          )),
         ),
       ),
     ]);
@@ -1005,29 +1034,29 @@ class _SidePanel extends StatelessWidget {
                 '(to ${s.playerName(o.to)})'),
             Row(children: [
               if (o.to == s.seat) ...[
-                TextButton(
+                hoverSfx(TextButton(
                     onPressed: () =>
                         s.sendCmd({'type': 'accept_trade', 'trade': o.id}),
-                    child: const Text('Accept')),
-                TextButton(
+                    child: const Text('Accept'))),
+                hoverSfx(TextButton(
                     onPressed: () =>
                         s.sendCmd({'type': 'decline_trade', 'trade': o.id}),
-                    child: const Text('Refuse')),
+                    child: const Text('Refuse'))),
               ],
               if (o.from == s.seat)
-                TextButton(
+                hoverSfx(TextButton(
                     onPressed: () =>
                         s.sendCmd({'type': 'cancel_trade', 'trade': o.id}),
-                    child: const Text('Cancel')),
+                    child: const Text('Cancel'))),
             ]),
           ]),
         ),
       if (v != null && !v.finished)
-        OutlinedButton(
+        hoverSfx(OutlinedButton(
           onPressed: () => showDialog<void>(
               context: context, builder: (ctx) => TradeDialog(s: s)),
           child: const Text('New offer'),
-        ),
+        )),
     ]);
   }
 }
@@ -1158,7 +1187,10 @@ class _SettingsPanelState extends State<_SettingsPanel> {
           title: const Text('Auction on decline',
               style: TextStyle(fontSize: 12)),
           value: _auction,
-          onChanged: (v) => setState(() => _auction = v),
+          onChanged: (v) {
+            v ? sfx.toggleOn() : sfx.toggleOff();
+            setState(() => _auction = v);
+          },
         ),
         const SizedBox(height: 4),
         wideButton('Apply settings', _apply, primary: false),
@@ -1225,21 +1257,21 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                       color: Color(0xFF9AA3B2),
                       letterSpacing: 1)),
             ),
-            IconButton(
+            hoverSfx(IconButton(
               icon: const Icon(Icons.close, size: 16),
               onPressed: s.dismissFeedback,
               tooltip: 'Dismiss',
-            ),
+            )),
           ]),
           Row(children: [
             for (var star = 1; star <= 5; star++)
-              IconButton(
+              hoverSfx(IconButton(
                 icon: Icon(
                   star <= _rating ? Icons.star : Icons.star_border,
                   color: const Color(0xFFD8B45A),
                 ),
                 onPressed: () => setState(() => _rating = star),
-              ),
+              )),
           ]),
           TextField(
             controller: _comment,
@@ -1248,12 +1280,12 @@ class _FeedbackCardState extends State<_FeedbackCard> {
                 labelText: 'Anything to add? (optional)', counterText: ''),
           ),
           const SizedBox(height: 6),
-          FilledButton(
+          hoverSfx(FilledButton(
             onPressed: _rating == 0
                 ? null
                 : () => s.sendFeedback(_rating, _comment.text),
             child: const Text('Send'),
-          ),
+          )),
         ]),
       ),
     );
@@ -1356,10 +1388,10 @@ class _TradeDialogState extends State<TradeDialog> {
         ]),
       ]),
       actions: [
-        TextButton(
+        hoverSfx(TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Close')),
-        FilledButton(
+            child: const Text('Close'))),
+        hoverSfx(FilledButton(
           onPressed: _to == null
               ? null
               : () {
@@ -1374,7 +1406,7 @@ class _TradeDialogState extends State<TradeDialog> {
                   Navigator.pop(context);
                 },
           child: const Text('Propose'),
-        ),
+        )),
       ],
     );
   }

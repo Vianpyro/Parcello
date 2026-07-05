@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'sfx.dart';
+
 /// Local server controller: spawns a `parcello-server` binary, streams its
 /// logs, and stops/restarts it by killing the process. Local-only by design
 /// (no remote admin control plane; see ADR-0016 / server main.rs).
@@ -107,11 +109,11 @@ class _ServerManagerState extends State<ServerManager> {
                 TextField(controller: _args, decoration: const InputDecoration(labelText: 'Arguments (space-separated)')),
                 const SizedBox(height: 8),
                 Row(children: [
-                  ElevatedButton(onPressed: running ? null : _startProcess, child: const Text('Start')),
+                  hoverSfx(ElevatedButton(onPressed: running ? null : _startProcess, child: const Text('Start'))),
                   const SizedBox(width: 8),
-                  ElevatedButton(onPressed: running ? () => _stopProcess(force: false) : null, child: const Text('Stop')),
+                  hoverSfx(ElevatedButton(onPressed: running ? () => _stopProcess(force: false) : null, child: const Text('Stop'))),
                   const SizedBox(width: 8),
-                  ElevatedButton(onPressed: running ? _restartProcess : null, child: const Text('Restart')),
+                  hoverSfx(ElevatedButton(onPressed: running ? _restartProcess : null, child: const Text('Restart'))),
                 ])
               ]),
             ),

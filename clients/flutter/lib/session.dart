@@ -287,7 +287,9 @@ class GameSession extends ChangeNotifier {
         loginMessage = '';
         _log('Joined room $code. Mods: ${content!.modIds.join(', ')}');
       case 'lobby':
-        seats = _seatList(msg['players']);
+        final incoming = _seatList(msg['players']);
+        _announceSeatChanges(incoming);
+        seats = incoming;
         settings = RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
       case 'game_started':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
@@ -295,6 +297,7 @@ class GameSession extends ChangeNotifier {
         gameEndsAt = _deadlineFrom(msg['time_remaining']);
         turnSeconds = msg['turn_seconds'] as int?;
         turnEndsAt = _deadlineFrom(turnSeconds);
+        sfx.gameStart();
         _log('Game started.');
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
@@ -310,8 +313,10 @@ class GameSession extends ChangeNotifier {
           _log(describeEvent(ev, playerName, tileName));
         }
       case 'rejected':
+        sfx.error();
         _log('Rejected: ${msg['error']['code']}');
       case 'error':
+        sfx.error();
         if (!joined) loginMessage = msg['message'] as String;
         _log('Error: ${msg['message']}');
     }
@@ -324,6 +329,16 @@ class GameSession extends ChangeNotifier {
   List<SeatInfo> _seatList(dynamic players) => (players as List)
       .map((s) => SeatInfo.fromJson(s as Map<String, dynamic>))
       .toList();
+
+  /// Plays a join/leave cue when the lobby seat list changes (new player,
+  /// bot added/removed). Compares against the previous `seats`, so this must
+  /// run before `seats` is overwritten.
+  void _announceSeatChanges(List<SeatInfo> incoming) {
+    final before = seats.map((p) => p.playerId).toSet();
+    final after = incoming.map((p) => p.playerId).toSet();
+    if (after.difference(before).isNotEmpty) sfx.playerJoin();
+    if (before.difference(after).isNotEmpty) sfx.playerLeave();
+  }
 
   void _log(String line) {
     log.add(line);
