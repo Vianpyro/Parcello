@@ -178,9 +178,9 @@ checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "cc"
-version = "1.2.65"
+version = "1.2.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e228eec9be7c17ccb640b59b36a5cd805ea2a564a4c5e162c2f659fea30d3b96"
+checksum = "f5d6cac793997bd970000024b2934968efe83b382de4fdcf4fcb46b6ee4ad996"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -836,7 +836,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "parcello-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "clap",
  "futures-util",
@@ -851,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-engine"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-mods"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "parcello-engine",
  "serde",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-protocol"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "parcello-engine",
  "parcello-mods",
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-server"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "axum",
  "base64",

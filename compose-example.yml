@@ -1,0 +1,39 @@
+services:
+  parcello-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: parcello-server:local
+    container_name: parcello-server
+    restart: unless-stopped
+    ports:
+      - "${PARCELLO_PORT:-7878}:7878"
+    environment:
+      RUST_LOG: "${RUST_LOG:-info}"
+
+      # Server defaults. These map to the parcello-server CLI flags.
+      PARCELLO_BIND: "0.0.0.0:7878"
+      PARCELLO_MODS_DIR: "mods"
+      PARCELLO_MODS: "${PARCELLO_MODS:-base}"
+      PARCELLO_HISTORY: "${PARCELLO_HISTORY:-data/parcello.db}"
+      PARCELLO_TURN_TIMEOUT: "${PARCELLO_TURN_TIMEOUT:-25}"
+      PARCELLO_GAME_TIMEOUT: "${PARCELLO_GAME_TIMEOUT:-3600}"
+
+      # Authentication. Guest mode is convenient for LAN/testing; set this to
+      # false and configure identity URLs for production identity-provider use.
+      PARCELLO_INSECURE_GUEST: "${PARCELLO_INSECURE_GUEST:-true}"
+      # PARCELLO_IDENTITY_URLS: "https://identity.example/.well-known/jwks.json"
+      # PARCELLO_IDENTITY_AUDIENCE: "parcello"
+      # PARCELLO_JWT_SECRET: "deprecated-hs256-secret"
+
+      # LAN discovery. When enabled on Docker Desktop, host networking rules
+      # may still limit multicast/broadcast delivery.
+      PARCELLO_LAN: "${PARCELLO_LAN:-false}"
+      PARCELLO_LAN_MADDR: "${PARCELLO_LAN_MADDR:-239.255.0.1}"
+      PARCELLO_LAN_PORT: "${PARCELLO_LAN_PORT:-55888}"
+      PARCELLO_LAN_BROADCAST_FALLBACK: "${PARCELLO_LAN_BROADCAST_FALLBACK:-false}"
+    volumes:
+      - parcello-data:/srv/parcello/data
+
+volumes:
+  parcello-data:

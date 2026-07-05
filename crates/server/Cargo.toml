@@ -16,7 +16,7 @@ parcello-mods = { path = "../mods" }
 parcello-protocol = { path = "../protocol" }
 
 axum = { version = "0.8", features = ["ws"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 rand = "0.10"
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -105,7 +105,9 @@ these announcements.
 
 Docker: `docker build -t parcello . && docker run -p 7878:7878 parcello`
 (mount a volume and add `--history data/parcello.db` for persistence), or
-pull the published image: `ghcr.io/vianpyro/parcello-server`.
+pull the published image: `ghcr.io/vianpyro/parcello-server`. For a
+ready-to-run local deployment with persistent history and editable server
+settings, use `docker compose -f compose-example.yml up --build`.
 
 Accounts are optional and only exist for continuity/stats: guests can
 always play. The Flutter client has a "Sign in with account" button

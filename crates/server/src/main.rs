@@ -29,64 +29,73 @@ use room::Rooms;
 #[command(name = "parcello-server", about = "Parcello authoritative game server")]
 struct Args {
     /// Listen address.
-    #[arg(long, default_value = "0.0.0.0:7878")]
+    #[arg(long, env = "PARCELLO_BIND", default_value = "0.0.0.0:7878")]
     bind: String,
 
     /// Directory containing mod bundles (one subdirectory per mod id).
-    #[arg(long, default_value = "mods")]
+    #[arg(long, env = "PARCELLO_MODS_DIR", default_value = "mods")]
     mods_dir: PathBuf,
 
     /// Ordered mod list; later mods override earlier ones per key.
-    #[arg(long = "mod", default_values_t = vec!["base".to_string()])]
+    #[arg(
+        long = "mod",
+        env = "PARCELLO_MODS",
+        value_delimiter = ',',
+        default_values_t = vec!["base".to_string()]
+    )]
     mods: Vec<String>,
 
     /// Accept unauthenticated guests (LAN/testing; identities are spoofable).
-    #[arg(long)]
+    #[arg(long, env = "PARCELLO_INSECURE_GUEST")]
     insecure_guest: bool,
 
     /// JWKS URL of an EdDSA identity provider (ADR-0009); repeatable for
     /// redundant issuer instances. Enables `id:` token logins.
-    #[arg(long = "identity-url")]
+    #[arg(
+        long = "identity-url",
+        env = "PARCELLO_IDENTITY_URLS",
+        value_delimiter = ','
+    )]
     identity_urls: Vec<String>,
 
     /// When set, identity tokens must carry this audience (`aud` claim).
-    #[arg(long)]
+    #[arg(long, env = "PARCELLO_IDENTITY_AUDIENCE")]
     identity_audience: Option<String>,
 
     /// SQLite file for game history (seeds + accepted-command replay logs).
     /// Omit for in-memory history.
-    #[arg(long)]
+    #[arg(long, env = "PARCELLO_HISTORY")]
     history: Option<PathBuf>,
 
     /// Default per-turn limit for new rooms (seconds): auto-play the
     /// canonical action (roll/decline/pass/end turn) for the acting player
     /// after this long without progress. 0 disables. The host can change it
     /// per room in the lobby (ADR-0015).
-    #[arg(long, default_value_t = 25)]
+    #[arg(long, env = "PARCELLO_TURN_TIMEOUT", default_value_t = 25)]
     turn_timeout: u64,
 
     /// Default game length for new rooms (seconds): the game ends and the
     /// richest player (by net worth) wins (ADR-0010). 0 = untimed. The host
     /// can change it per room in the lobby (ADR-0015).
-    #[arg(long, default_value_t = 3600)]
+    #[arg(long, env = "PARCELLO_GAME_TIMEOUT", default_value_t = 3600)]
     game_timeout: u64,
 
     /// Enable LAN discovery announcements (multicast) for local network
     /// game browsing.
-    #[arg(long)]
+    #[arg(long, env = "PARCELLO_LAN")]
     lan: bool,
 
     /// Multicast address to announce to (default: 239.255.0.1).
-    #[arg(long, default_value = "239.255.0.1")]
+    #[arg(long, env = "PARCELLO_LAN_MADDR", default_value = "239.255.0.1")]
     lan_maddr: String,
 
     /// Multicast port to announce to (default: 55888).
-    #[arg(long, default_value_t = 55888)]
+    #[arg(long, env = "PARCELLO_LAN_PORT", default_value_t = 55888)]
     lan_port: u16,
 
     /// Also send a broadcast fallback to 255.255.255.255:<port> when
     /// multicast delivery may be unreliable.
-    #[arg(long)]
+    #[arg(long, env = "PARCELLO_LAN_BROADCAST_FALLBACK")]
     lan_broadcast_fallback: bool,
 }
 
