@@ -6,6 +6,7 @@
 mod auth;
 mod eddsa;
 mod history;
+mod lan;
 mod room;
 mod ws;
 
@@ -69,6 +70,24 @@ struct Args {
     /// can change it per room in the lobby (ADR-0015).
     #[arg(long, default_value_t = 3600)]
     game_timeout: u64,
+
+    /// Enable LAN discovery announcements (multicast) for local network
+    /// game browsing.
+    #[arg(long)]
+    lan: bool,
+
+    /// Multicast address to announce to (default: 239.255.0.1).
+    #[arg(long, default_value = "239.255.0.1")]
+    lan_maddr: String,
+
+    /// Multicast port to announce to (default: 55888).
+    #[arg(long, default_value_t = 55888)]
+    lan_port: u16,
+
+    /// Also send a broadcast fallback to 255.255.255.255:<port> when
+    /// multicast delivery may be unreliable.
+    #[arg(long)]
+    lan_broadcast_fallback: bool,
 }
 
 #[derive(Clone)]
@@ -162,6 +181,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         turn_timeout,
         game_timeout,
     };
+
+    if args.lan {
+        lan::spawn_broadcaster(
+            args.lan_maddr.clone(),
+            args.lan_port,
+            args.lan_broadcast_fallback,
+            args.bind.clone(),
+        );
+    }
 
     let app = Router::new()
         // Embedded web client: the server is the whole deployment.

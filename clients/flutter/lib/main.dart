@@ -12,6 +12,8 @@ import 'oidc.dart';
 import 'protocol.dart';
 import 'session.dart';
 import 'sfx.dart';
+import 'lan_discovery.dart';
+import 'server_manager.dart';
 
 void main() => runApp(ParcelloApp(session: GameSession()));
 
@@ -281,7 +283,19 @@ class _MenuScreenState extends State<MenuScreen> {
                                 letterSpacing: 1,
                                 color: Color(0xFF9AA3B2))),
                         const SizedBox(height: 10),
-                        wideButton('Browse public games', null),
+                        wideButton('Browse public games', () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => LanBrowser(session: s)));
+                        }),
+                        const SizedBox(height: 6),
+                        wideButton('Server Manager', () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ServerManager()));
+                        }, primary: false),
                         const SizedBox(height: 6),
                         const Text('Coming soon.',
                             style: TextStyle(

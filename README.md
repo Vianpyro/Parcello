@@ -97,6 +97,11 @@ ADR-0010; 0 = off), `--identity-url <jwks-url>`
 (repeatable; accept EdDSA identity tokens from an OIDC provider such as
 Rauthy, ADR-0009) with optional `--identity-audience <client-id>`.
 `PARCELLO_JWT_SECRET` (HS256, ADR-0003) still works but is deprecated.
+`--lan` announces the server on the LAN so clients can find it without a
+URL (multicast `239.255.0.1:55888` by default, override with `--lan-maddr`
+/ `--lan-port`; add `--lan-broadcast-fallback` for networks that block
+multicast; ADR-0016). The Flutter client's "Browse public games" browses
+these announcements.
 
 Docker: `docker build -t parcello . && docker run -p 7878:7878 parcello`
 (mount a volume and add `--history data/parcello.db` for persistence), or

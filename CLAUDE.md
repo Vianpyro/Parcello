@@ -13,7 +13,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0013` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0016` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
@@ -145,11 +145,16 @@ architecture doc section 5; dependencies point downward only):
   on the header `alg`), `history.rs` (`GameHistory` port; in-memory
   adapter + `SqliteHistory`: dedicated writer thread owns the rusqlite
   connection, trait methods enqueue and never block, `Drop` drains -
-  ADR-0005), `web/index.html` (embedded via `include_str!` - the server
+  ADR-0005), `lan.rs` (opt-in `--lan` UDP discovery announcer: periodic
+  multicast to `239.255.0.1:55888` with optional broadcast fallback so LAN
+  clients find the server without a URL; best-effort, detached, no admin
+  control plane - local process management is the client's job, ADR-0016),
+  `web/index.html` (embedded via `include_str!` - the server
   binary is the whole deployment).
 - `crates/cli` - terminal test harness; keep it in sync with new commands
   (it is the cheapest end-to-end protocol check; `addbot`/`rmbot` and
-  `set <field> <value>` stdin commands too, ADR-0015). `--bot` turns it into an autopilot seat using the shared
+  `set <field> <value>` stdin commands too, ADR-0015; the `discover` bin
+  is a headless listener to validate `--lan` announcements). `--bot` turns it into an autopilot seat using the shared
   `parcello_engine::bot::decide` (buy/bid/build/jail-card, declines trades)
   so games can be playtested without volunteers; soak it with 3 bots when
   touching turn flow. Server-side bots (ADR-0014) reuse the same heuristic.

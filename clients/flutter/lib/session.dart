@@ -66,6 +66,10 @@ class GameSession extends ChangeNotifier {
   String _authName = '';
   String _authToken = '';
 
+  /// Public accessors for the stored auth identity (guest name or token).
+  String get authName => _authName;
+  String get authToken => _authToken;
+
   /// Post-game survey shown once per game; answering or dismissing hides it.
   bool feedbackDone = false;
 
