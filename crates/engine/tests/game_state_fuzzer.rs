@@ -194,21 +194,43 @@ fn random_asset_command(
                     });
                 }
             }
+            let cap = content.rules.max_houses_per_property.min(5);
             if prop.rent_model == RentModel::Houses
                 && state.owns_full_group(content, player, &prop.group)
                 && group_has_no_mortgages(content, state, &prop.group)
-                && tile_state.houses < content.rules.max_houses_per_property.min(5)
+                && tile_state.houses < cap
                 && state.players[player].cash >= prop.house_cost
                 && can_build_evenly(content, state, tile, &prop.group)
             {
-                choices.push(CommandKind::Build {
-                    tile: def.id.clone(),
-                });
+                // Shared building pools (ADR-0019): only offer a Build the
+                // matching pool can actually satisfy right now, same as the
+                // cash check above - `next_valid_command` must always be
+                // accepted.
+                let becomes_top = tile_state.houses + 1 == cap;
+                let pool_ok = if becomes_top {
+                    state.conglomerates_available != Some(0)
+                } else {
+                    state.subsidiaries_available != Some(0)
+                };
+                if pool_ok {
+                    choices.push(CommandKind::Build {
+                        tile: def.id.clone(),
+                    });
+                }
             }
             if tile_state.houses > 0 && can_sell_evenly(content, state, tile, &prop.group) {
-                choices.push(CommandKind::SellHouse {
-                    tile: def.id.clone(),
-                });
+                // Stepping off the top level re-issues cap-1 subsidiaries;
+                // only offer it when the pool can cover that right now.
+                let steps_off_top = tile_state.houses == cap;
+                let pool_ok = !steps_off_top
+                    || state
+                        .subsidiaries_available
+                        .is_none_or(|n| n >= (cap - 1) as u64);
+                if pool_ok {
+                    choices.push(CommandKind::SellHouse {
+                        tile: def.id.clone(),
+                    });
+                }
             }
             let boost_cost = prop.price * content.rules.rent_boost / 100;
             if content.rules.rent_boost > 0
@@ -223,8 +245,8 @@ fn random_asset_command(
         } else if let Some(owner) = tile_state.owner
             && owner != player
             && !tile_state.mortgaged
-            && tile_state.houses == 0
-            // ADR-0022: takeover only applies to the tile just landed on.
+            // ADR-0022: takeover only applies to the tile just landed on;
+            // improved tiles are legal targets too (liquidated on seizure).
             && matches!(state.turn, TurnPhase::AwaitEnd)
             && tile == state.players[player].position
         {
@@ -348,16 +370,46 @@ fn assert_invariants(
         }
     }
 
+    let cap = content.rules.max_houses_per_property.min(5);
     for tile in &state.tiles {
         if let Some(owner) = tile.owner
             && (owner >= state.players.len() || state.players[owner].bankrupt)
         {
             fail("tile owner is invalid");
         }
-        if tile.houses > content.rules.max_houses_per_property.min(5) || tile.boosts > 3 {
+        if tile.houses > cap || tile.boosts > 3 {
             fail("tile improvement state is out of range");
         }
     }
+
+    // Shared building pools (ADR-0019): the fixed total (computed from the
+    // same formula `GameState::new` uses) must always equal what's still in
+    // the pool plus what's currently checked out across every tile.
+    if content.rules.subsidiary_pool_factor > 0 {
+        let total = pool_size(content.rules.subsidiary_pool_factor, state.players.len());
+        let in_use: u64 = state
+            .tiles
+            .iter()
+            .filter(|t| t.houses > 0 && t.houses < cap)
+            .map(|t| t.houses as u64)
+            .sum();
+        if state.subsidiaries_available.unwrap_or(0) + in_use != total {
+            fail("subsidiary pool is not conserved");
+        }
+    }
+    if content.rules.conglomerate_pool_factor > 0 {
+        let total = pool_size(content.rules.conglomerate_pool_factor, state.players.len());
+        let in_use = state.tiles.iter().filter(|t| t.houses == cap).count() as u64;
+        if state.conglomerates_available.unwrap_or(0) + in_use != total {
+            fail("conglomerate pool is not conserved");
+        }
+    }
+}
+
+/// Mirrors the pool-sizing formula in `GameState::new` (ADR-0019):
+/// `round(factor * sqrt(players))`.
+fn pool_size(factor: i64, players: usize) -> u64 {
+    (factor as f64 * (players as f64).sqrt()).round() as u64
 }
 
 fn assert_money_delta(
@@ -383,9 +435,14 @@ fn assert_money_delta(
             Event::CashAdjusted { delta, .. } => *delta,
             Event::HouseBuilt { cost, .. } => -*cost,
             Event::HouseSold { refund, .. } => *refund,
-            Event::Expropriated { tile, cost, .. } => {
+            Event::Expropriated {
+                tile,
+                cost,
+                liquidation_refund,
+                ..
+            } => {
                 let compensation = content.property(*tile).expect("property").price.min(*cost);
-                compensation - cost
+                compensation + liquidation_refund - cost
             }
             Event::RentBoosted { cost, .. } => -*cost,
             Event::PropertyMortgaged { value, .. } => *value,
@@ -538,6 +595,10 @@ fn fuzz_content() -> GameContent {
         rules: RuleParams {
             expropriation: 200,
             rent_boost: 25,
+            // Small on purpose (ADR-0019): tight enough that build/sell
+            // exhaustion actually gets exercised across a run.
+            subsidiary_pool_factor: 2,
+            conglomerate_pool_factor: 2,
             ..RuleParams::default()
         },
     }

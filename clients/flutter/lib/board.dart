@@ -251,7 +251,7 @@ class BoardWidget extends StatelessWidget {
     if (def.isProperty) parts.add('\$${def.price}');
     if (def.amount != null) parts.add('pay \$${def.amount}');
     if (ts != null && ts.houses > 0) {
-      parts.add(ts.houses == 5 ? 'HOTEL' : '▪' * ts.houses);
+      parts.add(ts.houses == 5 ? 'CONGLOMERATE' : '▪' * ts.houses);
     }
     if (ts != null && ts.boosts > 0) parts.add('⚡${ts.boosts}');
     if (ts?.mortgaged == true) parts.add('MORT.');

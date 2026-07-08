@@ -16,11 +16,12 @@ Parcello's architecture.
 board (9x9 ring, no Community Chest, two resorts instead of four stations,
 slightly less starting cash); the 40-tile Monopoly-like board moved to
 `mods/classic`; the clients render any `4*(d-1)` square ring. V2 build
-order step 1 also landed: the blitz clock (12 s turns, 45 s personal time
-bank, ADR-0023) and landing-only takeover legality (ADR-0022, the
-building-liquidation half still waits on step 2's pools). The rest of
-this note is still ahead. The remaining engine mechanics (below) are what
-make it genuinely *Business Tour* rather than "short Monopoly".
+order steps 1-2 also landed: the blitz clock (12 s turns, 45 s personal
+time bank, ADR-0023), landing-only takeover legality (ADR-0022), shared
+building pools (ADR-0019), and takeover liquidation of improved tiles
+(the rest of ADR-0022). The rest of this note is still ahead. The
+remaining engine mechanics (below) are what make it genuinely *Business
+Tour* rather than "short Monopoly".
 
 Naming caution (commercial plans, see the Steam note): game *mechanics* are
 not protectable, but Business Tour's specific names ("Lost Island", "World
@@ -56,9 +57,14 @@ protocol break, so version accordingly):
    personal time bank, never refilled) + ADR-0022 landing-only legality
    (`AwaitEnd`, tile == current position) - both ran on the current
    engine, no pools needed yet.
-2. ADR-0019 pools + the building-liquidation half of ADR-0022 (improved
-   tiles become seizable once buildings can return to shared pools; they
-   share the pool accounting).
+2. **DONE (2026-07).** ADR-0019 pools (subsidiaries/conglomerates, sized
+   `round(factor * sqrt(players))`, base mod 6/3) + the building-liquidation
+   half of ADR-0022 (improved tiles are seizable, buildings liquidate at
+   half cost to the former owner and return to the shared pools). Forced
+   (bankruptcy) liquidation stays even-sell but falls back to a one-motion
+   full strip when the subsidiary pool can't cover a normal step-down, so
+   it can never stall. `mods/classic`/`mods/highroller` deliberately left
+   untouched (classic stays unlimited/V1 until its step-6 removal).
 3. ADR-0021 market forecast (independent).
 4. ADR-0018 sealed bids (before points: points measure ownership).
 5. ADR-0020 victory points + pool-exhaustion end.

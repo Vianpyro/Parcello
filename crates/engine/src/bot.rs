@@ -233,7 +233,6 @@ impl Bot<'_> {
         (owner != self.me
             && !self.view.players[owner].bankrupt
             && !self.view.tiles[i].mortgaged
-            && self.view.tiles[i].houses == 0
             && self.cash_after(cost) >= BUILD_RESERVE
             && self.completes_group(i))
         .then(|| CommandKind::Expropriate {
@@ -475,6 +474,8 @@ mod tests {
             tiles: vec![TileState::default(); 3],
             turn_count: 0,
             pending_trades: vec![],
+            subsidiaries_available: None,
+            conglomerates_available: None,
         }
     }
 
@@ -646,6 +647,21 @@ mod tests {
 
         v.tiles[1].owner = None;
         assert!(matches!(decide(&c, &v, 0), Some(CommandKind::EndTurn)));
+    }
+
+    #[test]
+    fn seizes_an_improved_tile_that_completes_a_group() {
+        // ADR-0022: improved tiles are legal takeover targets too.
+        let c = advanced_content();
+        let mut v = advanced_view(1000, TurnPhase::AwaitEnd);
+        v.tiles[1].owner = Some(0);
+        v.tiles[2].owner = Some(1);
+        v.tiles[2].houses = 2;
+        v.players[0].position = 2;
+        assert!(matches!(
+            decide(&c, &v, 0),
+            Some(CommandKind::Expropriate { tile }) if tile == "b"
+        ));
     }
 
     #[test]

@@ -75,6 +75,8 @@ impl RegistryBuilder {
                 "expropriation" => rules.expropriation = *value,
                 "rent_boost" => rules.rent_boost = *value,
                 "win_full_groups" => rules.win_full_groups = *value,
+                "subsidiary_pool_factor" => rules.subsidiary_pool_factor = *value,
+                "conglomerate_pool_factor" => rules.conglomerate_pool_factor = *value,
                 _ => warn!(key, value, "unknown rule key ignored"),
             }
         }

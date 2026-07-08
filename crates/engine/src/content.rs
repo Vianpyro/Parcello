@@ -126,6 +126,15 @@ pub struct RuleParams {
     /// 0 disables. "Control all cities of N colours."
     #[serde(default)]
     pub win_full_groups: i64,
+    /// Shared subsidiary-pool sizing factor (ADR-0019): the table-wide
+    /// stock of levels 1..max-1 is `round(factor * sqrt(players))` at game
+    /// start; 0 disables pooling (unlimited stock, like today).
+    #[serde(default)]
+    pub subsidiary_pool_factor: i64,
+    /// Shared conglomerate-pool sizing factor (ADR-0019): same formula,
+    /// for the top build level; 0 disables pooling.
+    #[serde(default)]
+    pub conglomerate_pool_factor: i64,
 }
 
 impl Default for RuleParams {
@@ -140,6 +149,8 @@ impl Default for RuleParams {
             expropriation: 0,
             rent_boost: 0,
             win_full_groups: 0,
+            subsidiary_pool_factor: 0,
+            conglomerate_pool_factor: 0,
         }
     }
 }

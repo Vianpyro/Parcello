@@ -149,6 +149,8 @@
           <label>Expropriation %<input id="set_expropriation" type="number" min="0"></label>
           <label>Rent boost %<input id="set_rent_boost" type="number" min="0"></label>
           <label>Domination groups (0=off)<input id="set_win_groups" type="number" min="0"></label>
+          <label>Subsidiary pool factor (0=off)<input id="set_subsidiary_pool" type="number" min="0"></label>
+          <label>Conglomerate pool factor (0=off)<input id="set_conglomerate_pool" type="number" min="0"></label>
           <label class="chk"><input id="set_auction" type="checkbox">Auction on decline</label>
         </div>
         <button id="applysettings" style="margin-top:8px">Apply settings</button>
@@ -465,7 +467,7 @@ function buildBoard() {
     center.id = "center";
     // Interior spans the (d-2) x (d-2) inner cells.
     center.style.gridArea = `2 / 2 / ${d} / ${d}`;
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   } else {
     // Non-ring boards (mods): linear fallback, panel below.
@@ -473,7 +475,7 @@ function buildBoard() {
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");
     center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   }
 }
@@ -486,6 +488,7 @@ function render() {
     return;
   }
   const v = st.view;
+  renderPools(v);
   board().forEach((_, i) => {
     const ts = v.tiles[i];
     const el = $(`#tile-${i}`);
@@ -494,7 +497,7 @@ function render() {
     el.classList.toggle("mine", ts.owner === st.seat);
     const h = el.querySelector(".houses");
     if (h) {
-      h.textContent = ts.houses === 0 ? "" : ts.houses === 5 ? "HOTEL" : "\u25AA".repeat(ts.houses);
+      h.textContent = ts.houses === 0 ? "" : ts.houses === 5 ? "CONGLOMERATE" : "\u25AA".repeat(ts.houses);
       if (ts.boosts) h.textContent += ` \u26A1${ts.boosts}`; // rent boost (ADR-0012)
     }
     const m = el.querySelector(".mort");
@@ -594,6 +597,8 @@ function renderSettings() {
   put("set_expropriation", r.expropriation);
   put("set_rent_boost", r.rent_boost);
   put("set_win_groups", r.win_full_groups);
+  put("set_subsidiary_pool", r.subsidiary_pool_factor);
+  put("set_conglomerate_pool", r.conglomerate_pool_factor);
   const auc = $("#set_auction");
   if (auc) { auc.checked = r.auction_on_decline; auc.disabled = !host; }
   $("#applysettings").style.display = host ? "inline" : "none";
@@ -616,11 +621,26 @@ function applySettings() {
       expropriation: n("set_expropriation"),
       rent_boost: n("set_rent_boost"),
       win_full_groups: n("set_win_groups"),
+      subsidiary_pool_factor: n("set_subsidiary_pool"),
+      conglomerate_pool_factor: n("set_conglomerate_pool"),
     },
   } }));
 }
 
 function setStatus(text) { const s = $("#status"); if (s) s.textContent = text; }
+
+// Shared building pools (ADR-0019): "the tension only works if everyone
+// watches the shelf empty."
+function renderPools(v) {
+  const el = $("#pools");
+  if (!el) return;
+  if (v.subsidiaries_available == null && v.conglomerates_available == null) {
+    el.textContent = "";
+    return;
+  }
+  const pool = n => n == null ? "unlimited" : n;
+  el.textContent = `Subsidiaries: ${pool(v.subsidiaries_available)} | Conglomerates: ${pool(v.conglomerates_available)}`;
+}
 
 function renderStatus() {
   const v = st.view;
@@ -705,10 +725,15 @@ function tileMenu(i, evt) {
     actions.push(ts.mortgaged
       ? ["Redeem mortgage", { type: "unmortgage", tile: id }]
       : ["Mortgage", { type: "mortgage", tile: id }]);
-  } else if (ts.owner !== null && prop(i) && rules.expropriation > 0 && ts.houses === 0 && !ts.mortgaged
+  } else if (ts.owner !== null && prop(i) && rules.expropriation > 0 && !ts.mortgaged
       && myTurn() && v.turn.type === "await_end" && v.players[st.seat].position === i) {
-    // Takeover (ADR-0022): seize a rival's raw property, landing tile only.
-    actions.push([`Seize ($${Math.floor(prop(i).price * rules.expropriation / 100)})`, { type: "expropriate", tile: id }]);
+    // Takeover (ADR-0022): seize a rival's property, landing tile only.
+    // Improved tiles liquidate on seizure - the former owner is refunded
+    // half cost per level on top of the usual compensation (ADR-0022).
+    const label = ts.houses > 0
+      ? `Seize + liquidate ($${Math.floor(prop(i).price * rules.expropriation / 100)})`
+      : `Seize ($${Math.floor(prop(i).price * rules.expropriation / 100)})`;
+    actions.push([label, { type: "expropriate", tile: id }]);
   }
   if (!actions.length) return;
   menu.innerHTML = `<div class="muted">${escapeHtml(tileName(i))}</div>`;
@@ -863,7 +888,8 @@ function describe(e) {
       return `${P(e.player)} ${e.delta >= 0 ? "received" : "paid"} $${Math.abs(e.delta)} (${e.reason})`;
     case "house_built": return `${P(e.player)} built on ${T(e.tile)} (now ${e.houses})`;
     case "house_sold": return `${P(e.player)} sold a house on ${T(e.tile)} (+$${e.refund})`;
-    case "expropriated": return `${P(e.player)} seized ${T(e.tile)} from ${P(e.from)} for $${e.cost}`;
+    case "expropriated": return `${P(e.player)} seized ${T(e.tile)} from ${P(e.from)} for $${e.cost}`
+      + (e.liquidated > 0 ? ` (${e.liquidated} levels liquidated, $${e.liquidation_refund} to the former owner)` : "");
     case "rent_boosted": return `${P(e.player)} boosted ${T(e.tile)} rent to level ${e.boosts} for $${e.cost}`;
     case "property_mortgaged": return `${P(e.player)} mortgaged ${T(e.tile)} for $${e.value}`;
     case "property_unmortgaged": return `${P(e.player)} redeemed ${T(e.tile)} for $${e.cost}`;

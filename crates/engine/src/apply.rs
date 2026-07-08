@@ -594,8 +594,25 @@ impl<'e> Exec<'e> {
         if self.st.players[p].cash < prop.house_cost {
             return Err(CommandError::InsufficientFunds);
         }
+        // Shared building pools (ADR-0019): the top level draws a
+        // conglomerate and, in the same motion, releases the max-1
+        // subsidiaries the tile held (the classic house-to-hotel
+        // conversion); any other level draws a plain subsidiary.
+        let becomes_top = self.st.tiles[tile].houses + 1 == cap;
+        if becomes_top {
+            self.st
+                .take_conglomerate()
+                .map_err(|()| CommandError::PoolExhausted)?;
+        } else {
+            self.st
+                .take_subsidiary()
+                .map_err(|()| CommandError::PoolExhausted)?;
+        }
         self.st.players[p].cash -= prop.house_cost;
         self.st.tiles[tile].houses += 1;
+        if becomes_top {
+            self.st.return_subsidiaries((cap - 1) as u64);
+        }
         self.ev.push(Event::HouseBuilt {
             player: p,
             tile,
@@ -623,9 +640,28 @@ impl<'e> Exec<'e> {
         if self.st.tiles[tile].houses < group_max {
             return Err(CommandError::UnevenBuild);
         }
+        // Shared building pools (ADR-0019): stepping down off the top level
+        // returns the conglomerate but must re-issue max-1 subsidiaries -
+        // rejected if the bank can't lend that many right now (mortgaging
+        // remains the liquidity valve). Any other level just returns one
+        // subsidiary, which can never fail.
+        let cap = self.content.rules.max_houses_per_property.min(5);
+        let steps_off_top = self.st.tiles[tile].houses == cap;
+        if steps_off_top {
+            let subsidiaries_needed = (cap - 1) as u64;
+            if !self.st.subsidiaries_free(subsidiaries_needed) {
+                return Err(CommandError::PoolExhausted);
+            }
+        }
         let refund = prop.house_cost / 2;
         self.st.tiles[tile].houses -= 1;
         self.st.players[p].cash += refund;
+        if steps_off_top {
+            self.st.return_conglomerate();
+            self.st.consume_subsidiaries((cap - 1) as u64);
+        } else {
+            self.st.return_subsidiaries(1);
+        }
         self.ev.push(Event::HouseSold {
             player: p,
             tile,
@@ -635,12 +671,15 @@ impl<'e> Exec<'e> {
         Ok(())
     }
 
-    /// Seize a rival's unimproved, unmortgaged property for a premium
-    /// (ADR-0011). The former owner is compensated (min of price and what
-    /// was paid); the bank keeps any premium above that.
-    /// Takeover happens on the landing tile only (ADR-0022): after rent has
-    /// resolved, at the end of the acting player's own turn, on the exact
-    /// tile they are standing on.
+    /// Seize a rival's unmortgaged property for a premium (ADR-0011). The
+    /// former owner is compensated (min of price and what was paid); the
+    /// bank keeps any premium above that. Takeover happens on the landing
+    /// tile only (ADR-0022): after rent has resolved, at the end of the
+    /// acting player's own turn, on the exact tile they are standing on.
+    /// Improved tiles are seizable too (ADR-0022): their buildings
+    /// liquidate at `sell_house` pricing, paid to the former owner on top
+    /// of the usual compensation, and the stripped units return to the
+    /// shared pools; the taker always receives a bare tile.
     fn expropriate(&mut self, p: usize, tile_id: &str) -> Result<(), CommandError> {
         if !matches!(self.st.turn, TurnPhase::AwaitEnd) {
             return Err(CommandError::WrongPhase);
@@ -663,10 +702,10 @@ impl<'e> Exec<'e> {
             .property(tile)
             .ok_or(CommandError::NotAProperty)?;
         let ts = self.st.tiles[tile];
-        // Must be a rival's raw property: owned by someone else, no houses,
-        // not mortgaged.
+        // Must be a rival's property, mortgage-free (the takeover shield);
+        // improved tiles are legal targets now (ADR-0022).
         let from = match ts.owner {
-            Some(o) if o != p && !ts.mortgaged && ts.houses == 0 => o,
+            Some(o) if o != p && !ts.mortgaged => o,
             _ => return Err(CommandError::NotExpropriable),
         };
         let cost = prop.price * pct / 100;
@@ -674,15 +713,22 @@ impl<'e> Exec<'e> {
             return Err(CommandError::InsufficientFunds);
         }
         let compensation = prop.price.min(cost);
+        let cap = self.content.rules.max_houses_per_property.min(5);
+        let liquidated = ts.houses;
+        let liquidation_refund = (prop.house_cost / 2) * liquidated as i64;
         self.st.players[p].cash -= cost;
-        self.st.players[from].cash += compensation;
+        self.st.players[from].cash += compensation + liquidation_refund;
         self.st.tiles[tile].owner = Some(p);
+        self.st.tiles[tile].houses = 0;
         self.st.tiles[tile].boosts = 0;
+        self.st.release_tile_pools(liquidated, cap);
         self.ev.push(Event::Expropriated {
             player: p,
             from,
             tile,
             cost,
+            liquidated,
+            liquidation_refund,
         });
         Ok(())
     }
@@ -1142,8 +1188,12 @@ impl<'e> Exec<'e> {
 
     fn bankrupt(&mut self, p: usize, creditor: Option<usize>) {
         self.st.pending_trades.retain(|t| t.from != p && t.to != p);
+        let cap = self.content.rules.max_houses_per_property.min(5);
         for tile in 0..self.st.tiles.len() {
             if self.st.tiles[tile].owner == Some(p) {
+                // Bank refurbishes (no compensation), but the shared pools
+                // still get their units back (ADR-0019) - a pure release.
+                self.st.release_tile_pools(self.st.tiles[tile].houses, cap);
                 self.st.tiles[tile].owner = creditor;
                 self.st.tiles[tile].houses = 0;
                 self.st.tiles[tile].boosts = 0;

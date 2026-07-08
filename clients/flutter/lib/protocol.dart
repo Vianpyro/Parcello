@@ -77,6 +77,9 @@ class RuleParams {
   final int expropriation;
   final int rentBoost;
   final int winFullGroups;
+  /// Shared building pool sizing factors (ADR-0019); 0 disables pooling.
+  final int subsidiaryPoolFactor;
+  final int conglomeratePoolFactor;
 
   RuleParams.fromJson(Map<String, dynamic> j)
       : startingBalance = j['starting_balance'] as int,
@@ -87,7 +90,9 @@ class RuleParams {
         auctionOnDecline = j['auction_on_decline'] as bool,
         expropriation = j['expropriation'] as int? ?? 0,
         rentBoost = j['rent_boost'] as int? ?? 0,
-        winFullGroups = j['win_full_groups'] as int? ?? 0;
+        winFullGroups = j['win_full_groups'] as int? ?? 0,
+        subsidiaryPoolFactor = j['subsidiary_pool_factor'] as int? ?? 0,
+        conglomeratePoolFactor = j['conglomerate_pool_factor'] as int? ?? 0;
 }
 
 /// Per-room settings the host edits in the lobby (ADR-0015).
@@ -181,6 +186,9 @@ class ClientView {
   final TurnPhase turn;
   final List<TileState> tiles;
   final List<TradeOffer> pendingTrades;
+  /// Shared building pools (ADR-0019); `null` = unlimited (pooling off).
+  final int? subsidiariesAvailable;
+  final int? conglomeratesAvailable;
 
   ClientView.fromJson(Map<String, dynamic> j)
       : finished = j['phase']['type'] == 'finished',
@@ -195,7 +203,9 @@ class ClientView {
             .toList(),
         pendingTrades = (j['pending_trades'] as List? ?? [])
             .map((t) => TradeOffer.fromJson(t as Map<String, dynamic>))
-            .toList();
+            .toList(),
+        subsidiariesAvailable = j['subsidiaries_available'] as int?,
+        conglomeratesAvailable = j['conglomerates_available'] as int?;
 }
 
 /// Human-readable line for one engine event (the animation/log feed).
@@ -245,7 +255,12 @@ String describeEvent(
     case 'house_sold':
       return "${p(e['player'])} sold a house on ${t(e['tile'])} (+\$${e['refund']})";
     case 'expropriated':
-      return "${p(e['player'])} seized ${t(e['tile'])} from ${p(e['from'])} for \$${e['cost']}";
+      final base =
+          "${p(e['player'])} seized ${t(e['tile'])} from ${p(e['from'])} for \$${e['cost']}";
+      final liquidated = e['liquidated'] as int? ?? 0;
+      return liquidated > 0
+          ? "$base ($liquidated levels liquidated, \$${e['liquidation_refund']} to the former owner)"
+          : base;
     case 'rent_boosted':
       return "${p(e['player'])} boosted ${t(e['tile'])} rent to level ${e['boosts']} for \$${e['cost']}";
     case 'property_mortgaged':

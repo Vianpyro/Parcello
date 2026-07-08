@@ -65,6 +65,8 @@ pub enum CommandError {
     NotExpropriable,
     #[error("takeover only applies to the tile you just landed on")]
     NotOnTile,
+    #[error("the shared building pool has no stock left")]
+    PoolExhausted,
     #[error("rent boosting is disabled in this game")]
     RentBoostDisabled,
     #[error("this tile's rent boost is already maxed out")]

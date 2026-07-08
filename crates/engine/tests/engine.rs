@@ -722,7 +722,9 @@ fn expropriation_transfers_and_compensates() {
             player: 0,
             from: 1,
             tile: 2,
-            cost: 120
+            cost: 120,
+            liquidated: 0,
+            liquidation_refund: 0,
         }
     )));
     assert_eq!(st.tiles[2].owner, Some(0), "the tile changes hands");
@@ -787,7 +789,9 @@ fn expropriation_is_gated() {
         "p0 is still at position 0, not on ave_a"
     );
     st.players[0].position = 2;
-    // Own tile, improved tile, and broke seizer all reject.
+    // Own tile, mortgaged tile (the takeover shield), and broke seizer all
+    // reject. Improved tiles are legal targets now (ADR-0022) - covered by
+    // `takeover_liquidates_improved_tile_and_refunds_old_owner` below.
     st.tiles[2].owner = Some(0);
     assert_eq!(
         engine
@@ -804,7 +808,7 @@ fn expropriation_is_gated() {
         CommandError::NotExpropriable
     );
     st.tiles[2].owner = Some(1);
-    st.tiles[2].houses = 1;
+    st.tiles[2].mortgaged = true;
     assert_eq!(
         engine
             .apply(
@@ -817,9 +821,10 @@ fn expropriation_is_gated() {
                 )
             )
             .unwrap_err(),
-        CommandError::NotExpropriable
+        CommandError::NotExpropriable,
+        "mortgaged tiles stay the takeover shield"
     );
-    st.tiles[2].houses = 0;
+    st.tiles[2].mortgaged = false;
     st.players[0].cash = 10;
     assert_eq!(
         engine
@@ -1760,4 +1765,467 @@ fn forced_liquidation_respects_even_sell() {
     assert_eq!(sales, vec![(2, 1)]);
     assert_eq!(st.tiles[3].houses, 1, "shorter tile untouched");
     assert!(!st.players[1].bankrupt);
+}
+
+// -- Shared building pools (ADR-0019) ----------------------------------------
+
+#[test]
+fn build_consumes_and_sell_returns_subsidiary_pool() {
+    let engine = engine_with_rules(&[], |r| r.subsidiary_pool_factor = 1); // pool = 1 for 2 players
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0); // ave_a
+    st.tiles[3].owner = Some(0); // ave_b
+    assert_eq!(st.subsidiaries_available, Some(1));
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Build {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert_eq!(st.subsidiaries_available, Some(0));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::HouseBuilt {
+            tile: 2,
+            houses: 1,
+            ..
+        }
+    )));
+
+    // Pool exhausted: ave_b is still at group_min (0), legal for even-build,
+    // but there is no subsidiary left to draw.
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Build {
+                        tile: "ave_b".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::PoolExhausted
+    );
+    assert_eq!(
+        st.subsidiaries_available,
+        Some(0),
+        "rejection never mutates"
+    );
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::SellHouse {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert_eq!(st.subsidiaries_available, Some(1));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::HouseSold {
+            tile: 2,
+            houses: 0,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn conglomerate_build_releases_subsidiaries_and_consumes_one_conglomerate() {
+    let engine = engine_with_rules(&[], |r| {
+        r.subsidiary_pool_factor = 1; // pool = 1 for 2 players
+        r.conglomerate_pool_factor = 1; // pool = 1 for 2 players
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[2].houses = 4;
+    st.tiles[3].houses = 4;
+    st.players[0].cash = 1_000;
+    assert_eq!(st.conglomerates_available, Some(1));
+    assert_eq!(st.subsidiaries_available, Some(1));
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Build {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert_eq!(st.tiles[2].houses, 5, "reaches the conglomerate level");
+    assert_eq!(
+        st.conglomerates_available,
+        Some(0),
+        "one conglomerate consumed"
+    );
+    assert_eq!(
+        st.subsidiaries_available,
+        Some(1 + 4),
+        "the tile's 4 subsidiaries return to the pool"
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::HouseBuilt {
+            tile: 2,
+            houses: 5,
+            ..
+        }
+    )));
+
+    // Conglomerate pool now empty: a second top-level build (blvd, singleton
+    // navy, already a full group by itself) rejects.
+    let mut st = st;
+    st.tiles[6].owner = Some(0);
+    st.tiles[6].houses = 4;
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Build {
+                        tile: "blvd".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::PoolExhausted
+    );
+}
+
+#[test]
+fn sell_house_off_conglomerate_needs_free_subsidiaries_or_rejects() {
+    let engine = engine_with_rules(&[], |r| {
+        r.subsidiary_pool_factor = 1; // pool = 1 for 2 players, short of cap-1 = 4
+        r.conglomerate_pool_factor = 1;
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[2].houses = 5;
+    st.tiles[3].houses = 5;
+    assert_eq!(st.subsidiaries_available, Some(1));
+    assert_eq!(st.conglomerates_available, Some(1));
+
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::SellHouse {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::PoolExhausted,
+        "cap-1 = 4 subsidiaries needed but only 1 is free"
+    );
+
+    st.subsidiaries_available = Some(4);
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::SellHouse {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert_eq!(st.tiles[2].houses, 4);
+    assert_eq!(
+        st.subsidiaries_available,
+        Some(0),
+        "4 re-issued down to zero"
+    );
+    assert_eq!(
+        st.conglomerates_available,
+        Some(2),
+        "the tile's conglomerate returns"
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::HouseSold {
+            tile: 2,
+            houses: 4,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn pool_sizes_scale_with_player_count() {
+    // (players, expected subsidiaries at factor 6, expected conglomerates at factor 3)
+    let expected = [(2, 8, 4), (3, 10, 5), (4, 12, 6), (5, 13, 7), (6, 15, 7)];
+    for (n, subs, congs) in expected {
+        let mut content = plain_board();
+        content.rules.subsidiary_pool_factor = 6;
+        content.rules.conglomerate_pool_factor = 3;
+        let engine = Engine::new(Arc::new(content)).expect("valid content");
+        let players = (0..n).map(|i| (format!("p{i}"), format!("P{i}"))).collect();
+        let st = engine.new_game(players, 1);
+        assert_eq!(st.subsidiaries_available, Some(subs), "players={n}");
+        assert_eq!(st.conglomerates_available, Some(congs), "players={n}");
+    }
+}
+
+#[test]
+fn zero_pool_factor_is_unlimited() {
+    let engine = engine_with(plain_board(), &[]); // RuleParams::default(): factors 0
+    let mut st = two_players(&engine);
+    assert_eq!(st.subsidiaries_available, None);
+    assert_eq!(st.conglomerates_available, None);
+
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.players[0].cash = 10_000;
+    for _ in 0..5 {
+        st = step(
+            &engine,
+            &st,
+            cmd(
+                "p0",
+                CommandKind::Build {
+                    tile: "ave_a".into(),
+                },
+            ),
+        )
+        .0;
+        st = step(
+            &engine,
+            &st,
+            cmd(
+                "p0",
+                CommandKind::Build {
+                    tile: "ave_b".into(),
+                },
+            ),
+        )
+        .0;
+    }
+    assert_eq!(st.tiles[2].houses, 5);
+    assert_eq!(st.tiles[3].houses, 5);
+    assert_eq!(st.subsidiaries_available, None, "still unlimited");
+    assert_eq!(st.conglomerates_available, None, "still unlimited");
+}
+
+#[test]
+fn forced_liquidation_steps_normally_when_pool_has_room() {
+    // Default rules: unlimited pools, so a top-level tile steps down by one
+    // level exactly like `forced_liquidation_respects_even_sell`, not a
+    // full strip.
+    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let mut st = two_players(&engine);
+    st.tiles[6].owner = Some(0); // singleton navy: rent doubled to 20
+    st.tiles[2].owner = Some(1);
+    st.tiles[3].owner = Some(1);
+    st.tiles[2].houses = 5; // at cap
+    st.tiles[3].houses = 4;
+    st.players[1].cash = 0;
+    st.players[1].position = 3;
+    st.current = 1;
+
+    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let sales: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match e {
+            Event::HouseSold { tile, houses, .. } => Some((*tile, *houses)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sales, vec![(2, 4)], "single-level step off the top");
+    assert_eq!(st.tiles[3].houses, 4, "shorter tile untouched");
+    assert!(!st.players[1].bankrupt);
+}
+
+#[test]
+fn forced_liquidation_full_strips_when_subsidiary_pool_exhausted() {
+    let engine = engine_with_rules(&[(1, 2)], |r| {
+        r.subsidiary_pool_factor = 1;
+        r.conglomerate_pool_factor = 3;
+    });
+    let mut st = two_players(&engine);
+    st.tiles[6].owner = Some(0);
+    st.tiles[2].owner = Some(1);
+    st.tiles[3].owner = Some(1);
+    st.tiles[2].houses = 5;
+    st.tiles[3].houses = 4;
+    st.subsidiaries_available = Some(0); // exhausted: can't re-issue cap-1 = 4
+    let conglomerates_before = st.conglomerates_available;
+    st.players[1].cash = 0;
+    st.players[1].position = 3;
+    st.current = 1;
+
+    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let sales: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match e {
+            Event::HouseSold {
+                tile,
+                houses,
+                refund,
+                ..
+            } => Some((*tile, *houses, *refund)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sales,
+        vec![(2, 0, 125)],
+        "full strip in one motion: 5 levels * 25 refund"
+    );
+    assert_eq!(st.tiles[2].houses, 0);
+    assert_eq!(
+        st.subsidiaries_available,
+        Some(0),
+        "no subsidiary touch - the tile held none at the top level"
+    );
+    assert_eq!(
+        st.conglomerates_available,
+        conglomerates_before.map(|n| n + 1),
+        "the tile's conglomerate returns"
+    );
+    assert!(!st.players[1].bankrupt);
+}
+
+#[test]
+fn bankrupt_releases_pool_units_on_resignation() {
+    // Resignation wipes assets directly (bypassing charge()/liquidate()),
+    // so it is the reachable path for `bankrupt()`'s own pool release -
+    // debt-driven bankruptcy always fully sells houses first, leaving none
+    // for `bankrupt()` to touch.
+    let engine = engine_with_rules(&[], |r| {
+        r.subsidiary_pool_factor = 6; // 8 for 2 players
+        r.conglomerate_pool_factor = 3; // 4 for 2 players
+    });
+    let mut st = two_players(&engine);
+    let initial_subs = st.subsidiaries_available;
+    let initial_congs = st.conglomerates_available;
+
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[2].houses = 5; // conglomerate level
+    st.tiles[3].houses = 3; // subsidiary level
+    // Model these levels as actually drawn from the pool.
+    st.subsidiaries_available = initial_subs.map(|n| n - 3);
+    st.conglomerates_available = initial_congs.map(|n| n - 1);
+
+    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Resign));
+    assert!(st.players[0].bankrupt);
+    assert_eq!(st.tiles[2].houses, 0);
+    assert_eq!(st.tiles[3].houses, 0);
+    assert_eq!(
+        st.subsidiaries_available, initial_subs,
+        "conserved: released back on resignation"
+    );
+    assert_eq!(
+        st.conglomerates_available, initial_congs,
+        "conserved: released back on resignation"
+    );
+}
+
+#[test]
+fn takeover_liquidates_improved_tile_and_refunds_old_owner() {
+    let engine = engine_with_rules(&[], |r| {
+        r.expropriation = 200;
+        r.subsidiary_pool_factor = 6; // 8 for 2 players
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60, house_cost 50)
+    st.tiles[2].houses = 3;
+    st.subsidiaries_available = st.subsidiaries_available.map(|n| n - 3); // drawn for those 3
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 2;
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Expropriate {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Expropriated {
+            player: 0,
+            from: 1,
+            tile: 2,
+            cost: 120,
+            liquidated: 3,
+            liquidation_refund: 75, // 3 * (50 / 2)
+        }
+    )));
+    assert_eq!(st.tiles[2].houses, 0, "the taker gets a bare tile");
+    assert_eq!(
+        st.players[0].cash,
+        1500 - 120,
+        "seizer pays the flat cost only"
+    );
+    assert_eq!(
+        st.players[1].cash,
+        1500 + 60 + 75,
+        "former owner gets compensation plus the liquidation refund"
+    );
+    assert_eq!(
+        st.subsidiaries_available,
+        Some(8),
+        "the 3 liquidated levels return to the pool"
+    );
+}
+
+#[test]
+fn takeover_of_conglomerate_tile_returns_one_conglomerate() {
+    let engine = engine_with_rules(&[], |r| {
+        r.expropriation = 200;
+        r.conglomerate_pool_factor = 3; // 4 for 2 players
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1);
+    st.tiles[2].houses = 5; // conglomerate level
+    st.conglomerates_available = st.conglomerates_available.map(|n| n - 1);
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 2;
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Expropriate {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Expropriated {
+            liquidated: 5,
+            liquidation_refund: 125, // 5 * (50 / 2)
+            ..
+        }
+    )));
+    assert_eq!(st.tiles[2].houses, 0);
+    assert_eq!(
+        st.conglomerates_available,
+        Some(4),
+        "the tile's conglomerate returns, not subsidiaries"
+    );
 }

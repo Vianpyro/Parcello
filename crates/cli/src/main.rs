@@ -268,6 +268,8 @@ fn apply_setting(s: &mut RoomSettings, field: &str, value: &str) -> Option<()> {
         "expropriation" => r.expropriation = value.parse().ok()?,
         "rent_boost" => r.rent_boost = value.parse().ok()?,
         "win_full_groups" => r.win_full_groups = value.parse().ok()?,
+        "subsidiary_pool" => r.subsidiary_pool_factor = value.parse().ok()?,
+        "conglomerate_pool" => r.conglomerate_pool_factor = value.parse().ok()?,
         _ => return None,
     }
     Some(())
@@ -407,7 +409,7 @@ impl Ctx {
         println!(
             "* settings: game={} turn={} bank={} | starting_balance={} go_salary={} jail_fine={} \
              max_houses={} bankruptcy_threshold={} auction_on_decline={} expropriation={} \
-             rent_boost={} win_full_groups={}",
+             rent_boost={} win_full_groups={} subsidiary_pool={} conglomerate_pool={}",
             secs(s.game_seconds),
             secs(s.turn_seconds),
             secs(s.time_bank_seconds),
@@ -420,6 +422,8 @@ impl Ctx {
             r.expropriation,
             r.rent_boost,
             r.win_full_groups,
+            r.subsidiary_pool_factor,
+            r.conglomerate_pool_factor,
         );
     }
 
@@ -442,6 +446,14 @@ impl Ctx {
                 p.cash,
                 self.tile_name(p.position),
                 status
+            );
+        }
+        if view.subsidiaries_available.is_some() || view.conglomerates_available.is_some() {
+            let pool = |p: Option<u64>| p.map_or("unlimited".to_string(), |n| n.to_string());
+            println!(
+                "  pools: subsidiaries={} conglomerates={}",
+                pool(view.subsidiaries_available),
+                pool(view.conglomerates_available)
             );
         }
         for t in &view.pending_trades {
@@ -626,12 +638,23 @@ impl Ctx {
                 from,
                 tile,
                 cost,
-            } => format!(
-                "{} seized {} from {} for ${cost}",
-                self.player(*player),
-                self.tile_name(*tile),
-                self.player(*from)
-            ),
+                liquidated,
+                liquidation_refund,
+            } => {
+                let base = format!(
+                    "{} seized {} from {} for ${cost}",
+                    self.player(*player),
+                    self.tile_name(*tile),
+                    self.player(*from)
+                );
+                if *liquidated > 0 {
+                    format!(
+                        "{base} ({liquidated} levels liquidated, ${liquidation_refund} to the former owner)"
+                    )
+                } else {
+                    base
+                }
+            }
             Event::RentBoosted {
                 player,
                 tile,

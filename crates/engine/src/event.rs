@@ -126,11 +126,16 @@ pub enum Event {
     },
     /// A rival's property was seized (ADR-0011). `from` is the former
     /// owner, `player` the new one; `cost` is what the seizer paid.
+    /// Improved tiles liquidate on seizure (ADR-0022): `liquidated` levels
+    /// were stripped, paying `from` `liquidation_refund` on top of `cost`'s
+    /// usual compensation; both are 0 for a bare tile.
     Expropriated {
         player: usize,
         from: usize,
         tile: usize,
         cost: i64,
+        liquidated: u8,
+        liquidation_refund: i64,
     },
     /// A tile's rent was boosted one step (ADR-0012).
     RentBoosted {

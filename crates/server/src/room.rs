@@ -200,6 +200,10 @@ fn clamp_settings(mut s: RoomSettings) -> RoomSettings {
     r.expropriation = r.expropriation.clamp(0, 1_000);
     r.rent_boost = r.rent_boost.clamp(0, 1_000);
     r.win_full_groups = r.win_full_groups.clamp(0, 100);
+    // Small multipliers (base mod uses 6/3), not percents like the rules
+    // above - a much smaller ceiling is enough (ADR-0019).
+    r.subsidiary_pool_factor = r.subsidiary_pool_factor.clamp(0, 100);
+    r.conglomerate_pool_factor = r.conglomerate_pool_factor.clamp(0, 100);
     s
 }
 

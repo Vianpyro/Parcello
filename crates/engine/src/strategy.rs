@@ -128,18 +128,53 @@ impl BankruptcyResolver for StandardLiquidation {
                 })
                 .max_by_key(|&t| content.property(t).map(|p| p.house_cost).unwrap_or(0));
             let Some(tile) = candidate else { break };
-            let refund = content
-                .property(tile)
-                .map(|p| p.house_cost / 2)
-                .unwrap_or(0);
-            state.tiles[tile].houses -= 1;
-            state.players[debtor].cash += refund;
-            events.push(Event::HouseSold {
-                player: debtor,
-                tile,
-                houses: state.tiles[tile].houses,
-                refund,
-            });
+            let house_cost = content.property(tile).map(|p| p.house_cost).unwrap_or(0);
+            let cap = content.rules.max_houses_per_property.min(5);
+            let houses = state.tiles[tile].houses;
+            // Shared building pools (ADR-0019): a plain subsidiary-level
+            // sale always succeeds (a pure return). Stepping a tile off the
+            // top level normally re-issues cap-1 subsidiaries the same way
+            // `SellHouse` does - but forced liquidation must never stall,
+            // so when that re-issue would be blocked it strips the tile to
+            // zero in one motion instead (still a pure release, no
+            // consumption, so it can never fail either).
+            if houses == cap {
+                if state.subsidiaries_free((cap - 1) as u64) {
+                    let refund = house_cost / 2;
+                    state.tiles[tile].houses -= 1;
+                    state.players[debtor].cash += refund;
+                    state.return_conglomerate();
+                    state.consume_subsidiaries((cap - 1) as u64);
+                    events.push(Event::HouseSold {
+                        player: debtor,
+                        tile,
+                        houses: state.tiles[tile].houses,
+                        refund,
+                    });
+                } else {
+                    let refund = (house_cost / 2) * houses as i64;
+                    state.tiles[tile].houses = 0;
+                    state.players[debtor].cash += refund;
+                    state.return_conglomerate();
+                    events.push(Event::HouseSold {
+                        player: debtor,
+                        tile,
+                        houses: 0,
+                        refund,
+                    });
+                }
+            } else {
+                let refund = house_cost / 2;
+                state.tiles[tile].houses -= 1;
+                state.players[debtor].cash += refund;
+                state.return_subsidiaries(1);
+                events.push(Event::HouseSold {
+                    player: debtor,
+                    tile,
+                    houses: state.tiles[tile].houses,
+                    refund,
+                });
+            }
         }
         if state.players[debtor].cash >= needed {
             return;

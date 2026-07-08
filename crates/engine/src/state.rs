@@ -38,6 +38,15 @@ pub struct GameState {
     pub pending_trades: Vec<TradeOffer>,
     #[serde(default)]
     pub trade_seq: u32,
+    /// Shared table-wide stock of subsidiary levels (ADR-0019); `None` =
+    /// unlimited (`rules.subsidiary_pool_factor == 0`, the default).
+    /// Computed once at `GameState::new` and never recomputed mid-game.
+    #[serde(default)]
+    pub subsidiaries_available: Option<u64>,
+    /// Shared table-wide stock of conglomerate (top) levels; `None` =
+    /// unlimited (`rules.conglomerate_pool_factor == 0`, the default).
+    #[serde(default)]
+    pub conglomerates_available: Option<u64>,
 }
 
 /// A standing offer: `from` gives `give_*` and receives `receive_*`.
@@ -149,9 +158,15 @@ impl GameState {
         rules: &RuleParams,
     ) -> Self {
         assert!(players.len() >= 2, "a game requires at least two players");
+        let player_count = players.len();
         let mut rng = seed;
         let chance_deck = DeckState::shuffled(content.chance.len(), &mut rng);
         let community_deck = DeckState::shuffled(content.community.len(), &mut rng);
+        // round(factor * sqrt(players)); 0 disables pooling (unlimited stock,
+        // the off-by-default idiom shared with expropriation/rent_boost).
+        let pool_size = |factor: i64| -> Option<u64> {
+            (factor > 0).then(|| (factor as f64 * (player_count as f64).sqrt()).round() as u64)
+        };
         Self {
             phase: GamePhase::Active,
             players: players
@@ -176,6 +191,8 @@ impl GameState {
             turn_count: 0,
             pending_trades: Vec::new(),
             trade_seq: 0,
+            subsidiaries_available: pool_size(rules.subsidiary_pool_factor),
+            conglomerates_available: pool_size(rules.conglomerate_pool_factor),
         }
     }
 
@@ -234,5 +251,87 @@ impl GameState {
             }
         }
         worth
+    }
+
+    // -- Shared building pools (ADR-0019) --------------------------------
+    //
+    // `None` means the pool is disabled (unlimited stock); `Some(n)` is the
+    // live remaining count. Shared by `apply.rs` and `strategy.rs` so
+    // neither duplicates the `Option`-is-unlimited matching.
+
+    /// Whether `n` subsidiary units could be taken right now (an unlimited
+    /// pool always answers yes) - used to decide whether stepping a tile
+    /// down off the top level can proceed normally.
+    pub(crate) fn subsidiaries_free(&self, n: u64) -> bool {
+        self.subsidiaries_available.is_none_or(|avail| avail >= n)
+    }
+
+    /// Takes one subsidiary from the pool; `Err(())` only when the pool is
+    /// enabled and empty.
+    pub(crate) fn take_subsidiary(&mut self) -> Result<(), ()> {
+        match &mut self.subsidiaries_available {
+            Some(0) => Err(()),
+            Some(n) => {
+                *n -= 1;
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Takes one conglomerate from the pool; `Err(())` only when the pool
+    /// is enabled and empty.
+    pub(crate) fn take_conglomerate(&mut self) -> Result<(), ()> {
+        match &mut self.conglomerates_available {
+            Some(0) => Err(()),
+            Some(n) => {
+                *n -= 1;
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Returns `n` subsidiaries to the pool; always succeeds (a pool return
+    /// can never fail, only a take can).
+    pub(crate) fn return_subsidiaries(&mut self, n: u64) {
+        if let Some(avail) = &mut self.subsidiaries_available {
+            *avail += n;
+        }
+    }
+
+    /// Returns one conglomerate to the pool; always succeeds.
+    pub(crate) fn return_conglomerate(&mut self) {
+        if let Some(avail) = &mut self.conglomerates_available {
+            *avail += 1;
+        }
+    }
+
+    /// Consumes `n` subsidiaries already confirmed free via
+    /// `subsidiaries_free` - the re-issue half of stepping a tile down off
+    /// the top level. Never call this without checking first: unlike
+    /// `take_subsidiary`, it has no failure path and will saturate rather
+    /// than reject an unchecked over-consumption.
+    pub(crate) fn consume_subsidiaries(&mut self, n: u64) {
+        if let Some(avail) = &mut self.subsidiaries_available {
+            *avail = avail.saturating_sub(n);
+        }
+    }
+
+    /// Releases whatever pool units a tile currently holds at `houses`
+    /// levels (of `cap` total): one conglomerate at the top level,
+    /// otherwise that many subsidiaries; a no-op at zero. Always succeeds -
+    /// used wherever a tile's buildings vanish outright (bankruptcy wipe,
+    /// takeover liquidation, forced-liquidation full strip) rather than
+    /// stepping down one level at a time.
+    pub(crate) fn release_tile_pools(&mut self, houses: u8, cap: u8) {
+        if houses == 0 {
+            return;
+        }
+        if houses == cap {
+            self.return_conglomerate();
+        } else {
+            self.return_subsidiaries(houses as u64);
+        }
     }
 }

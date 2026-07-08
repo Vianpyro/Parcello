@@ -417,13 +417,17 @@ class GameScreen extends StatelessWidget {
         } else if (rival &&
             def.isProperty &&
             expro > 0 &&
-            ts.houses == 0 &&
             !ts.mortgaged &&
             s.myTurn &&
             v.turn.type == 'await_end' &&
             v.players[s.seat!].position == i) {
+          // Improved tiles liquidate on seizure - the former owner is
+          // refunded half cost per level on top of the usual compensation
+          // (ADR-0022).
           items.add(ListTile(
-              title: Text('Seize (\$${price * expro ~/ 100})'),
+              title: Text(ts.houses > 0
+                  ? 'Seize + liquidate (\$${price * expro ~/ 100})'
+                  : 'Seize (\$${price * expro ~/ 100})'),
               subtitle: const Text('take this tile from its owner'),
               onTap: () {
                 s.sendCmd({'type': 'expropriate', 'tile': def.id});
@@ -483,12 +487,28 @@ class _CenterPanel extends StatelessWidget {
                 warnSecs: 10),
           ],
         ]),
+        if (_poolsLine() != null) ...[
+          const SizedBox(height: 2),
+          Text(_poolsLine()!,
+              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
+        ],
         const SizedBox(height: 6),
         _Actions(s: s),
         const SizedBox(height: 6),
         Expanded(child: _EventLog(log: s.log)),
       ]),
     );
+  }
+
+  /// Shared building pools (ADR-0019): "the tension only works if everyone
+  /// watches the shelf empty." Null when pooling is off entirely.
+  String? _poolsLine() {
+    final v = s.view;
+    if (v == null) return null;
+    final subs = v.subsidiariesAvailable;
+    final congs = v.conglomeratesAvailable;
+    if (subs == null && congs == null) return null;
+    return 'Subsidiaries: ${subs ?? 'unlimited'} | Conglomerates: ${congs ?? 'unlimited'}';
   }
 
   String _status() {
@@ -1098,6 +1118,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
     ('expropriation', 'Expropriation %'),
     ('rent_boost', 'Rent boost %'),
     ('win_full_groups', 'Domination groups (0=off)'),
+    ('subsidiary_pool', 'Subsidiary pool factor (0=off)'),
+    ('conglomerate_pool', 'Conglomerate pool factor (0=off)'),
   ];
   late final Map<String, TextEditingController> _c;
   late bool _auction;
@@ -1121,6 +1143,10 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       'expropriation': TextEditingController(text: '${r.expropriation}'),
       'rent_boost': TextEditingController(text: '${r.rentBoost}'),
       'win_full_groups': TextEditingController(text: '${r.winFullGroups}'),
+      'subsidiary_pool':
+          TextEditingController(text: '${r.subsidiaryPoolFactor}'),
+      'conglomerate_pool':
+          TextEditingController(text: '${r.conglomeratePoolFactor}'),
     };
     _auction = r.auctionOnDecline;
   }
@@ -1151,6 +1177,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
         'expropriation': _n('expropriation'),
         'rent_boost': _n('rent_boost'),
         'win_full_groups': _n('win_full_groups'),
+        'subsidiary_pool_factor': _n('subsidiary_pool'),
+        'conglomerate_pool_factor': _n('conglomerate_pool'),
       },
     });
   }
@@ -1227,6 +1255,14 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       ('Expropriation', r.expropriation == 0 ? 'off' : '${r.expropriation}%'),
       ('Rent boost', r.rentBoost == 0 ? 'off' : '${r.rentBoost}%'),
       ('Domination', r.winFullGroups == 0 ? 'off' : '${r.winFullGroups} groups'),
+      (
+        'Subsidiary pool',
+        r.subsidiaryPoolFactor == 0 ? 'off' : 'x${r.subsidiaryPoolFactor}'
+      ),
+      (
+        'Conglomerate pool',
+        r.conglomeratePoolFactor == 0 ? 'off' : 'x${r.conglomeratePoolFactor}'
+      ),
     ];
     return [
       for (final (label, value) in rows)

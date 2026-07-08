@@ -18,6 +18,12 @@ pub struct ClientView {
     pub turn_count: u32,
     #[serde(default)]
     pub pending_trades: Vec<TradeOffer>,
+    /// Shared building pools (ADR-0019), public so "everyone watches the
+    /// shelf empty"; `None` = unlimited (pooling disabled).
+    #[serde(default)]
+    pub subsidiaries_available: Option<u64>,
+    #[serde(default)]
+    pub conglomerates_available: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +72,8 @@ impl ClientView {
             tiles: state.tiles.clone(),
             turn_count: state.turn_count,
             pending_trades: state.pending_trades.clone(),
+            subsidiaries_available: state.subsidiaries_available,
+            conglomerates_available: state.conglomerates_available,
         }
     }
 }

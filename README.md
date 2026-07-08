@@ -246,9 +246,11 @@ are allowlist-validated server-side. Examples: play the long game with
 
 V1 hook points: `rules.{starting_balance, go_salary, jail_fine,
 max_houses_per_property, bankruptcy_threshold, auction_on_decline,
-expropriation, rent_boost, win_full_groups}` (booleans as 0/1;
-`expropriation`/`rent_boost` are cost percents and `win_full_groups` a
-group count, 0 = off), `cards.chance[*]`,
+expropriation, rent_boost, win_full_groups, subsidiary_pool_factor,
+conglomerate_pool_factor}` (booleans as 0/1; `expropriation`/`rent_boost`
+are cost percents, `win_full_groups` a group count, and the two pool
+factors a multiplier scaling `round(factor * sqrt(players))`, 0 = off),
+`cards.chance[*]`,
 `cards.community[*]`, `properties[*]` (including per-tile `rent_model`:
 `houses` (default), `group_scaled` for stations, `dice_scaled` for
 utilities; the scaled models need no `house_cost` and cannot be built on).
@@ -268,7 +270,17 @@ unimproved rent; a singleton group counts as full; stations scale by
 stations owned, utilities by dice total), building and voluntary house
 sales with the classic even-build/even-sell rule (forced liquidation
 follows it too), the full-group requirement, per-tile cap, and
-no-mortgage-in-group rule, mortgage (half
+no-mortgage-in-group rule. Optional shared building pools (ADR-0019,
+`rules.subsidiary_pool_factor`/`conglomerate_pool_factor`, 0 = unlimited,
+6/3 in the base fast board): a table-wide stock of levels 1..max-1
+("subsidiaries") and the top level ("conglomerates"), sized
+`round(factor * sqrt(players))` at game start and public in every view;
+`Build` draws from the matching pool and rejects (`pool_exhausted`) when
+it's empty, building the top level converts one conglomerate and releases
+the tile's subsidiaries back; stepping a tile back down off the top level
+can be rejected the same way if the subsidiary pool can't re-issue them,
+but forced (bankruptcy) liquidation always succeeds regardless, falling
+back to a one-motion full strip when needed. Mortgage (half
 price out, plus 10% interest floored to redeem; mortgaged tiles collect
 nothing but still count for group ownership; a group must be house-free to
 mortgage), taxes, chance/community decks (cyclic, seeded shuffle, chained
@@ -283,9 +295,12 @@ transfer to the creditor (mortgages carry over as-is; the bank refurbishes
 returned tiles), resignation, last-player-standing win. Optional time-boxed games
 (`--game-timeout`): at the buzzer the richest player by net worth wins
 (cash + property equity + houses), ADR-0010. Aggressive mods-gated
-mechanics for swingy games: expropriation (seize a rival's unimproved
-property at a premium, landing tile only, right after rent, at the end of
-your turn; the owner is compensated, ADR-0011, tightened by ADR-0022) and rent boosts
+mechanics for swingy games: expropriation (seize a rival's property at a
+premium, landing tile only, right after rent, at the end of your turn; the
+owner is compensated, ADR-0011, tightened by ADR-0022 - improved tiles are
+seizable too, their buildings liquidating at half cost to the former owner
+on top of the usual compensation and returning to the shared pools) and
+rent boosts
 (pay to raise an owned tile's rent one step, capped, ADR-0012) - both on by
 default in the base fast board. Multiple win conditions: last player
 standing, richest at the time limit (ADR-0010), and a domination win -
@@ -326,14 +341,15 @@ deck rotation once drawn.
 - The host sets each game's options in the lobby (ADR-0015): the three
   timers (game, turn, time bank) and every rule scalar (starting balance, GO
   salary, jail fine, max houses, bankruptcy threshold, auctions on/off,
-  expropriation %, rent boost %, domination groups). Edits broadcast live to
-  the lobby; the server clamps every value. New rooms default to a 60-minute
-  game with a 12 s turn limit and a 45 s personal time bank (ADR-0023). One
-  server runs many rooms, each with its own settings - no orchestrator
-  needed. `--turn-timeout` / `--time-bank-seconds` / `--game-timeout` set the
-  per-room defaults (0 disables); the host overrides them. CLI:
-  `set <field> <value>` (e.g. `set game 45`, `set turn off`, `set bank 60`,
-  `set expropriation 0`).
+  expropriation %, rent boost %, domination groups, subsidiary/conglomerate
+  pool factors). Edits broadcast live to the lobby; the server clamps every
+  value. New rooms default to a 60-minute game with a 12 s turn limit and a
+  45 s personal time bank (ADR-0023). One server runs many rooms, each with
+  its own settings - no orchestrator needed. `--turn-timeout` /
+  `--time-bank-seconds` / `--game-timeout` set the per-room defaults (0
+  disables); the host overrides them. CLI: `set <field> <value>` (e.g.
+  `set game 45`, `set turn off`, `set bank 60`, `set expropriation 0`,
+  `set subsidiary_pool 6`).
 
 ## Deviations from the architecture doc
 
@@ -350,10 +366,12 @@ worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts;
 0013 domination win (control N full colour groups); 0014 server-side bot
 seats (host-added, yield to humans, shared `bot::decide` heuristic);
 0015 per-room host-editable settings (timers + rules chosen in the lobby,
-clamped server-side; one server runs many independent games); 0022 takeover
-tightened to the landing tile only, at end of turn (amends 0011); 0023
-blitz clock: 12s turns plus a 45s personal time bank, never refilled
-(amends 0015).
+clamped server-side; one server runs many independent games); 0019 shared
+building pools (subsidiaries/conglomerates, table-wide scarcity scaled by
+player count); 0022 takeover tightened to the landing tile only, at end of
+turn, and improved tiles seizable with liquidation to the pools (amends
+0011, shares accounting with 0019); 0023 blitz clock: 12s turns plus a 45s
+personal time bank, never refilled (amends 0015).
 
 ## Roadmap
 
