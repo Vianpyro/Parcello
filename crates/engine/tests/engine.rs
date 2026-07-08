@@ -159,18 +159,42 @@ fn step(engine: &Engine, st: &GameState, c: PlayerCommand) -> (GameState, Vec<Ev
 }
 
 #[test]
-fn buy_then_pay_rent() {
+fn discoverer_wins_at_floor_when_uncontested_then_pays_rent() {
     let engine = engine_with(plain_board(), &[(1, 2), (1, 2)]);
     let st = two_players(&engine);
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert_eq!(st.turn, TurnPhase::AwaitBuy { tile: 3 });
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::PurchaseOffered { tile: 3, .. }))
-    );
+    assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 3, .. }));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BlindAuctionOpened {
+            tile: 3,
+            discoverer: 0,
+            floor: 60
+        }
+    )));
 
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Buy));
+    // p1 abstains; p0 (discoverer) stays silent too - the implicit floor
+    // bid wins uncontested, no discount.
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BlindAuctionResolved {
+            tile: 3,
+            winner: Some(0),
+            amount: 60,
+            ..
+        }
+    )));
     assert_eq!(st.tiles[3].owner, Some(0));
     assert_eq!(st.players[0].cash, 1500 - 60);
 
@@ -638,11 +662,16 @@ fn same_seed_produces_identical_games() {
             if matches!(st.phase, GamePhase::Finished { .. }) {
                 break;
             }
-            let (actor, kind) = match st.turn {
+            let (actor, kind) = match &st.turn {
                 TurnPhase::AwaitRoll => (st.current, CommandKind::Roll),
-                TurnPhase::AwaitBuy { .. } => (st.current, CommandKind::Decline),
                 TurnPhase::AwaitEnd => (st.current, CommandKind::EndTurn),
-                TurnPhase::Auction { turn, .. } => (turn, CommandKind::Pass),
+                TurnPhase::BlindAuction { bids, .. } => {
+                    let seat = st
+                        .alive_players()
+                        .find(|&s| bids[s].is_none())
+                        .expect("a phase stays BlindAuction only while someone is pending");
+                    (seat, CommandKind::SubmitBlindBid { amount: 0 })
+                }
             };
             let actor = st.players[actor].id.clone();
             st = step(&engine, &st, cmd(&actor, kind)).0;
@@ -1341,97 +1370,96 @@ fn liquidation_mortgages_properties_after_houses() {
 }
 
 #[test]
-fn declined_purchase_goes_to_auction_and_highest_bid_wins() {
+fn discoverer_wins_above_floor_with_discount_after_a_contest() {
     let engine = engine_with(plain_board(), &[(1, 1)]);
     let st = two_players(&engine);
 
-    // p0 lands on ave_a (tile 2) and declines: auction opens, p1 speaks first.
+    // p0 lands on ave_a (tile 2, floor 60): the window opens for both seats.
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Decline));
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::AuctionStarted { tile: 2 }))
-    );
-    assert!(matches!(
-        st.turn,
-        TurnPhase::Auction {
-            tile: 2,
-            high_bid: 0,
-            high_bidder: None,
-            turn: 1,
-            ..
-        }
-    ));
+    assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 2, .. }));
 
-    // Out-of-turn and invalid bids are rejected.
+    // A discoverer bid below the floor is rejected; an unaffordable bid too.
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Bid { amount: 10 }))
+            .apply(&st, &cmd("p0", CommandKind::SubmitBlindBid { amount: 10 }))
             .unwrap_err(),
-        CommandError::NotYourTurn
+        CommandError::BidBelowFloor
     );
     assert_eq!(
         engine
-            .apply(&st, &cmd("p1", CommandKind::Bid { amount: 0 }))
-            .unwrap_err(),
-        CommandError::BidTooLow
-    );
-    assert_eq!(
-        engine
-            .apply(&st, &cmd("p1", CommandKind::Bid { amount: 9999 }))
+            .apply(
+                &st,
+                &cmd("p1", CommandKind::SubmitBlindBid { amount: 9999 })
+            )
             .unwrap_err(),
         CommandError::InsufficientFunds
     );
 
-    // p1 bids 10, p0 raises to 25 (below the 60 list price), p1 passes.
-    let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Bid { amount: 10 }));
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::SubmitBlindBid { amount: 80 }),
+    );
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Bid { amount: 10 }))
+            .apply(&st, &cmd("p0", CommandKind::SubmitBlindBid { amount: 90 }))
             .unwrap_err(),
-        CommandError::BidTooLow
+        CommandError::AlreadyBid
     );
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Bid { amount: 25 }));
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Pass));
 
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 50 }),
+    );
     assert!(ev.iter().any(|e| matches!(
         e,
-        Event::AuctionEnded {
+        Event::BlindAuctionResolved {
             tile: 2,
             winner: Some(0),
-            amount: 25
+            amount: 72, // 90% of the 80 winning bid, floored
+            ..
         }
     )));
     assert_eq!(st.tiles[2].owner, Some(0));
-    assert_eq!(st.players[0].cash, 1475);
-    assert_eq!(st.turn, TurnPhase::AwaitEnd, "turn stays with the decliner");
+    assert_eq!(st.players[0].cash, 1500 - 72);
+    assert_eq!(st.turn, TurnPhase::AwaitEnd);
     assert_eq!(st.current, 0);
 }
 
 #[test]
-fn auction_with_no_bids_leaves_the_tile_unsold() {
+fn all_zero_effective_bids_leave_the_tile_unsold() {
     let engine = engine_with(plain_board(), &[(1, 1)]);
-    let st = two_players(&engine);
+    let mut st = two_players(&engine);
+    st.players[0].cash = 10; // broke discoverer: no implicit floor
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Decline));
-    let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Pass));
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Pass));
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
 
     assert!(ev.iter().any(|e| matches!(
         e,
-        Event::AuctionEnded {
+        Event::BlindAuctionResolved {
             tile: 2,
             winner: None,
-            amount: 0
+            amount: 0,
+            ..
         }
     )));
     assert_eq!(st.tiles[2].owner, None);
-    assert_eq!(st.players[0].cash, 1500);
+    assert_eq!(st.players[0].cash, 10);
     assert_eq!(st.players[1].cash, 1500);
 }
 
 #[test]
-fn high_bidder_resigning_reopens_the_auction() {
+fn discoverer_resigning_mid_window_does_not_abort_the_auction() {
     let engine = engine_with(plain_board(), &[(1, 1)]);
     let players = vec![
         ("p0".to_string(), "Alice".to_string()),
@@ -1440,44 +1468,43 @@ fn high_bidder_resigning_reopens_the_auction() {
     ];
     let st = engine.new_game(players, 42);
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Decline));
+    assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 2, .. }));
 
-    // p1 takes the high bid, then resigns while p2 is on the clock.
-    let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Bid { amount: 40 }));
-    let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Resign));
-    assert!(matches!(
-        st.turn,
-        TurnPhase::Auction {
-            high_bid: 0,
-            high_bidder: None,
-            ..
-        }
-    ));
+    // p1 bids, then the discoverer (p0) resigns while p2 is still pending -
+    // the window must survive (the top-level bankruptcy-advance guard must
+    // not fire while a BlindAuction is open).
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 30 }),
+    );
+    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Resign));
+    assert!(
+        matches!(st.turn, TurnPhase::BlindAuction { tile: 2, .. }),
+        "the window must still be open for p2"
+    );
+    assert!(st.players[0].bankrupt);
 
-    // Bidding reopened from zero: p2 takes it for 1.
-    let (st, _) = step(&engine, &st, cmd("p2", CommandKind::Bid { amount: 1 }));
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Pass));
+    // p2 abstains: with the discoverer gone (no floor), p1's bid wins at
+    // full price. Resolving also completes the deferred turn-advance off
+    // the now-bankrupt former discoverer.
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p2", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
     assert!(ev.iter().any(|e| matches!(
         e,
-        Event::AuctionEnded {
-            winner: Some(2),
-            amount: 1,
+        Event::BlindAuctionResolved {
+            tile: 2,
+            winner: Some(1),
+            amount: 30,
             ..
         }
     )));
-    assert_eq!(st.tiles[2].owner, Some(2));
-}
-
-#[test]
-fn auction_rule_can_be_disabled() {
-    let mut content = plain_board();
-    content.rules.auction_on_decline = false;
-    let engine = engine_with(content, &[(1, 1)]);
-    let st = two_players(&engine);
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Decline));
-    assert!(!ev.iter().any(|e| matches!(e, Event::AuctionStarted { .. })));
-    assert_eq!(st.turn, TurnPhase::AwaitEnd);
+    assert_eq!(st.tiles[2].owner, Some(1));
+    assert_eq!(st.current, 1);
+    assert_eq!(st.turn, TurnPhase::AwaitRoll);
 }
 
 fn offer(
@@ -1665,10 +1692,9 @@ fn trades_are_blocked_during_auctions_and_purged_on_bankruptcy() {
     let st = two_players(&engine);
     let (st, _) = step(&engine, &st, cmd("p0", offer("p1", 25, &[], 0, &[])));
 
-    // Enter an auction: all trade actions reject.
+    // Land on an unowned tile: a sealed-bid window opens, all trade actions reject.
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Decline));
-    assert!(matches!(st.turn, TurnPhase::Auction { .. }));
+    assert!(matches!(st.turn, TurnPhase::BlindAuction { .. }));
     assert_eq!(
         engine
             .apply(&st, &cmd("p1", CommandKind::AcceptTrade { trade: 0 }))
@@ -1682,9 +1708,17 @@ fn trades_are_blocked_during_auctions_and_purged_on_bankruptcy() {
         CommandError::WrongPhase
     );
 
-    // Close the auction, then the proposer resigns: the offer is purged.
-    let (st, _) = step(&engine, &st, cmd("p1", CommandKind::Pass));
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Pass));
+    // Close the window, then the winner resigns: the offer is purged.
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Resign));
     assert!(st.pending_trades.is_empty());
 }

@@ -301,7 +301,11 @@ mod tests {
 
         let history = SqliteHistory::open(&db).expect("open");
         history.record_start("ABCDE", &["p0".into(), "p1".into()], u64::MAX);
-        for kind in [CommandKind::Roll, CommandKind::Buy, CommandKind::EndTurn] {
+        for kind in [
+            CommandKind::Roll,
+            CommandKind::SubmitBlindBid { amount: 0 },
+            CommandKind::EndTurn,
+        ] {
             history.record_command(
                 "ABCDE",
                 &PlayerCommand {

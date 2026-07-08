@@ -7,4 +7,3 @@ go_salary = 200
 jail_fine = 50
 max_houses_per_property = 5
 bankruptcy_threshold = 0
-auction_on_decline = 1

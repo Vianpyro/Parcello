@@ -31,14 +31,8 @@ pub fn decide(content: &GameContent, view: &ClientView, me: usize) -> Option<Com
         return Some(command);
     }
 
-    match view.turn {
-        TurnPhase::Auction {
-            tile,
-            high_bid,
-            high_bidder,
-            turn,
-            ..
-        } => bot.auction_action(tile, high_bid, high_bidder, turn),
+    match &view.turn {
+        TurnPhase::BlindAuction { tile, bids } => bot.blind_bid_action(*tile, bids),
         _ if view.current != me => None,
         TurnPhase::AwaitRoll => {
             if view.players[me].in_jail && view.players[me].jail_cards > 0 {
@@ -52,7 +46,6 @@ pub fn decide(content: &GameContent, view: &ClientView, me: usize) -> Option<Com
                 Some(CommandKind::Roll)
             }
         }
-        TurnPhase::AwaitBuy { tile } => bot.buy_action(tile),
         TurnPhase::AwaitEnd => bot.asset_action().or(Some(CommandKind::EndTurn)),
     }
 }
@@ -87,42 +80,35 @@ impl Bot<'_> {
         }
     }
 
-    fn auction_action(
-        &self,
-        tile: usize,
-        high_bid: i64,
-        high_bidder: Option<usize>,
-        turn: usize,
-    ) -> Option<CommandKind> {
-        if turn != self.me || high_bidder == Some(self.me) {
+    /// Sealed-bid auction (ADR-0018): each seat submits exactly once. As
+    /// the discoverer, take the implicit floor if affordable (declining
+    /// outright is no longer possible once landed); otherwise, bid up to
+    /// 60%/90% of price like the old open auction, if comfortably
+    /// affordable, else abstain.
+    fn blind_bid_action(&self, tile: usize, bids: &[Option<i64>]) -> Option<CommandKind> {
+        if bids[self.me].is_some() {
             return None;
         }
         let price = self.content.property(tile)?.price;
-        let max_bid = if self.completes_group(tile) {
-            price * 9 / 10
+        let amount = if self.view.current == self.me {
+            if self.cash_after(price) >= 0 {
+                price
+            } else {
+                0
+            }
         } else {
-            price * 6 / 10
+            let max_bid = if self.completes_group(tile) {
+                price * 9 / 10
+            } else {
+                price * 6 / 10
+            };
+            if max_bid > 0 && self.cash_after(max_bid) >= RESERVE {
+                max_bid
+            } else {
+                0
+            }
         };
-        let bid = high_bid + 10;
-        if bid <= max_bid && self.cash_after(bid) >= RESERVE {
-            Some(CommandKind::Bid { amount: bid })
-        } else {
-            Some(CommandKind::Pass)
-        }
-    }
-
-    fn buy_action(&self, tile: usize) -> Option<CommandKind> {
-        let price = self.content.property(tile)?.price;
-        let reserve = if self.completes_group(tile) {
-            RESERVE / 2
-        } else {
-            RESERVE
-        };
-        if self.cash_after(price) >= reserve {
-            Some(CommandKind::Buy)
-        } else {
-            Some(CommandKind::Decline)
-        }
+        Some(CommandKind::SubmitBlindBid { amount })
     }
 
     fn asset_action(&self) -> Option<CommandKind> {
@@ -491,32 +477,48 @@ mod tests {
     }
 
     #[test]
-    fn buys_when_comfortable_declines_when_broke() {
+    fn discoverer_bids_floor_when_affordable_else_abstains() {
         let c = content();
-        let rich = view(1000, TurnPhase::AwaitBuy { tile: 1 });
-        assert!(matches!(decide(&c, &rich, 0), Some(CommandKind::Buy)));
-        let broke = view(150, TurnPhase::AwaitBuy { tile: 1 });
-        assert!(matches!(decide(&c, &broke, 0), Some(CommandKind::Decline)));
+        let auction = |bids| TurnPhase::BlindAuction { tile: 1, bids };
+        let rich = view(1000, auction(vec![None, None]));
+        assert!(matches!(
+            decide(&c, &rich, 0),
+            Some(CommandKind::SubmitBlindBid { amount: 100 })
+        ));
+        let broke = view(50, auction(vec![None, None]));
+        assert!(matches!(
+            decide(&c, &broke, 0),
+            Some(CommandKind::SubmitBlindBid { amount: 0 })
+        ));
     }
 
     #[test]
-    fn bids_up_to_sixty_percent_then_passes() {
+    fn non_discoverer_bids_sixty_percent_or_abstains_then_stays_quiet_once_bid() {
         let c = content();
-        let auction = |high_bid| TurnPhase::Auction {
+        let mut v = view(
+            1000,
+            TurnPhase::BlindAuction {
+                tile: 1,
+                bids: vec![None, None],
+            },
+        );
+        v.current = 1; // someone else discovered it; seat 0 is a bidder
+        assert!(matches!(
+            decide(&c, &v, 0),
+            Some(CommandKind::SubmitBlindBid { amount: 60 })
+        ));
+
+        v.players[0].cash = 150; // 1000 - 60 was fine, 150 - 60 is not
+        assert!(matches!(
+            decide(&c, &v, 0),
+            Some(CommandKind::SubmitBlindBid { amount: 0 })
+        ));
+
+        v.turn = TurnPhase::BlindAuction {
             tile: 1,
-            high_bid,
-            high_bidder: None,
-            turn: 0,
-            active: 3,
+            bids: vec![Some(60), None],
         };
-        assert!(matches!(
-            decide(&c, &view(1000, auction(20)), 0),
-            Some(CommandKind::Bid { amount: 30 })
-        ));
-        assert!(matches!(
-            decide(&c, &view(1000, auction(60)), 0),
-            Some(CommandKind::Pass)
-        ));
+        assert!(decide(&c, &v, 0).is_none());
     }
 
     #[test]

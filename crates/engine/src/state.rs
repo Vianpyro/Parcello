@@ -74,23 +74,17 @@ pub enum GamePhase {
     Finished { winner: usize },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnPhase {
     /// Waiting for the current player to roll (or pay the jail fine).
     AwaitRoll,
-    /// Landed on an unowned property; waiting for buy/decline.
-    AwaitBuy { tile: usize },
-    /// Declined purchase: round-robin auction. `turn` is the seat expected
-    /// to bid or pass; `active` is a bitmask of seats still in the auction.
-    /// The high bidder is skipped until someone outbids them.
-    Auction {
-        tile: usize,
-        high_bid: i64,
-        high_bidder: Option<usize>,
-        turn: usize,
-        active: u8,
-    },
+    /// Landed on an unowned property: a 5s sealed-bid window is open
+    /// (ADR-0018). One slot per seat, parallel to `players`; `None` = not
+    /// yet submitted. The landing player (`GameState::current`, stable for
+    /// the whole window - see the turn-advance guard in `apply.rs`) is the
+    /// discoverer and gets an implicit list-price floor bid.
+    BlindAuction { tile: usize, bids: Vec<Option<i64>> },
     /// Movement resolved; building allowed; waiting for end of turn.
     AwaitEnd,
 }

@@ -30,12 +30,9 @@ const sampleView = {
   ],
   'current': 1,
   'turn': {
-    'type': 'auction',
+    'type': 'blind_auction',
     'tile': 3,
-    'high_bid': 60,
-    'high_bidder': 0,
-    'turn': 1,
-    'active': 3,
+    'bids': [null, 60],
   },
   'tiles': [
     {'owner': null, 'houses': 0, 'mortgaged': false},
@@ -62,11 +59,9 @@ void main() {
     expect(v.players[0].jailCards, 1);
     expect(v.players[1].inJail, true);
     expect(v.current, 1);
-    expect(v.turn.type, 'auction');
+    expect(v.turn.type, 'blind_auction');
     expect(v.turn.tile, 3);
-    expect(v.turn.highBid, 60);
-    expect(v.turn.highBidder, 0);
-    expect(v.turn.turnSeat, 1);
+    expect(v.turn.bids, [null, 60]);
     expect(v.tiles[1].owner, 0);
     expect(v.tiles[1].mortgaged, true);
     expect(v.pendingTrades.single.giveTiles, [1]);

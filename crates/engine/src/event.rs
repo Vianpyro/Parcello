@@ -33,19 +33,28 @@ pub enum Event {
         player: usize,
         amount: i64,
     },
-    PurchaseOffered {
-        player: usize,
+    /// A sealed-bid window opened (ADR-0018): landed on an unowned
+    /// property. `discoverer` gets an implicit floor bid of `floor` (list
+    /// price) if they stay silent and can afford it.
+    BlindAuctionOpened {
         tile: usize,
-        price: i64,
+        discoverer: usize,
+        floor: i64,
     },
-    PropertyPurchased {
+    /// A seat submitted its bid; the amount stays hidden until resolution
+    /// (ADR-0018 secrecy - `ClientView::for_seat` masks it too).
+    BlindBidSubmitted {
         player: usize,
-        tile: usize,
-        price: i64,
     },
-    PurchaseDeclined {
-        player: usize,
+    /// Every living seat has bid: the window resolved. `winner = None`
+    /// means every effective bid was zero and the tile stays unsold.
+    /// `bids` reveals every seat's raw submission (`0` where unset).
+    BlindAuctionResolved {
         tile: usize,
+        discoverer: usize,
+        winner: Option<usize>,
+        amount: i64,
+        bids: Vec<i64>,
     },
     /// Offer details live in the view's `pending_trades`.
     TradeProposed {
@@ -70,24 +79,6 @@ pub enum Event {
         trade: u32,
         from: usize,
         to: usize,
-    },
-    AuctionStarted {
-        tile: usize,
-    },
-    BidPlaced {
-        player: usize,
-        tile: usize,
-        amount: i64,
-    },
-    AuctionPassed {
-        player: usize,
-        tile: usize,
-    },
-    /// `winner = None` means nobody bid; the tile stays with the bank.
-    AuctionEnded {
-        tile: usize,
-        winner: Option<usize>,
-        amount: i64,
     },
     RentPaid {
         from: usize,

@@ -488,6 +488,12 @@ class _CenterPanel extends StatelessWidget {
                 icon: Icons.account_balance,
                 warnSecs: 10),
           ],
+          // Sealed-bid window (ADR-0018): a one-shot 5s countdown, local
+          // estimate only - the server alone decides when it actually closes.
+          if (s.bidEndsAt != null && s.view?.finished == false) ...[
+            const SizedBox(width: 6),
+            _Countdown(endsAt: s.bidEndsAt!, icon: Icons.gavel, warnSecs: 2),
+          ],
         ]),
         if (_poolsLine() != null) ...[
           const SizedBox(height: 2),
@@ -552,15 +558,15 @@ class _CenterPanel extends StatelessWidget {
     if (v.finished) return 'Game over — ${s.playerName(v.winner!)} wins!';
     final t = v.turn;
     switch (t.type) {
-      case 'auction':
-        final high = t.highBidder == null
-            ? 'no bids'
-            : '\$${t.highBid} by ${s.playerName(t.highBidder!)}';
-        return 'Auction: ${s.tileName(t.tile!)} ($high) — '
-            '${s.playerName(t.turnSeat!)} to act';
-      case 'await_buy':
-        final price = s.content!.board[t.tile!].price;
-        return '${s.playerName(v.current)} may buy ${s.tileName(t.tile!)} for \$$price';
+      case 'blind_auction':
+        final pending = <int>[
+          for (var i = 0; i < t.bids.length; i++)
+            if (t.bids[i] == null) i
+        ];
+        final waiting = pending.isEmpty
+            ? 'nobody'
+            : pending.map(s.playerName).join(', ');
+        return 'Sealed bid on ${s.tileName(t.tile!)} — waiting on: $waiting';
       default:
         return "${s.playerName(v.current)}'s turn";
     }
@@ -816,10 +822,26 @@ class _ActionsState extends State<_Actions> {
     }
 
     final children = <Widget>[];
-    if (t.type == 'auction') {
-      if (t.turnSeat != s.seat) return const SizedBox.shrink();
-      _bid.text = '${t.highBid + 1}';
+    // Every living seat may bid at once (ADR-0018), not a single actor:
+    // show the overlay whenever we haven't submitted yet, regardless of
+    // whose turn it nominally is.
+    if (t.type == 'blind_auction') {
+      final seat = s.seat;
+      if (seat == null ||
+          t.bids[seat] != null ||
+          v.players[seat].bankrupt) {
+        return const SizedBox.shrink();
+      }
+      final price = s.content!.board[t.tile!].price;
+      final isDiscoverer = v.current == seat;
+      _bid.text = '$price';
       children.addAll([
+        Text(
+          isDiscoverer
+              ? 'Sealed bid on ${s.tileName(t.tile!)} (floor \$$price if you stay silent):'
+              : 'Sealed bid on ${s.tileName(t.tile!)}:',
+          style: const TextStyle(fontSize: 12),
+        ),
         SizedBox(
           width: 90,
           child: TextField(
@@ -830,11 +852,14 @@ class _ActionsState extends State<_Actions> {
           ),
         ),
         hoverSfx(FilledButton(
-          onPressed: () => s
-              .sendCmd({'type': 'bid', 'amount': int.tryParse(_bid.text) ?? 0}),
+          onPressed: () => s.sendCmd({
+            'type': 'submit_blind_bid',
+            'amount': int.tryParse(_bid.text) ?? 0
+          }),
           child: const Text('Bid'),
         )),
-        btn('Pass', {'type': 'pass'}, primary: false),
+        btn('Abstain', {'type': 'submit_blind_bid', 'amount': 0},
+            primary: false),
       ]);
     } else if (s.myTurn) {
       final me = v.players[s.seat!];
@@ -849,10 +874,6 @@ class _ActionsState extends State<_Actions> {
                   primary: false));
             }
           }
-        case 'await_buy':
-          final price = s.content!.board[t.tile!].price;
-          children.add(btn('Buy (\$$price)', {'type': 'buy'}));
-          children.add(btn('Decline', {'type': 'decline'}, primary: false));
         case 'await_end':
           children.add(btn('End turn', {'type': 'end_turn'}));
       }
@@ -1167,7 +1188,6 @@ class _SettingsPanelState extends State<_SettingsPanel> {
     ('conglomerate_pool', 'Conglomerate pool factor (0=off)'),
   ];
   late final Map<String, TextEditingController> _c;
-  late bool _auction;
 
   @override
   void initState() {
@@ -1193,7 +1213,6 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       'conglomerate_pool':
           TextEditingController(text: '${r.conglomeratePoolFactor}'),
     };
-    _auction = r.auctionOnDecline;
   }
 
   @override
@@ -1218,7 +1237,6 @@ class _SettingsPanelState extends State<_SettingsPanel> {
         'jail_fine': _n('jail_fine'),
         'max_houses_per_property': _n('max_houses'),
         'bankruptcy_threshold': _n('bankruptcy_threshold'),
-        'auction_on_decline': _auction,
         'expropriation': _n('expropriation'),
         'rent_boost': _n('rent_boost'),
         'win_full_groups': _n('win_full_groups'),
@@ -1270,17 +1288,6 @@ class _SettingsPanelState extends State<_SettingsPanel> {
               ),
             ]),
           ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          title: const Text('Auction on decline',
-              style: TextStyle(fontSize: 12)),
-          value: _auction,
-          onChanged: (v) {
-            v ? sfx.toggleOn() : sfx.toggleOff();
-            setState(() => _auction = v);
-          },
-        ),
         const SizedBox(height: 4),
         wideButton('Apply settings', _apply, primary: false),
       ];
@@ -1296,7 +1303,6 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       ('Jail fine', '\$${r.jailFine}'),
       ('Max houses', '${r.maxHousesPerProperty}'),
       ('Bankruptcy threshold', '\$${r.bankruptcyThreshold}'),
-      ('Auctions', r.auctionOnDecline ? 'on' : 'off'),
       ('Expropriation', r.expropriation == 0 ? 'off' : '${r.expropriation}%'),
       ('Rent boost', r.rentBoost == 0 ? 'off' : '${r.rentBoost}%'),
       ('Domination', r.winFullGroups == 0 ? 'off' : '${r.winFullGroups} groups'),

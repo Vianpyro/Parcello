@@ -92,6 +92,18 @@ class GameSession extends ChangeNotifier {
   List<int>? banks;
   DateTime? bankEndsAt;
 
+  /// Sealed-bid window deadline (ADR-0018): a local approximation of the
+  /// server's 5s window, set the moment we first see the phase and cleared
+  /// once it's gone - the server alone resolves the window.
+  DateTime? bidEndsAt;
+  void _trackBidWindow() {
+    if (view?.turn.type == 'blind_auction') {
+      bidEndsAt ??= DateTime.now().add(const Duration(seconds: 5));
+    } else {
+      bidEndsAt = null;
+    }
+  }
+
   /// Latest dice roll for the center-of-board display. `diceSeq` bumps on
   /// every roll so the overlay re-triggers even on a repeated value.
   int diceSeq = 0;
@@ -206,6 +218,7 @@ class GameSession extends ChangeNotifier {
     code = null;
     gameEndsAt = null;
     turnEndsAt = null;
+    bidEndsAt = null;
     loginMessage = '';
     notifyListeners();
   }
@@ -293,6 +306,7 @@ class GameSession extends ChangeNotifier {
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
+        _trackBidWindow();
         joined = true;
         loginMessage = '';
         _log('Joined room $code. Mods: ${content!.modIds.join(', ')}');
@@ -309,12 +323,14 @@ class GameSession extends ChangeNotifier {
         turnEndsAt = _deadlineFrom(turnSeconds);
         timeBankSeconds = msg['time_bank_seconds'] as int?;
         banks = null;
+        _trackBidWindow();
         sfx.gameStart();
         _log('Game started.');
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         turnEndsAt = _deadlineFrom(turnSeconds);
         banks = (msg['banks'] as List?)?.cast<int>();
+        _trackBidWindow();
         // The bank only starts draining once the plain turn window is
         // spent; until then it shows the flat reserve (ADR-0023).
         bankEndsAt = (turnEndsAt != null && banks != null && seat != null)

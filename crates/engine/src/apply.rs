@@ -37,10 +37,6 @@ pub(crate) fn apply(
     if state.players[player].bankrupt {
         return Err(CommandError::Bankrupt);
     }
-    let expected_actor = match state.turn {
-        TurnPhase::Auction { turn, .. } => turn,
-        _ => state.current,
-    };
     let any_turn = matches!(
         cmd.kind,
         CommandKind::Resign
@@ -49,7 +45,11 @@ pub(crate) fn apply(
             | CommandKind::DeclineTrade { .. }
             | CommandKind::CancelTrade { .. }
     );
-    if !any_turn && player != expected_actor {
+    // A sealed-bid window (ADR-0018) has no single actor: any living seat
+    // may submit while it's open, regardless of whose turn it nominally is.
+    let in_open_bid = matches!(cmd.kind, CommandKind::SubmitBlindBid { .. })
+        && matches!(state.turn, TurnPhase::BlindAuction { .. });
+    if !any_turn && !in_open_bid && player != state.current {
         return Err(CommandError::NotYourTurn);
     }
 
@@ -62,10 +62,7 @@ pub(crate) fn apply(
 
     match &cmd.kind {
         CommandKind::Roll => exec.roll(player)?,
-        CommandKind::Buy => exec.buy(player)?,
-        CommandKind::Decline => exec.decline(player)?,
-        CommandKind::Bid { amount } => exec.bid(player, *amount)?,
-        CommandKind::Pass => exec.pass(player)?,
+        CommandKind::SubmitBlindBid { amount } => exec.submit_blind_bid(player, *amount)?,
         CommandKind::ProposeTrade {
             to,
             give_cash,
@@ -96,8 +93,15 @@ pub(crate) fn apply(
     }
 
     // A player can go bankrupt during their own turn (jail fine, card debt).
-    // The turn must then move on without requiring further input from them.
-    if matches!(exec.st.phase, GamePhase::Active) && exec.st.players[exec.st.current].bankrupt {
+    // The turn must then move on without requiring further input from them -
+    // but not while a sealed-bid window is still open (ADR-0018): other
+    // seats may still need to bid, and advancing here would wipe out an
+    // in-progress window out from under them. This fires correctly on the
+    // next command once resolution moves `turn` off `BlindAuction`.
+    if matches!(exec.st.phase, GamePhase::Active)
+        && exec.st.players[exec.st.current].bankrupt
+        && !matches!(exec.st.turn, TurnPhase::BlindAuction { .. })
+    {
         exec.advance_turn();
     }
 
@@ -183,44 +187,6 @@ impl<'e> Exec<'e> {
         self.ev.push(Event::LeftJail { player: p });
         self.move_forward(p, total);
         self.resolve_landing(p, total as u8, 0);
-    }
-
-    fn buy(&mut self, p: usize) -> Result<(), CommandError> {
-        let tile = match self.st.turn {
-            TurnPhase::AwaitBuy { tile } => tile,
-            _ => return Err(CommandError::WrongPhase),
-        };
-        let price = self
-            .content
-            .property(tile)
-            .expect("AwaitBuy always targets a property")
-            .price;
-        if self.st.players[p].cash < price {
-            return Err(CommandError::InsufficientFunds);
-        }
-        self.st.players[p].cash -= price;
-        self.st.tiles[tile].owner = Some(p);
-        self.ev.push(Event::PropertyPurchased {
-            player: p,
-            tile,
-            price,
-        });
-        self.st.turn = TurnPhase::AwaitEnd;
-        Ok(())
-    }
-
-    fn decline(&mut self, p: usize) -> Result<(), CommandError> {
-        let tile = match self.st.turn {
-            TurnPhase::AwaitBuy { tile } => tile,
-            _ => return Err(CommandError::WrongPhase),
-        };
-        self.ev.push(Event::PurchaseDeclined { player: p, tile });
-        if self.content.rules.auction_on_decline {
-            self.start_auction(tile);
-        } else {
-            self.st.turn = TurnPhase::AwaitEnd;
-        }
-        Ok(())
     }
 
     // -- Trading ----------------------------------------------------------------
@@ -368,7 +334,7 @@ impl<'e> Exec<'e> {
 
     fn reject_during_auction(&self) -> Result<(), CommandError> {
         match self.st.turn {
-            TurnPhase::Auction { .. } => Err(CommandError::WrongPhase),
+            TurnPhase::BlindAuction { .. } => Err(CommandError::WrongPhase),
             _ => Ok(()),
         }
     }
@@ -420,128 +386,109 @@ impl<'e> Exec<'e> {
         Ok(())
     }
 
-    // -- Auction ----------------------------------------------------------------
+    // -- Sealed-bid auction (ADR-0018) -------------------------------------------
+    //
+    // Every landing on an unowned property opens a 5s window (server-timed,
+    // see crates/server/src/room.rs) in which every living seat submits
+    // exactly one bid; `0` abstains. The discoverer (the landing player,
+    // `GameState::current` - stable for the whole window, see the
+    // turn-advance guard in `apply()`) is treated as having bid list price
+    // if they stay silent/submit `0` and can afford it. Resolution is pure
+    // and automatic the instant every living seat has bid - no close command.
 
-    fn start_auction(&mut self, tile: usize) {
-        let mut active = 0u8;
-        for (i, player) in self.st.players.iter().enumerate() {
-            if !player.bankrupt {
-                active |= 1 << i;
-            }
-        }
-        self.ev.push(Event::AuctionStarted { tile });
-        // Bidding starts left of the decliner; the decliner speaks last.
-        self.st.turn = TurnPhase::Auction {
-            tile,
-            high_bid: 0,
-            high_bidder: None,
-            turn: self.st.current,
-            active,
-        };
-        self.advance_auction();
-    }
-
-    fn bid(&mut self, p: usize, amount: i64) -> Result<(), CommandError> {
-        let TurnPhase::Auction {
-            tile,
-            high_bid,
-            turn,
-            active,
-            ..
-        } = self.st.turn
-        else {
+    fn submit_blind_bid(&mut self, p: usize, amount: i64) -> Result<(), CommandError> {
+        let TurnPhase::BlindAuction { tile, ref bids } = self.st.turn else {
             return Err(CommandError::WrongPhase);
         };
-        if amount <= high_bid || amount < 1 {
-            return Err(CommandError::BidTooLow);
+        if bids[p].is_some() {
+            return Err(CommandError::AlreadyBid);
         }
-        // Cash cannot change during an auction, so validating here guarantees
-        // the winner can pay at settlement.
-        if self.st.players[p].cash < amount {
+        if !(0..=self.st.players[p].cash).contains(&amount) {
             return Err(CommandError::InsufficientFunds);
         }
-        self.ev.push(Event::BidPlaced {
-            player: p,
-            tile,
-            amount,
-        });
-        self.st.turn = TurnPhase::Auction {
-            tile,
-            high_bid: amount,
-            high_bidder: Some(p),
-            turn,
-            active,
+        let floor = self
+            .content
+            .property(tile)
+            .expect("BlindAuction always targets a property")
+            .price;
+        if p == self.st.current && amount != 0 && amount < floor {
+            return Err(CommandError::BidBelowFloor);
+        }
+        let TurnPhase::BlindAuction { bids, .. } = &mut self.st.turn else {
+            unreachable!()
         };
-        self.advance_auction();
+        bids[p] = Some(amount);
+        self.ev.push(Event::BlindBidSubmitted { player: p });
+        self.maybe_resolve_blind_auction();
         Ok(())
     }
 
-    fn pass(&mut self, p: usize) -> Result<(), CommandError> {
-        let TurnPhase::Auction {
-            tile,
-            high_bid,
-            high_bidder,
-            turn,
-            active,
-        } = self.st.turn
-        else {
-            return Err(CommandError::WrongPhase);
-        };
-        self.ev.push(Event::AuctionPassed { player: p, tile });
-        self.st.turn = TurnPhase::Auction {
-            tile,
-            high_bid,
-            high_bidder,
-            turn,
-            active: active & !(1 << p),
-        };
-        self.advance_auction();
-        Ok(())
-    }
-
-    /// Moves the auction to the next seat that may speak (active and not the
-    /// current high bidder). When nobody is left to speak, settles.
-    fn advance_auction(&mut self) {
-        let TurnPhase::Auction {
-            tile,
-            high_bid,
-            high_bidder,
-            turn,
-            active,
-        } = self.st.turn
-        else {
+    /// Resolves the open sealed-bid window once every living seat has bid.
+    /// A no-op otherwise. Highest effective bid wins (the discoverer's
+    /// silent/zero bid is substituted with the list price if they can
+    /// afford it); ties favour the discoverer, then the lowest seat.
+    fn maybe_resolve_blind_auction(&mut self) {
+        let TurnPhase::BlindAuction { tile, ref bids } = self.st.turn else {
             return;
         };
-        let n = self.st.players.len();
-        let mut i = turn;
-        for _ in 0..n {
-            i = (i + 1) % n;
-            if active & (1 << i) != 0 && Some(i) != high_bidder {
-                self.st.turn = TurnPhase::Auction {
-                    tile,
-                    high_bid,
-                    high_bidder,
-                    turn: i,
-                    active,
-                };
-                return;
-            }
+        if !self.st.alive_players().all(|s| bids[s].is_some()) {
+            return;
         }
-        match high_bidder {
-            Some(winner) => {
-                self.st.players[winner].cash -= high_bid;
-                self.st.tiles[tile].owner = Some(winner);
-                self.ev.push(Event::AuctionEnded {
+        let discoverer = self.st.current;
+        let floor = self
+            .content
+            .property(tile)
+            .expect("BlindAuction always targets a property")
+            .price;
+        let raw: Vec<i64> = {
+            let TurnPhase::BlindAuction { bids, .. } = &self.st.turn else {
+                unreachable!()
+            };
+            (0..self.st.players.len())
+                .map(|i| bids[i].unwrap_or(0))
+                .collect()
+        };
+        let effective = |s: usize| -> i64 {
+            if s == discoverer && raw[s] == 0 && self.st.players[discoverer].cash >= floor {
+                floor
+            } else {
+                raw[s]
+            }
+        };
+        let winner = self
+            .st
+            .alive_players()
+            .filter(|&s| effective(s) > 0)
+            .max_by_key(|&s| (effective(s), s == discoverer, std::cmp::Reverse(s)));
+        match winner {
+            Some(w) => {
+                let win_amount = effective(w);
+                let raw_settlement = if w == discoverer && win_amount > floor {
+                    win_amount * 90 / 100
+                } else {
+                    win_amount
+                };
+                let settlement = self
+                    .apply_market_multiplier(MarketEffect::AcquisitionMultiplier, raw_settlement);
+                self.st.players[w].cash -= settlement;
+                self.st.tiles[tile].owner = Some(w);
+                self.ev.push(Event::BlindAuctionResolved {
                     tile,
-                    winner: Some(winner),
-                    amount: high_bid,
+                    discoverer,
+                    winner: Some(w),
+                    amount: settlement,
+                    bids: raw,
                 });
             }
-            None => self.ev.push(Event::AuctionEnded {
-                tile,
-                winner: None,
-                amount: 0,
-            }),
+            None => {
+                self.ev.push(Event::BlindAuctionResolved {
+                    tile,
+                    discoverer,
+                    winner: None,
+                    amount: 0,
+                    bids: raw,
+                });
+            }
         }
         self.st.turn = TurnPhase::AwaitEnd;
     }
@@ -888,33 +835,15 @@ impl<'e> Exec<'e> {
 
     fn resign(&mut self, p: usize) -> Result<(), CommandError> {
         self.ev.push(Event::PlayerResigned { player: p });
-        if let TurnPhase::Auction {
-            tile,
-            high_bid,
-            high_bidder,
-            turn,
-            active,
-        } = self.st.turn
-        {
-            // A resigning high bidder forfeits: bidding reopens from zero
-            // (rare edge; slight discount for the remaining bidders).
-            let (high_bid, high_bidder) = if high_bidder == Some(p) {
-                (0, None)
-            } else {
-                (high_bid, high_bidder)
-            };
-            self.st.turn = TurnPhase::Auction {
-                tile,
-                high_bid,
-                high_bidder,
-                turn,
-                active: active & !(1 << p),
-            };
-            if turn == p {
-                self.advance_auction();
-            }
-        }
         self.bankrupt(p, None);
+        // Bankruptcy already excluded `p` from `alive_players()`, so this
+        // may complete a sealed-bid window still waiting on `p` - including
+        // the discoverer resigning while other seats haven't bid yet.
+        if matches!(self.st.phase, GamePhase::Active)
+            && matches!(self.st.turn, TurnPhase::BlindAuction { .. })
+        {
+            self.maybe_resolve_blind_auction();
+        }
         Ok(())
     }
 
@@ -1016,12 +945,15 @@ impl<'e> Exec<'e> {
             }
             TileKind::Property(prop) => match self.st.tiles[tile].owner {
                 None => {
-                    self.ev.push(Event::PurchaseOffered {
-                        player: p,
+                    self.ev.push(Event::BlindAuctionOpened {
                         tile,
-                        price: prop.price,
+                        discoverer: p,
+                        floor: prop.price,
                     });
-                    self.st.turn = TurnPhase::AwaitBuy { tile };
+                    self.st.turn = TurnPhase::BlindAuction {
+                        tile,
+                        bids: vec![None; self.st.players.len()],
+                    };
                 }
                 Some(owner) if owner == p => {
                     self.st.turn = TurnPhase::AwaitEnd;

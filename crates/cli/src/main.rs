@@ -1,8 +1,9 @@
 //! Terminal test client. Not a product surface: exists to exercise the
 //! server end-to-end until the Flutter client lands.
 //!
-//! Commands (stdin): start | addbot | rmbot | set <field> <value> | roll | buy | no | bid <amount> | pass
-//! | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
+//! Commands (stdin): start | addbot | rmbot | set <field> <value> | roll | bid <amount>
+//! (0 abstains; landing on an unowned tile opens a 5s sealed-bid window for
+//! every living seat, ADR-0018) | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
 //! | offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
 //! | accept <id> | refuse <id> | cancel <id> | pay | card | end | resign | quit.
 
@@ -89,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.name.as_deref().unwrap_or("(identity token)")
     );
     println!(
-        "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | seize <t> (landing tile only, end of turn) | boost <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
+        "commands: start | roll | bid <n> (0 abstains) | build <t> | sell <t> | seize <t> (landing tile only, end of turn) | boost <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
     );
     println!(
         "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
@@ -169,12 +170,9 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
             return Some(ClientMessage::Configure { settings });
         }
         ("roll", None) => CommandKind::Roll,
-        ("buy", None) => CommandKind::Buy,
-        ("no", None) => CommandKind::Decline,
-        ("bid", Some(n)) => CommandKind::Bid {
+        ("bid", Some(n)) => CommandKind::SubmitBlindBid {
             amount: n.parse().ok()?,
         },
-        ("pass", None) => CommandKind::Pass,
         ("build", Some(tile)) => CommandKind::Build {
             tile: tile.to_string(),
         },
@@ -264,7 +262,6 @@ fn apply_setting(s: &mut RoomSettings, field: &str, value: &str) -> Option<()> {
         "jail_fine" => r.jail_fine = value.parse().ok()?,
         "max_houses" => r.max_houses_per_property = value.parse().ok()?,
         "bankruptcy_threshold" => r.bankruptcy_threshold = value.parse().ok()?,
-        "auction" => r.auction_on_decline = value.parse().ok()?,
         "expropriation" => r.expropriation = value.parse().ok()?,
         "rent_boost" => r.rent_boost = value.parse().ok()?,
         "win_full_groups" => r.win_full_groups = value.parse().ok()?,
@@ -408,7 +405,7 @@ impl Ctx {
         let secs = |v: Option<u64>| v.map_or("off".to_string(), |n| format!("{n}s"));
         println!(
             "* settings: game={} turn={} bank={} | starting_balance={} go_salary={} jail_fine={} \
-             max_houses={} bankruptcy_threshold={} auction_on_decline={} expropriation={} \
+             max_houses={} bankruptcy_threshold={} expropriation={} \
              rent_boost={} win_full_groups={} subsidiary_pool={} conglomerate_pool={}",
             secs(s.game_seconds),
             secs(s.turn_seconds),
@@ -418,7 +415,6 @@ impl Ctx {
             r.jail_fine,
             r.max_houses_per_property,
             r.bankruptcy_threshold,
-            r.auction_on_decline,
             r.expropriation,
             r.rent_boost,
             r.win_full_groups,
@@ -494,36 +490,41 @@ impl Ctx {
             GamePhase::Finished { winner } => {
                 println!("=== game over, winner: {} ===", self.player(winner));
             }
-            GamePhase::Active => {
-                let (actor, hint) = match &view.turn {
-                    TurnPhase::AwaitRoll => (view.current, "roll".to_string()),
-                    TurnPhase::AwaitBuy { tile } => (
-                        view.current,
-                        format!("buy | no ({})", self.tile_name(*tile)),
-                    ),
-                    TurnPhase::AwaitEnd => (
-                        view.current,
-                        "end (or build/seize <tile_id> on the tile you're standing on)".to_string(),
-                    ),
-                    TurnPhase::Auction {
-                        tile,
-                        high_bid,
-                        high_bidder,
-                        turn,
-                        ..
-                    } => {
-                        let high = match high_bidder {
-                            Some(b) => format!("${high_bid} by {}", self.player(*b)),
-                            None => "no bids".to_string(),
-                        };
-                        (
-                            *turn,
-                            format!("AUCTION {} ({high}): bid <n> | pass", self.tile_name(*tile)),
-                        )
-                    }
-                };
-                println!("  -> {} to act: {hint}", self.player(actor));
-            }
+            GamePhase::Active => match &view.turn {
+                TurnPhase::AwaitRoll => {
+                    println!("  -> {} to act: roll", self.player(view.current));
+                }
+                TurnPhase::AwaitEnd => {
+                    println!(
+                        "  -> {} to act: end (or build/seize <tile_id> on the tile you're standing on)",
+                        self.player(view.current)
+                    );
+                }
+                // Every living seat may bid at once (ADR-0018), not a
+                // single actor: list who's still pending, and prompt only
+                // when it's our own seat still waiting.
+                TurnPhase::BlindAuction { tile, bids } => {
+                    let pending: Vec<String> = bids
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, b)| b.is_none())
+                        .map(|(i, _)| self.player(i))
+                        .collect();
+                    let waiting_on_me = self
+                        .my_seat
+                        .is_some_and(|seat| bids.get(seat).is_some_and(|b| b.is_none()));
+                    let hint = if waiting_on_me {
+                        ": bid <n> (0 abstains)"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "  -> sealed bid open on {} (5s window), waiting on: {}{hint}",
+                        self.tile_name(*tile),
+                        pending.join(", ")
+                    );
+                }
+            },
         }
     }
 
@@ -549,27 +550,32 @@ impl Ctx {
             Event::SalaryPaid { player, amount } => {
                 format!("{} collected ${amount} salary", self.player(*player))
             }
-            Event::PurchaseOffered { tile, price, .. } => {
-                format!("{} is for sale: ${price}", self.tile_name(*tile))
-            }
-            Event::PropertyPurchased {
-                player,
+            Event::BlindAuctionOpened {
                 tile,
-                price,
-            } => {
-                format!(
-                    "{} bought {} for ${price}",
-                    self.player(*player),
-                    self.tile_name(*tile)
-                )
+                discoverer,
+                floor,
+            } => format!(
+                "{} landed on {}: sealed bid open (${floor} floor for {})",
+                self.player(*discoverer),
+                self.tile_name(*tile),
+                self.player(*discoverer),
+            ),
+            Event::BlindBidSubmitted { player } => {
+                format!("{} submitted a bid", self.player(*player))
             }
-            Event::PurchaseDeclined { player, tile } => {
-                format!(
-                    "{} declined {}",
-                    self.player(*player),
+            Event::BlindAuctionResolved {
+                tile,
+                winner,
+                amount,
+                ..
+            } => match winner {
+                Some(w) => format!(
+                    "{} won {} at ${amount}",
+                    self.player(*w),
                     self.tile_name(*tile)
-                )
-            }
+                ),
+                None => format!("{} stays unsold", self.tile_name(*tile)),
+            },
             Event::TradeProposed { trade, from, to } => format!(
                 "{} proposed trade #{trade} to {}",
                 self.player(*from),
@@ -582,25 +588,6 @@ impl Ctx {
             ),
             Event::TradeDeclined { trade, .. } => format!("trade #{trade} declined"),
             Event::TradeCancelled { trade, .. } => format!("trade #{trade} cancelled"),
-            Event::AuctionStarted { tile } => {
-                format!("auction opened for {}", self.tile_name(*tile))
-            }
-            Event::BidPlaced { player, amount, .. } => {
-                format!("{} bid ${amount}", self.player(*player))
-            }
-            Event::AuctionPassed { player, .. } => format!("{} passed", self.player(*player)),
-            Event::AuctionEnded {
-                tile,
-                winner,
-                amount,
-            } => match winner {
-                Some(w) => format!(
-                    "{} won the auction for {} at ${amount}",
-                    self.player(*w),
-                    self.tile_name(*tile)
-                ),
-                None => format!("{} stays unsold", self.tile_name(*tile)),
-            },
             Event::RentPaid {
                 from,
                 to,

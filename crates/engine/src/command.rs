@@ -18,10 +18,6 @@ pub struct PlayerCommand {
 pub enum CommandKind {
     /// Roll and move; while jailed, attempt a doubles escape instead.
     Roll,
-    /// Accept the pending purchase offer.
-    Buy,
-    /// Decline the pending purchase offer.
-    Decline,
     /// Build one house on an owned tile (full group required).
     Build {
         tile: String,
@@ -51,12 +47,12 @@ pub enum CommandKind {
     CancelTrade {
         trade: u32,
     },
-    /// Auction: bid strictly above the current high bid (cash-limited).
-    Bid {
+    /// Sealed-bid auction (ADR-0018): submit one bid for the open
+    /// `BlindAuction` window. `0` abstains. The discoverer's implicit floor
+    /// is list price; an explicit non-zero discoverer bid must meet it.
+    SubmitBlindBid {
         amount: i64,
     },
-    /// Auction: withdraw. The tile stays unsold if everyone passes.
-    Pass,
     /// Sell one house back to the bank for half its cost (even-sell rule).
     SellHouse {
         tile: String,

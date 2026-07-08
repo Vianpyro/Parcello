@@ -32,7 +32,7 @@ Patterns from the doc and where they live:
 - Command: `engine::command`, single `Engine::apply` pipeline (ADR-0001).
 - Observer: `engine::event::Event`, broadcast by rooms after each command.
 - State Machine: room `Lobby -> Active -> Finished` (`server::room`),
-  turn `AwaitRoll -> AwaitBuy -> AwaitEnd` (`engine::state::TurnPhase`).
+  turn `AwaitRoll -> BlindAuction -> AwaitEnd` (`engine::state::TurnPhase`).
 - Registry: `mods::RegistryBuilder` freezes into validated `GameContent`.
 - Strategy: `DicePolicy`, `RentCalculator`, `BankruptcyResolver` behind
   `dyn` in `Engine` (V2 WASM substitutes implementations here).
@@ -245,7 +245,7 @@ are allowlist-validated server-side. Examples: play the long game with
 `base, highroller`.
 
 V1 hook points: `rules.{starting_balance, go_salary, jail_fine,
-max_houses_per_property, bankruptcy_threshold, auction_on_decline,
+max_houses_per_property, bankruptcy_threshold,
 expropriation, rent_boost, win_full_groups, subsidiary_pool_factor,
 conglomerate_pool_factor}` (booleans as 0/1; `expropriation`/`rent_boost`
 are cost percents, `win_full_groups` a group count, and the two pool
@@ -258,15 +258,29 @@ utilities; the scaled models need no `house_cost` and cannot be built on),
 
 ## Game rules implemented
 
-Movement with Go salary, property purchase offers, trading (asynchronous
-offers of cash and/or house-free-group tiles between any solvent players,
-re-validated at acceptance so stale offers reject without side effects;
-blocked during auctions to preserve the auction's solvency invariant;
-capped at 4 open offers per proposer; offers are private - only the two
-parties see them and their lifecycle events), auctions on declined
-purchases (round-robin left of the decliner, strict raises capped by cash,
-high bidder skipped until outbid, no bids leaves the tile unsold; disable
-with `rules.auction_on_decline = 0`), rent (full-group doubles
+Movement with Go salary, sealed-bid auctions on every landing (ADR-0018):
+a 5s window opens the instant a player lands on an unowned property, and
+every living seat - not just the landing player - submits exactly one bid
+at once (`0` abstains); the landing player (the "discoverer") is treated
+as bidding list price if they stay silent and can afford it, and an
+explicit non-zero discoverer bid must meet that floor - landing on an
+affordable tile always commits you to at least the floor, there is no
+plain decline anymore. The window resolves the instant every living seat
+has bid (or the server auto-abstains whoever's left silent at the
+deadline): highest effective bid wins, ties go to the discoverer then the
+lowest seat, and an all-zero result (only possible when the discoverer is
+also broke) leaves the tile unsold. The discoverer pays list price in
+full when winning at the floor, but only 90% (floored) of their bid when
+winning above it after a contest; any other winner always pays their bid
+in full. Bids are private while the window is open - a view shows only
+your own - and revealed together once it resolves. Cash is frozen for the
+whole window, same invariant as the old open auction. Trading
+(asynchronous offers of cash and/or house-free-group tiles between any
+solvent players, re-validated at acceptance so stale offers reject
+without side effects; blocked while a sealed-bid window is open, to
+preserve its cash-frozen invariant; capped at 4 open offers per proposer;
+offers are private - only the two parties see them and their lifecycle
+events), rent (full-group doubles
 unimproved rent; a singleton group counts as full; stations scale by
 stations owned, utilities by dice total), building and voluntary house
 sales with the classic even-build/even-sell rule (forced liquidation
@@ -351,7 +365,7 @@ deck rotation once drawn.
   away (ADR-0014). Removed via "Remove bot" / `rmbot`.
 - The host sets each game's options in the lobby (ADR-0015): the three
   timers (game, turn, time bank) and every rule scalar (starting balance, GO
-  salary, jail fine, max houses, bankruptcy threshold, auctions on/off,
+  salary, jail fine, max houses, bankruptcy threshold,
   expropriation %, rent boost %, domination groups, subsidiary/conglomerate
   pool factors). Edits broadcast live to the lobby; the server clamps every
   value. New rooms default to a 60-minute game with a 12 s turn limit and a
@@ -377,7 +391,11 @@ worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts;
 0013 domination win (control N full colour groups); 0014 server-side bot
 seats (host-added, yield to humans, shared `bot::decide` heuristic);
 0015 per-room host-editable settings (timers + rules chosen in the lobby,
-clamped server-side; one server runs many independent games); 0019 shared
+clamped server-side; one server runs many independent games); 0018 sealed-bid auctions on every landing (replaces buy/decline and the
+open round-robin auction; a server-timed 5s window collected from every
+living seat at once, not a single actor - the first simultaneous
+multi-seat command phase, and the model for ADR-0024's corruption vote);
+0019 shared
 building pools (subsidiaries/conglomerates, table-wide scarcity scaled by
 player count); 0021 public market forecast (seeded, rolling event queue;
 rent/acquisition multipliers and a one-shot wealth tax); 0022 takeover

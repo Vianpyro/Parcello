@@ -258,7 +258,7 @@ mod tests {
             r#"{"type":"configure","settings":{"turn_seconds":12,"time_bank_seconds":45,"rules":{
                 "starting_balance":1500,"go_salary":200,"jail_fine":50,
                 "max_houses_per_property":5,"bankruptcy_threshold":0,
-                "auction_on_decline":true,"expropriation":200,"rent_boost":50,
+                "expropriation":200,"rent_boost":50,
                 "win_full_groups":3}}}"#,
         )
         .unwrap();

@@ -53,8 +53,10 @@ pub enum CommandError {
     TradeLimit,
     #[error("insufficient funds")]
     InsufficientFunds,
-    #[error("bid must be strictly higher than the current high bid")]
-    BidTooLow,
+    #[error("already submitted a bid for this window")]
+    AlreadyBid,
+    #[error("the discoverer's bid must be at least the list price")]
+    BidBelowFloor,
     #[error("player is not in jail")]
     NotInJail,
     #[error("no get-out-of-jail card held")]

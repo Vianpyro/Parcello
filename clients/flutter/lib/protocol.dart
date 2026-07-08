@@ -101,7 +101,6 @@ class RuleParams {
   final int jailFine;
   final int maxHousesPerProperty;
   final int bankruptcyThreshold;
-  final bool auctionOnDecline;
   final int expropriation;
   final int rentBoost;
   final int winFullGroups;
@@ -115,7 +114,6 @@ class RuleParams {
         jailFine = j['jail_fine'] as int,
         maxHousesPerProperty = j['max_houses_per_property'] as int,
         bankruptcyThreshold = j['bankruptcy_threshold'] as int,
-        auctionOnDecline = j['auction_on_decline'] as bool,
         expropriation = j['expropriation'] as int? ?? 0,
         rentBoost = j['rent_boost'] as int? ?? 0,
         winFullGroups = j['win_full_groups'] as int? ?? 0,
@@ -170,21 +168,22 @@ class TileState {
         boosts = j['boosts'] as int? ?? 0;
 }
 
-/// Flattened turn phase: `type` selects which of the nullable fields apply
-/// (await_buy/auction carry a tile; auction carries the bid state).
+/// Flattened turn phase: `type` selects which of the nullable fields apply.
+/// `blind_auction` (ADR-0018) is a sealed-bid window open to every living
+/// seat at once, not a single actor: `bids` is one slot per seat, `null` =
+/// not yet submitted; a seat's own view shows its own bid, others' are
+/// masked to `null` while the window is open (server-side secrecy).
 class TurnPhase {
-  final String type; // await_roll | await_buy | auction | await_end
+  final String type; // await_roll | blind_auction | await_end
   final int? tile;
-  final int highBid;
-  final int? highBidder;
-  final int? turnSeat; // auction only: seat expected to bid or pass
+  final List<int?> bids;
 
   TurnPhase.fromJson(Map<String, dynamic> j)
       : type = j['type'] as String,
         tile = j['tile'] as int?,
-        highBid = j['high_bid'] as int? ?? 0,
-        highBidder = j['high_bidder'] as int?,
-        turnSeat = j['turn'] as int?;
+        bids = (j['bids'] as List<dynamic>? ?? [])
+            .map((b) => b as int?)
+            .toList();
 }
 
 class TradeOffer {
@@ -300,19 +299,12 @@ String describeEvent(
           "${e['passed_go'] == true ? ' (passed Go)' : ''}";
     case 'salary_paid':
       return "${p(e['player'])} collected \$${e['amount']} salary";
-    case 'purchase_offered':
-      return "${t(e['tile'])} is for sale: \$${e['price']}";
-    case 'property_purchased':
-      return "${p(e['player'])} bought ${t(e['tile'])} for \$${e['price']}";
-    case 'purchase_declined':
-      return "${p(e['player'])} declined ${t(e['tile'])}";
-    case 'auction_started':
-      return "Auction opened for ${t(e['tile'])}";
-    case 'bid_placed':
-      return "${p(e['player'])} bid \$${e['amount']}";
-    case 'auction_passed':
-      return "${p(e['player'])} passed";
-    case 'auction_ended':
+    case 'blind_auction_opened':
+      return "${p(e['discoverer'])} landed on ${t(e['tile'])}: sealed bid open "
+          "(\$${e['floor']} floor for ${p(e['discoverer'])})";
+    case 'blind_bid_submitted':
+      return "${p(e['player'])} submitted a bid";
+    case 'blind_auction_resolved':
       return e['winner'] == null
           ? "${t(e['tile'])} stays unsold"
           : "${p(e['winner'])} won ${t(e['tile'])} at \$${e['amount']}";

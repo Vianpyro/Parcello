@@ -38,6 +38,12 @@ pub const DISCONNECTED_GRACE: Duration = Duration::from_secs(30);
 /// A bot seat pauses this long before each move so humans can follow the
 /// action; without it a table of bots would resolve instantly (ADR-0014).
 const BOT_THINK: Duration = Duration::from_millis(800);
+/// Sealed-bid auction window (ADR-0018): every living seat has this long to
+/// submit a bid once a window opens; silent seats are auto-abstained at
+/// expiry. A separate, parallel timer from the turn clock/time bank -
+/// `acting_seat()` returns `None` for the whole duration, so neither is
+/// consumed while it's armed.
+const BID_WINDOW: Duration = Duration::from_secs(5);
 
 pub type Rooms = Arc<RwLock<HashMap<String, mpsc::Sender<RoomCmd>>>>;
 pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;
@@ -127,6 +133,7 @@ pub async fn create_room(
         game_deadline: None,
         bot_counter: 0,
         banks: Vec::new(),
+        bid_deadline: None,
     };
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
@@ -249,6 +256,12 @@ struct Room {
     /// refilled during a match. Bots never drain it (`Seat.tx` is always
     /// `None` for them, same signal `afk_deadline` uses).
     banks: Vec<u64>,
+    /// Deadline for the currently open sealed-bid window (ADR-0018), if
+    /// any - armed in `handle_game` the instant `TurnPhase::BlindAuction`
+    /// opens, cleared the instant it's no longer open. Independent of
+    /// `last_progress`/`banks`: `acting_seat()` already returns `None` for
+    /// the whole phase, so the normal turn machinery stays disarmed.
+    bid_deadline: Option<tokio::time::Instant>,
 }
 
 impl Room {
@@ -275,6 +288,11 @@ impl Room {
             let bot_action = self.next_bot_action();
             let bot_armed = bot_action.is_some();
             let bot = tokio::time::sleep_until(last_progress + BOT_THINK);
+            // Sealed-bid window (ADR-0018): a separate, parallel timer -
+            // does not touch last_progress/banks, matching acting_seat()
+            // returning None for the whole phase.
+            let bid_armed = self.bid_deadline.is_some();
+            let bid = tokio::time::sleep_until(self.bid_deadline.unwrap_or(now + IDLE_TIMEOUT));
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
@@ -365,6 +383,9 @@ impl Room {
                     }
                     last_progress = tokio::time::Instant::now();
                 }
+                _ = bid, if bid_armed => {
+                    self.inject_silent_bids();
+                }
                 _ = idle => {
                     if self.seats.iter().all(|s| s.tx.is_none()) {
                         info!(room = %self.code, "idle timeout, dissolving");
@@ -378,16 +399,19 @@ impl Room {
         info!(room = %self.code, "room dissolved");
     }
 
-    /// Seat expected to act right now: the auction bidder, else the current
-    /// player. `None` outside an active game.
+    /// Seat expected to act right now, or `None` outside an active game -
+    /// also `None` while a sealed-bid window is open (ADR-0018): every
+    /// living seat may act there, not a single actor, so it is governed by
+    /// its own parallel `bid_deadline` timer instead (this is exactly what
+    /// disarms the turn clock/time bank for the whole window's duration).
     fn acting_seat(&self) -> Option<usize> {
         let Phase::Active(st) = &self.phase else {
             return None;
         };
-        Some(match st.turn {
-            TurnPhase::Auction { turn, .. } => turn,
-            _ => st.current,
-        })
+        match st.turn {
+            TurnPhase::BlindAuction { .. } => None,
+            _ => Some(st.current),
+        }
     }
 
     /// How long the acting seat may stall before its canonical action is
@@ -454,11 +478,40 @@ impl Room {
         let seat = self.acting_seat()?;
         let kind = match st.turn {
             TurnPhase::AwaitRoll => CommandKind::Roll,
-            TurnPhase::AwaitBuy { .. } => CommandKind::Decline,
             TurnPhase::AwaitEnd => CommandKind::EndTurn,
-            TurnPhase::Auction { .. } => CommandKind::Pass,
+            // acting_seat() already excludes this phase (no single actor);
+            // kept for exhaustiveness.
+            TurnPhase::BlindAuction { .. } => return None,
         };
         Some((st.players[seat].id.clone(), kind))
+    }
+
+    /// Auto-abstains every seat that hasn't bid by the sealed-bid window's
+    /// deadline (ADR-0018) - the multi-seat equivalent of `afk_command`'s
+    /// single-actor auto-play. Submitting through the normal `handle_game`
+    /// path means the last injection's own resolution naturally clears
+    /// `bid_deadline` via the transition detection there; cleared again
+    /// here regardless, defensively, so the timer can never spin.
+    fn inject_silent_bids(&mut self) {
+        let Phase::Active(state) = &self.phase else {
+            self.bid_deadline = None;
+            return;
+        };
+        let TurnPhase::BlindAuction { bids, .. } = &state.turn else {
+            self.bid_deadline = None;
+            return;
+        };
+        let silent: Vec<PlayerId> = state
+            .alive_players()
+            .filter(|&p| bids[p].is_none())
+            .map(|p| state.players[p].id.clone())
+            .collect();
+        for player_id in silent {
+            info!(room = %self.code, player = %player_id,
+                  "sealed-bid window closed, abstaining");
+            self.handle_game(&player_id, CommandKind::SubmitBlindBid { amount: 0 });
+        }
+        self.bid_deadline = None;
     }
 
     /// The first bot seat with something to do right now and the command it
@@ -720,6 +773,9 @@ impl Room {
         // Rebuilt from scratch, not extended: seat renumbering across
         // PlayAgain must never carry a stale bank (ADR-0023).
         self.banks = vec![self.settings.time_bank_seconds.unwrap_or(0); self.seats.len()];
+        // A fresh game always opens on AwaitRoll, but clear defensively so
+        // PlayAgain never carries a stale sealed-bid window (ADR-0018).
+        self.bid_deadline = None;
         info!(room = %self.code, players = self.seats.len(), "game started");
 
         let remaining = self.time_remaining_secs();
@@ -801,6 +857,7 @@ impl Room {
             }
         };
 
+        let was_blind_auction = matches!(state.turn, TurnPhase::BlindAuction { .. });
         let cmd = PlayerCommand {
             player: player_id.to_string(),
             kind,
@@ -812,6 +869,16 @@ impl Room {
             }
             Ok((next, events)) => {
                 self.history.record_command(&self.code, &cmd);
+                // Sealed-bid window timer (ADR-0018): a separate, parallel
+                // clock from the turn timer/time bank, armed the instant a
+                // window opens and cleared the instant it's no longer open -
+                // whether it resolved or the game ended.
+                let is_blind_auction = matches!(next.turn, TurnPhase::BlindAuction { .. });
+                if is_blind_auction && !was_blind_auction {
+                    self.bid_deadline = Some(tokio::time::Instant::now() + BID_WINDOW);
+                } else if !is_blind_auction {
+                    self.bid_deadline = None;
+                }
                 let finished_winner = match next.phase {
                     GamePhase::Finished { winner } => Some(winner),
                     GamePhase::Active => None,
@@ -1573,6 +1640,7 @@ mod tests {
             game_deadline: None,
             bot_counter: 0,
             banks: Vec::new(),
+            bid_deadline: None,
         }
     }
 
@@ -1924,5 +1992,137 @@ mod tests {
         .await
         .expect("must roll within DISCONNECTED_GRACE, far short of the 1000s bank");
         assert!(auto_rolled, "a disconnected seat must not draw on its bank");
+    }
+
+    /// Waits for the next `Update` and returns its view, skipping any other
+    /// message type (e.g. a stray `Rejected`).
+    async fn next_view(rx: &mut mpsc::UnboundedReceiver<ServerMessage>) -> Box<ClientView> {
+        loop {
+            match rx.recv().await.expect("room task alive") {
+                ServerMessage::Update { view, .. } => return view,
+                _ => continue,
+            }
+        }
+    }
+
+    /// Rolls/ends turns with real (non-fixed) dice until someone lands on
+    /// an unowned property and a sealed-bid window opens (ADR-0018); the
+    /// base mod board is almost entirely properties, so this converges in
+    /// very few attempts. Returns the seat whose turn it now is (the
+    /// discoverer).
+    async fn roll_until_blind_auction_opens(
+        room: &mpsc::Sender<RoomCmd>,
+        rx: &mut mpsc::UnboundedReceiver<ServerMessage>,
+        ids: [&str; 2],
+        mut current: usize,
+    ) -> usize {
+        tokio::time::timeout(Duration::from_secs(300), async {
+            loop {
+                room.send(RoomCmd::Game {
+                    player_id: ids[current].into(),
+                    cmd: CommandKind::Roll,
+                })
+                .await
+                .expect("room task alive");
+                let view = next_view(rx).await;
+                if matches!(view.turn, TurnPhase::BlindAuction { .. }) {
+                    return current;
+                }
+                current = view.current;
+                room.send(RoomCmd::Game {
+                    player_id: ids[current].into(),
+                    cmd: CommandKind::EndTurn,
+                })
+                .await
+                .expect("room task alive");
+                current = next_view(rx).await.current;
+            }
+        })
+        .await
+        .expect("must land on an unowned property within the timeout")
+    }
+
+    /// A silent seat is auto-abstained once the sealed-bid window's own 5s
+    /// deadline fires (ADR-0018) - a separate, parallel timer from the turn
+    /// clock/time bank (`acting_seat()` returns `None` for the whole
+    /// phase, so neither of those is touched while it's armed).
+    #[tokio::test(start_paused = true)]
+    async fn sealed_bid_window_auto_abstains_a_silent_seat() {
+        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let ids = ["guest:alice", "guest:bob"];
+
+        let discoverer = roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+
+        // The discoverer bids; the other seat stays silent.
+        room.send(RoomCmd::Game {
+            player_id: ids[discoverer].into(),
+            cmd: CommandKind::SubmitBlindBid { amount: 0 },
+        })
+        .await
+        .expect("room task alive");
+
+        let resolved = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::BlindAuctionResolved { .. }))
+                {
+                    return true;
+                }
+            }
+        })
+        .await
+        .expect("must resolve within the mock-clock timeout");
+        assert!(
+            resolved,
+            "the silent seat must be auto-abstained at the deadline"
+        );
+    }
+
+    /// When every living seat bids before the window's own deadline, it
+    /// resolves immediately as a direct result of the last bid - the 5s
+    /// timer is a fallback, not a wait (ADR-0018).
+    #[tokio::test(start_paused = true)]
+    async fn sealed_bid_window_resolves_early_once_everyone_has_bid() {
+        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let ids = ["guest:alice", "guest:bob"];
+
+        let discoverer = roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        let other = 1 - discoverer;
+
+        room.send(RoomCmd::Game {
+            player_id: ids[discoverer].into(),
+            cmd: CommandKind::SubmitBlindBid { amount: 0 },
+        })
+        .await
+        .expect("room task alive");
+        let _ = next_view(&mut client_rxs[1]).await;
+        room.send(RoomCmd::Game {
+            player_id: ids[other].into(),
+            cmd: CommandKind::SubmitBlindBid { amount: 0 },
+        })
+        .await
+        .expect("room task alive");
+
+        // A tight bound with no room for the 5s fallback to have
+        // contributed: the mock clock only auto-advances when nothing else
+        // is ready, so resolving inside it proves the window didn't wait.
+        let resolved = tokio::time::timeout(Duration::from_millis(50), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::BlindAuctionResolved { .. }))
+                {
+                    return true;
+                }
+            }
+        })
+        .await
+        .expect("must resolve immediately, not after the fallback timer");
+        assert!(resolved);
     }
 }

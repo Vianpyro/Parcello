@@ -16,12 +16,12 @@ Parcello's architecture.
 board (9x9 ring, no Community Chest, two resorts instead of four stations,
 slightly less starting cash); the 40-tile Monopoly-like board moved to
 `mods/classic`; the clients render any `4*(d-1)` square ring. V2 build
-order steps 1-3 also landed: the blitz clock (12 s turns, 45 s personal
+order steps 1-4 also landed: the blitz clock (12 s turns, 45 s personal
 time bank, ADR-0023), landing-only takeover legality and improved-tile
-liquidation (ADR-0022), shared building pools (ADR-0019), and the public
-market forecast (ADR-0021). The rest of this note is still ahead. The
-remaining engine mechanics (below) are what make it genuinely *Business
-Tour* rather than "short Monopoly".
+liquidation (ADR-0022), shared building pools (ADR-0019), the public
+market forecast (ADR-0021), and sealed-bid auctions (ADR-0018). The rest
+of this note is still ahead. The remaining engine mechanics (below) are
+what make it genuinely *Business Tour* rather than "short Monopoly".
 
 Naming caution (commercial plans, see the Steam note): game *mechanics* are
 not protectable, but Business Tour's specific names ("Lost Island", "World
@@ -74,7 +74,23 @@ protocol break, so version accordingly):
    `wealth_tax` (one-shot, every alive player pays a percent of net worth
    through the normal bankruptcy machinery). The base mod ships a starter
    pool (bubble/crash/audit).
-4. ADR-0018 sealed bids (before points: points measure ownership).
+4. **DONE (2026-07).** ADR-0018 sealed bids: `TurnPhase::AwaitBuy`/`Auction`
+   and `CommandKind::Buy`/`Decline`/`Bid`/`Pass` are gone, replaced by
+   `TurnPhase::BlindAuction { tile, bids }` and a single
+   `CommandKind::SubmitBlindBid { amount }` (0 = abstain). Every landing on
+   an unowned property opens a 5 s window in which every living seat bids
+   at once - the first phase where the pipeline's usual single-actor
+   assumption doesn't hold; the discoverer gets an implicit list-price
+   floor bid if silent and solvent, wins at that floor pay full price, wins
+   above it pay 90% (floored); ties favour the discoverer then the lowest
+   seat; all-zero effective bids (only possible when a broke discoverer's
+   silence has no floor) leave the tile unsold. The server's new
+   `bid_deadline` timer is a genuinely separate, parallel primitive from
+   the turn clock/time bank (`acting_seat()` returns `None` for the whole
+   phase) - the "timed collection window" the cross-cutting note below
+   flags as reusable for ADR-0024's corruption vote. `rules.auction_on_decline`
+   is gone (there is no plain decline anymore - landing on an affordable
+   tile always commits at least the floor).
 5. ADR-0020 victory points + pool-exhaustion end.
 6. ADR-0017 velocity deck + ADR-0024 jail, together (jail is only
    redesigned once the dice are gone). The big one - bot plus most of
@@ -116,7 +132,7 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Expropriation | `rules.expropriation`: seize a rival's unimproved property at a premium (owner compensated) | tune cost / allow improved targets | DONE (ADR-0011) |
 | Rent multiplier boost | `rules.rent_boost`: pay to raise an owned tile's rent +50%/step, cap 3 | theme it ("championships"), tie to a board event | DONE (ADR-0012) |
 | Free-destination move | `MoveTo`/`MoveBy` cards only | "world tour": choose your next landing | **engine** (a choose-destination phase/command) |
-| Auctions on decline | on by default | keep - it sustains momentum | already implemented (`rules.auction_on_decline`) |
+| Auctions on decline | on by default | sealed-bid, no plain decline | DONE - superseded by sealed-bid auctions on every landing (ADR-0018, step 4) |
 
 ## Suggested path (v1 note, absorbed by the build order above)
 

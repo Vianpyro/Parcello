@@ -50,6 +50,16 @@ impl ClientView {
         let mut view = Self::of(state);
         view.pending_trades
             .retain(|t| t.from == seat || t.to == seat);
+        // Sealed-bid secrecy (ADR-0018): a seat sees only its own bid while
+        // the window is open. "Who has bid" (not the amount) is covered by
+        // the amount-less `Event::BlindBidSubmitted` stream instead.
+        if let TurnPhase::BlindAuction { bids, .. } = &mut view.turn {
+            for (i, b) in bids.iter_mut().enumerate() {
+                if i != seat {
+                    *b = None;
+                }
+            }
+        }
         view
     }
 
@@ -72,7 +82,7 @@ impl ClientView {
                 })
                 .collect(),
             current: state.current,
-            turn: state.turn,
+            turn: state.turn.clone(),
             tiles: state.tiles.clone(),
             turn_count: state.turn_count,
             pending_trades: state.pending_trades.clone(),

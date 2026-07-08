@@ -2,7 +2,8 @@
 # (last-loaded-wins). Unknown keys are ignored with a warning.
 #
 # Fast-board tuning: a bit less starting cash than the classic long game
-# so pressure builds sooner; auctions stay on to keep momentum.
+# so pressure builds sooner. Every landing on an unowned property opens a
+# 5s sealed-bid window (ADR-0018) - not a rule flag, always on.
 
 [rules]
 starting_balance = 1200
@@ -10,7 +11,6 @@ go_salary = 200
 jail_fine = 50
 max_houses_per_property = 5
 bankruptcy_threshold = 0
-auction_on_decline = 1
 # Aggressive mechanics for swingy games (ADR-0011/0012):
 # expropriation = pay 200% of a rival's unimproved property to seize it
 # (they get 100% back); rent_boost = pay 100% of price per +50% rent step.

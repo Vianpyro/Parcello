@@ -103,7 +103,7 @@ fn next_valid_command(
     state: &GameState,
     rng: &mut FuzzRng,
 ) -> PlayerCommand {
-    let (actor, kind) = match state.turn {
+    let (actor, kind) = match &state.turn {
         TurnPhase::AwaitRoll => {
             let player = &state.players[state.current];
             if player.jail_turns.is_some() && player.jail_cards > 0 && rng.chance(3) {
@@ -119,17 +119,6 @@ fn next_valid_command(
                 (state.current, CommandKind::Roll)
             }
         }
-        TurnPhase::AwaitBuy { tile } => {
-            let price = content
-                .property(tile)
-                .expect("AwaitBuy targets property")
-                .price;
-            if state.players[state.current].cash >= price && rng.chance(2) {
-                (state.current, CommandKind::Buy)
-            } else {
-                (state.current, CommandKind::Decline)
-            }
-        }
         TurnPhase::AwaitEnd => {
             if let Some(kind) = random_asset_command(content, state, state.current, rng) {
                 (state.current, kind)
@@ -137,24 +126,26 @@ fn next_valid_command(
                 (state.current, CommandKind::EndTurn)
             }
         }
-        TurnPhase::Auction {
-            high_bid,
-            turn,
-            active: _,
-            ..
-        } => {
-            let cash = state.players[turn].cash;
-            if cash > high_bid && rng.chance(2) {
-                let max_raise = (cash - high_bid).min(80) as usize;
-                (
-                    turn,
-                    CommandKind::Bid {
-                        amount: high_bid + 1 + rng.below(max_raise) as i64,
-                    },
-                )
+        TurnPhase::BlindAuction { tile, bids } => {
+            let floor = content
+                .property(*tile)
+                .expect("BlindAuction targets property")
+                .price;
+            let pending: Vec<usize> = state
+                .alive_players()
+                .filter(|&s| bids[s].is_none())
+                .collect();
+            let seat = pending[rng.below(pending.len())];
+            let cash = state.players[seat].cash;
+            let is_discoverer = seat == state.current;
+            let amount = if is_discoverer && cash >= floor && rng.chance(2) {
+                floor + rng.below((cash - floor + 1) as usize) as i64
+            } else if !is_discoverer && cash > 0 && rng.chance(2) {
+                rng.below((cash + 1) as usize) as i64
             } else {
-                (turn, CommandKind::Pass)
-            }
+                0
+            };
+            (seat, CommandKind::SubmitBlindBid { amount })
         }
     };
 
@@ -311,39 +302,25 @@ fn assert_invariants(
         }
     }
 
-    match state.turn {
+    match &state.turn {
         TurnPhase::AwaitRoll | TurnPhase::AwaitEnd => {}
-        TurnPhase::AwaitBuy { tile } => {
+        TurnPhase::BlindAuction { tile, bids } => {
+            let tile = *tile;
             if tile >= state.tiles.len() || content.property(tile).is_none() {
-                fail("AwaitBuy references a non-property tile");
+                fail("BlindAuction references a non-property tile");
             }
             if state.tiles[tile].owner.is_some() {
-                fail("AwaitBuy references an owned tile");
+                fail("BlindAuction references an owned tile");
             }
-        }
-        TurnPhase::Auction {
-            tile,
-            high_bid,
-            high_bidder,
-            turn,
-            active,
-        } => {
-            if tile >= state.tiles.len() || content.property(tile).is_none() {
-                fail("auction references a non-property tile");
+            if bids.len() != state.players.len() {
+                fail("BlindAuction bids vector size mismatches player count");
             }
-            if state.tiles[tile].owner.is_some() {
-                fail("auction references an owned tile");
-            }
-            if high_bid < 0 || turn >= state.players.len() || state.players[turn].bankrupt {
-                fail("auction has invalid bid or turn");
-            }
-            if active & (1 << turn) == 0 {
-                fail("auction turn is not active");
-            }
-            if let Some(bidder) = high_bidder
-                && (bidder >= state.players.len() || state.players[bidder].bankrupt)
-            {
-                fail("auction has invalid high bidder");
+            for (i, bid) in bids.iter().enumerate() {
+                if let Some(amount) = bid
+                    && (*amount < 0 || *amount > state.players[i].cash)
+                {
+                    fail("BlindAuction bid is negative or exceeds cash");
+                }
             }
         }
     }
@@ -421,20 +398,47 @@ fn assert_money_delta(
     iteration: usize,
     step: usize,
 ) {
-    let mut expected_delta = 0;
+    let bankrupted: Vec<usize> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::PlayerBankrupt { player, .. } => Some(*player),
+            _ => None,
+        })
+        .collect();
+
+    // Every event type has an exactly-known cash effect except a debt paid
+    // to the bank (Tax/JailFine, or a negative card CashAdjusted - none
+    // have a creditor) that triggers the payer's bankruptcy: the
+    // partial-settlement path (`charge()` in apply.rs) deducts only
+    // whatever cash liquidation could raise, not the full nominal amount
+    // the event logs - so the true contribution is only known to lie
+    // somewhere in `[-amount, 0]`, not a fixed value.
+    let mut min_expected = 0i64;
+    let mut max_expected = 0i64;
     for event in events {
-        expected_delta += match event {
-            Event::SalaryPaid { amount, .. } => *amount,
-            Event::PropertyPurchased { price, .. } => -*price,
-            Event::AuctionEnded {
+        let (lo, hi) = match event {
+            Event::SalaryPaid { amount, .. } => (*amount, *amount),
+            Event::BlindAuctionResolved {
                 winner: Some(_),
                 amount,
                 ..
-            } => -*amount,
-            Event::TaxPaid { amount, .. } => -*amount,
-            Event::CashAdjusted { delta, .. } => *delta,
-            Event::HouseBuilt { cost, .. } => -*cost,
-            Event::HouseSold { refund, .. } => *refund,
+            } => (-*amount, -*amount),
+            Event::TaxPaid { player, amount, .. } => {
+                if bankrupted.contains(player) {
+                    (-*amount, 0)
+                } else {
+                    (-*amount, -*amount)
+                }
+            }
+            Event::CashAdjusted { player, delta, .. } => {
+                if *delta < 0 && bankrupted.contains(player) {
+                    (*delta, 0)
+                } else {
+                    (*delta, *delta)
+                }
+            }
+            Event::HouseBuilt { cost, .. } => (-*cost, -*cost),
+            Event::HouseSold { refund, .. } => (*refund, *refund),
             Event::Expropriated {
                 tile,
                 cost,
@@ -442,20 +446,29 @@ fn assert_money_delta(
                 ..
             } => {
                 let compensation = content.property(*tile).expect("property").price.min(*cost);
-                compensation + liquidation_refund - cost
+                let delta = compensation + liquidation_refund - cost;
+                (delta, delta)
             }
-            Event::RentBoosted { cost, .. } => -*cost,
-            Event::PropertyMortgaged { value, .. } => *value,
-            Event::PropertyUnmortgaged { cost, .. } => -*cost,
-            Event::JailFinePaid { amount, .. } => -*amount,
-            _ => 0,
+            Event::RentBoosted { cost, .. } => (-*cost, -*cost),
+            Event::PropertyMortgaged { value, .. } => (*value, *value),
+            Event::PropertyUnmortgaged { cost, .. } => (-*cost, -*cost),
+            Event::JailFinePaid { player, amount, .. } => {
+                if bankrupted.contains(player) {
+                    (-*amount, 0)
+                } else {
+                    (-*amount, -*amount)
+                }
+            }
+            _ => (0, 0),
         };
+        min_expected += lo;
+        max_expected += hi;
     }
 
-    assert_eq!(
-        after - before,
-        expected_delta,
-        "cash delta mismatch: seed={seed} iteration={iteration} step={step} events={events:?}"
+    let actual = after - before;
+    assert!(
+        actual >= min_expected && actual <= max_expected,
+        "cash delta out of range: seed={seed} iteration={iteration} step={step} actual={actual} expected=[{min_expected}, {max_expected}] events={events:?}"
     );
 }
 

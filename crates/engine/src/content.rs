@@ -152,9 +152,6 @@ pub struct RuleParams {
     pub max_houses_per_property: u8,
     /// Cash floor after liquidation below which a player goes bankrupt.
     pub bankruptcy_threshold: i64,
-    /// When true (default), declining a purchase starts an auction among all
-    /// solvent players instead of leaving the tile with the bank.
-    pub auction_on_decline: bool,
     /// Expropriation cost as a percent of the target's price (ADR-0011);
     /// 0 disables the mechanic. E.g. 200 = pay 2x price to seize a rival's
     /// unimproved property; the former owner is compensated its price.
@@ -188,7 +185,6 @@ impl Default for RuleParams {
             jail_fine: 50,
             max_houses_per_property: 5,
             bankruptcy_threshold: 0,
-            auction_on_decline: true,
             expropriation: 0,
             rent_boost: 0,
             win_full_groups: 0,

@@ -100,7 +100,6 @@ impl RegistryBuilder {
                     rules.max_houses_per_property = (*value).clamp(0, u8::MAX as i64) as u8;
                 }
                 "bankruptcy_threshold" => rules.bankruptcy_threshold = *value,
-                "auction_on_decline" => rules.auction_on_decline = *value != 0,
                 "expropriation" => rules.expropriation = *value,
                 "rent_boost" => rules.rent_boost = *value,
                 "win_full_groups" => rules.win_full_groups = *value,
