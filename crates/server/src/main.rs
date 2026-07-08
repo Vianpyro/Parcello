@@ -69,10 +69,18 @@ struct Args {
 
     /// Default per-turn limit for new rooms (seconds): auto-play the
     /// canonical action (roll/decline/pass/end turn) for the acting player
-    /// after this long without progress. 0 disables. The host can change it
-    /// per room in the lobby (ADR-0015).
-    #[arg(long, env = "PARCELLO_TURN_TIMEOUT", default_value_t = 25)]
+    /// after this long without progress, unless their personal time bank
+    /// covers the overage (ADR-0023). 0 disables. The host can change it per
+    /// room in the lobby (ADR-0015).
+    #[arg(long, env = "PARCELLO_TURN_TIMEOUT", default_value_t = 12)]
     turn_timeout: u64,
+
+    /// Default personal time bank for new rooms (seconds): a connected
+    /// acting seat may overrun `--turn-timeout` by draining this per-match
+    /// reserve, never refilled (ADR-0023). 0 disables (turn limit hard-stops
+    /// with no overrun). The host can change it per room in the lobby.
+    #[arg(long, env = "PARCELLO_TIME_BANK", default_value_t = 45)]
+    time_bank_seconds: u64,
 
     /// Default game length for new rooms (seconds): the game ends and the
     /// richest player (by net worth) wins (ADR-0010). 0 = untimed. The host
@@ -111,6 +119,8 @@ pub struct AppState {
     /// Default timers for new rooms; the host overrides them per room in the
     /// lobby (ADR-0015). `None` = disabled by default.
     pub turn_timeout: Option<std::time::Duration>,
+    /// Default personal time bank for new rooms (ADR-0023). `None` = off.
+    pub time_bank: Option<std::time::Duration>,
     pub game_timeout: Option<std::time::Duration>,
 }
 
@@ -174,6 +184,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(std::time::Duration::from_secs(secs))
         }
     };
+    let time_bank = match args.time_bank_seconds {
+        0 => None,
+        secs => {
+            info!(seconds = secs, "personal time bank enabled");
+            Some(std::time::Duration::from_secs(secs))
+        }
+    };
     let game_timeout = match args.game_timeout {
         0 => None,
         secs => {
@@ -188,6 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         verifier,
         history,
         turn_timeout,
+        time_bank,
         game_timeout,
     };
 

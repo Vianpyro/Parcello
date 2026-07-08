@@ -140,6 +140,7 @@
         <div class="setgrid">
           <label>Game length (min, 0=off)<input id="set_game" type="number" min="0"></label>
           <label>Turn limit (s, 0=off)<input id="set_turn" type="number" min="0"></label>
+          <label>Time bank (s, 0=off)<input id="set_bank" type="number" min="0"></label>
           <label>Starting balance<input id="set_starting_balance" type="number" min="0"></label>
           <label>GO salary<input id="set_go_salary" type="number" min="0"></label>
           <label>Jail fine<input id="set_jail_fine" type="number" min="0"></label>
@@ -218,7 +219,7 @@ const GROUP_COLORS = {
 
 // -- connection state ---------------------------------------------------------
 let ws = null;
-const st = { seat: null, code: null, content: null, view: null, seats: [], gameEndsAt: null };
+const st = { seat: null, code: null, content: null, view: null, seats: [], gameEndsAt: null, timeBankSeconds: null, banks: null, bankEndsAt: null };
 
 function send(cmd) { ws?.send(JSON.stringify({ type: "cmd", cmd })); }
 function log(text) {
@@ -280,6 +281,8 @@ function handle(msg) {
       st.gameEndsAt = deadlineFrom(msg.time_remaining);
       st.turnSeconds = msg.turn_seconds ?? null;
       st.turnEndsAt = deadlineFrom(st.turnSeconds);
+      st.timeBankSeconds = msg.time_bank_seconds ?? null;
+      st.banks = null;
       location.hash = msg.code;
       $("#login").style.display = "none";
       $("#app").style.display = "grid";
@@ -301,12 +304,20 @@ function handle(msg) {
       st.gameEndsAt = deadlineFrom(msg.time_remaining);
       st.turnSeconds = msg.turn_seconds ?? null;
       st.turnEndsAt = deadlineFrom(st.turnSeconds);
+      st.timeBankSeconds = msg.time_bank_seconds ?? null;
+      st.banks = null;
       log("Game started.");
       render();
       break;
     case "update":
       st.view = msg.view;
       st.turnEndsAt = deadlineFrom(st.turnSeconds);
+      st.banks = msg.banks ?? null;
+      // The bank only starts draining once the plain turn window is spent;
+      // until then it shows the flat reserve (ADR-0023).
+      st.bankEndsAt = (st.turnEndsAt && st.banks)
+        ? st.turnEndsAt + (st.banks[st.seat] ?? 0) * 1000
+        : null;
       msg.events.forEach(ev => {
         if (ev.type === "dice_rolled") showDice(ev.d1, ev.d2);
         log(describe(ev));
@@ -387,6 +398,19 @@ function tickCountdown() {
       tel.style.color = secs <= 10 ? "var(--danger)" : "inherit";
     }
   }
+  // Personal time bank (ADR-0023): flat reserve until the turn window
+  // expires, then it drains in real time toward the hard stop.
+  const bel = $("#timebank");
+  if (bel) {
+    if (!st.timeBankSeconds || finished || !st.turnEndsAt) { bel.textContent = ""; }
+    else if (Date.now() < st.turnEndsAt) {
+      bel.textContent = `🏦 ${st.banks?.[st.seat] ?? st.timeBankSeconds}s`;
+    } else if (st.bankEndsAt) {
+      const [secs, mmss] = fmtClock(st.bankEndsAt);
+      bel.textContent = `🏦 ${mmss}`;
+      bel.style.color = secs <= 10 ? "var(--danger)" : "inherit";
+    }
+  }
 }
 setInterval(tickCountdown, 1000);
 
@@ -441,7 +465,7 @@ function buildBoard() {
     center.id = "center";
     // Interior spans the (d-2) x (d-2) inner cells.
     center.style.gridArea = `2 / 2 / ${d} / ${d}`;
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   } else {
     // Non-ring boards (mods): linear fallback, panel below.
@@ -449,7 +473,7 @@ function buildBoard() {
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");
     center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   }
 }
@@ -561,6 +585,7 @@ function renderSettings() {
   const put = (id, val) => { const e = $("#" + id); if (e) { e.value = val; e.disabled = !host; } };
   put("set_game", s.game_seconds ? Math.round(s.game_seconds / 60) : 0);
   put("set_turn", s.turn_seconds ?? 0);
+  put("set_bank", s.time_bank_seconds ?? 0);
   put("set_starting_balance", r.starting_balance);
   put("set_go_salary", r.go_salary);
   put("set_jail_fine", r.jail_fine);
@@ -576,10 +601,11 @@ function renderSettings() {
 
 function applySettings() {
   const n = id => Math.max(0, parseInt($("#" + id).value || "0", 10) || 0);
-  const gameMin = n("set_game"), turnSec = n("set_turn");
+  const gameMin = n("set_game"), turnSec = n("set_turn"), bankSec = n("set_bank");
   ws?.send(JSON.stringify({ type: "configure", settings: {
     game_seconds: gameMin > 0 ? gameMin * 60 : null,
     turn_seconds: turnSec > 0 ? turnSec : null,
+    time_bank_seconds: bankSec > 0 ? bankSec : null,
     rules: {
       starting_balance: n("set_starting_balance"),
       go_salary: n("set_go_salary"),
@@ -679,8 +705,9 @@ function tileMenu(i, evt) {
     actions.push(ts.mortgaged
       ? ["Redeem mortgage", { type: "unmortgage", tile: id }]
       : ["Mortgage", { type: "mortgage", tile: id }]);
-  } else if (ts.owner !== null && prop(i) && rules.expropriation > 0 && ts.houses === 0 && !ts.mortgaged) {
-    // Expropriation (ADR-0011): seize a rival's raw property.
+  } else if (ts.owner !== null && prop(i) && rules.expropriation > 0 && ts.houses === 0 && !ts.mortgaged
+      && myTurn() && v.turn.type === "await_end" && v.players[st.seat].position === i) {
+    // Takeover (ADR-0022): seize a rival's raw property, landing tile only.
     actions.push([`Seize ($${Math.floor(prop(i).price * rules.expropriation / 100)})`, { type: "expropriate", tile: id }]);
   }
   if (!actions.length) return;

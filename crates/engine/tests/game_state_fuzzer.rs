@@ -224,6 +224,9 @@ fn random_asset_command(
             && owner != player
             && !tile_state.mortgaged
             && tile_state.houses == 0
+            // ADR-0022: takeover only applies to the tile just landed on.
+            && matches!(state.turn, TurnPhase::AwaitEnd)
+            && tile == state.players[player].position
         {
             let cost = prop.price * content.rules.expropriation / 100;
             if content.rules.expropriation > 0 && state.players[player].cash >= cost {

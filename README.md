@@ -90,8 +90,11 @@ Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 `--insecure-guest`, `--history <file.db>` (SQLite game logs; omit for
 in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
 canonical action - roll/decline/pass/end turn - for a *connected* player
-who stalls that long; 0 = disabled, the default - a *disconnected* player
-is always skipped after a 30s grace regardless), `--game-timeout <secs>`
+who stalls that long, unless their time bank still covers the overage;
+default 12, 0 = disabled - a *disconnected* player is always skipped after a
+30s grace regardless), `--time-bank-seconds <secs>` (personal per-match
+reserve a connected player draws on to overrun the turn limit, never
+refilled; default 45, 0 = off, ADR-0023), `--game-timeout <secs>`
 (time-box games: at the buzzer the richest player by net worth wins,
 ADR-0010; 0 = off), `--identity-url <jwks-url>`
 (repeatable; accept EdDSA identity tokens from an OIDC provider such as
@@ -281,7 +284,8 @@ returned tiles), resignation, last-player-standing win. Optional time-boxed game
 (`--game-timeout`): at the buzzer the richest player by net worth wins
 (cash + property equity + houses), ADR-0010. Aggressive mods-gated
 mechanics for swingy games: expropriation (seize a rival's unimproved
-property at a premium; the owner is compensated, ADR-0011) and rent boosts
+property at a premium, landing tile only, right after rent, at the end of
+your turn; the owner is compensated, ADR-0011, tightened by ADR-0022) and rent boosts
 (pay to raise an owned tile's rent one step, capped, ADR-0012) - both on by
 default in the base fast board. Multiple win conditions: last player
 standing, richest at the time limit (ADR-0010), and a domination win -
@@ -305,25 +309,30 @@ deck rotation once drawn.
   the room dissolves.
 - A disconnected player's turn is auto-played after a 30s grace so an AFK
   player never stalls the table (they keep their seat and can rejoin). The
-  room's turn limit (default 25s, host-editable, ADR-0015) extends this to
-  connected-but-idle players: a strict auto-skip of the acting seat. Set it
-  to off in the lobby if you want a present-but-slow player never forced.
-  When on, it rides `GameStarted`/`Joined` as `turn_seconds` and clients show
-  a per-turn countdown (reset on each accepted command); absent when off.
+  room's turn limit (default 12s, host-editable, ADR-0015/0023) extends this
+  to connected-but-idle players: a strict auto-skip of the acting seat, unless
+  they still have personal time bank left (default 45s, a per-match reserve
+  that is never refilled and does not apply to a disconnected seat, ADR-0023)
+  - the overage is drained from the bank instead of an immediate auto-skip.
+  Set the turn limit to off in the lobby if you want a present-but-slow
+  player never forced. When on, `GameStarted`/`Joined` carry `turn_seconds`
+  and `time_bank_seconds`, and clients show a per-turn countdown flowing into
+  the bank (reset on each accepted command); absent when off.
 - The host can add bots from the lobby (an "Add bot" button; `addbot` in the
   CLI). Bots are server-driven seats that play the shared autopilot
   heuristic at ~0.8s/move. They fill empty seats but yield to humans: a
   player joining a full room evicts the newest bot instead of being turned
   away (ADR-0014). Removed via "Remove bot" / `rmbot`.
-- The host sets each game's options in the lobby (ADR-0015): the two timers
-  and every rule scalar (starting balance, GO salary, jail fine, max houses,
-  bankruptcy threshold, auctions on/off, expropriation %, rent boost %,
-  domination groups). Edits broadcast live to the lobby; the server clamps
-  every value. New rooms default to a 60-minute game with a 25 s turn limit
-  (strict auto-skip). One server runs many rooms, each with its own settings
-  - no orchestrator needed. `--turn-timeout` / `--game-timeout` set the
+- The host sets each game's options in the lobby (ADR-0015): the three
+  timers (game, turn, time bank) and every rule scalar (starting balance, GO
+  salary, jail fine, max houses, bankruptcy threshold, auctions on/off,
+  expropriation %, rent boost %, domination groups). Edits broadcast live to
+  the lobby; the server clamps every value. New rooms default to a 60-minute
+  game with a 12 s turn limit and a 45 s personal time bank (ADR-0023). One
+  server runs many rooms, each with its own settings - no orchestrator
+  needed. `--turn-timeout` / `--time-bank-seconds` / `--game-timeout` set the
   per-room defaults (0 disables); the host overrides them. CLI:
-  `set <field> <value>` (e.g. `set game 45`, `set turn off`,
+  `set <field> <value>` (e.g. `set game 45`, `set turn off`, `set bank 60`,
   `set expropriation 0`).
 
 ## Deviations from the architecture doc
@@ -341,7 +350,10 @@ worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts;
 0013 domination win (control N full colour groups); 0014 server-side bot
 seats (host-added, yield to humans, shared `bot::decide` heuristic);
 0015 per-room host-editable settings (timers + rules chosen in the lobby,
-clamped server-side; one server runs many independent games).
+clamped server-side; one server runs many independent games); 0022 takeover
+tightened to the landing tile only, at end of turn (amends 0011); 0023
+blitz clock: 12s turns plus a 45s personal time bank, never refilled
+(amends 0015).
 
 ## Roadmap
 

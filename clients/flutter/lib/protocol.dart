@@ -94,11 +94,14 @@ class RuleParams {
 class RoomSettings {
   final int? gameSeconds;
   final int? turnSeconds;
+  /// Personal time bank in seconds (ADR-0023); `null`/0 disables it.
+  final int? timeBankSeconds;
   final RuleParams rules;
 
   RoomSettings.fromJson(Map<String, dynamic> j)
       : gameSeconds = j['game_seconds'] as int?,
         turnSeconds = j['turn_seconds'] as int?,
+        timeBankSeconds = j['time_bank_seconds'] as int?,
         rules = RuleParams.fromJson(j['rules'] as Map<String, dynamic>);
 }
 

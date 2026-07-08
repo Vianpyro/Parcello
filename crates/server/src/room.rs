@@ -91,6 +91,7 @@ pub async fn create_room(
     content: Arc<ResolvedContent>,
     history: Arc<dyn GameHistory>,
     turn_timeout: Option<Duration>,
+    time_bank: Option<Duration>,
     game_timeout: Option<Duration>,
 ) -> Result<String, String> {
     let engine = Engine::new(Arc::new(content.content.clone()))
@@ -112,6 +113,7 @@ pub async fn create_room(
     let settings = RoomSettings {
         game_seconds: game_timeout.map(|d| d.as_secs()),
         turn_seconds: turn_timeout.map(|d| d.as_secs()),
+        time_bank_seconds: time_bank.map(|d| d.as_secs()),
         rules: content.content.rules.clone(),
     };
     let room = Room {
@@ -124,6 +126,7 @@ pub async fn create_room(
         settings,
         game_deadline: None,
         bot_counter: 0,
+        banks: Vec::new(),
     };
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
@@ -185,6 +188,7 @@ fn token_eq(a: &str, b: &str) -> bool {
 fn clamp_settings(mut s: RoomSettings) -> RoomSettings {
     s.game_seconds = s.game_seconds.map(|v| v.clamp(60, 86_400));
     s.turn_seconds = s.turn_seconds.map(|v| v.clamp(5, 3_600));
+    s.time_bank_seconds = s.time_bank_seconds.map(|v| v.clamp(0, 600));
     let r = &mut s.rules;
     r.starting_balance = r.starting_balance.clamp(0, 1_000_000);
     r.go_salary = r.go_salary.clamp(0, 100_000);
@@ -236,6 +240,11 @@ struct Room {
     /// Monotonic counter for bot seat names ("Bot 1", "Bot 2", ...), so a
     /// removed-then-readded bot never reuses a `player_id`.
     bot_counter: usize,
+    /// Personal time bank remaining per seat, in seconds (ADR-0023). Rebuilt
+    /// from `settings.time_bank_seconds` at every `start_game`; never
+    /// refilled during a match. Bots never drain it (`Seat.tx` is always
+    /// `None` for them, same signal `afk_deadline` uses).
+    banks: Vec<u64>,
 }
 
 impl Room {
@@ -265,7 +274,19 @@ impl Room {
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
-                    last_activity = tokio::time::Instant::now();
+                    let now = tokio::time::Instant::now();
+                    last_activity = now;
+                    // Snapshot who was acting and for how long BEFORE
+                    // dispatch, since applying a game command can advance
+                    // whose turn it is. Drain speculatively so a Game
+                    // command's own Update (built inside handle_game,
+                    // below) already reflects the spend; refunded after if
+                    // the command turns out rejected (which sends
+                    // Rejected, not Update, so the brief mutation is never
+                    // observed) - ADR-0023.
+                    let drain_seat = self.acting_seat();
+                    let elapsed = now.saturating_duration_since(last_progress);
+                    let drained = self.drain_bank(drain_seat, elapsed);
                     let advanced = match cmd {
                         RoomCmd::Join { identity, reconnect, tx, reply } => {
                             let result = self.handle_join(identity, reconnect, tx);
@@ -301,12 +322,26 @@ impl Room {
                             false
                         }
                     };
-                    // Any accepted command resets the turn clock.
+                    // Any accepted command resets the turn clock and keeps
+                    // the drain above; a rejected one gets it refunded.
                     if advanced {
                         last_progress = tokio::time::Instant::now();
+                    } else {
+                        self.refund_bank(drain_seat, drained);
                     }
                 }
                 _ = afk, if afk_armed => {
+                    // The sleep target already covers turn_seconds plus the
+                    // whole remaining bank, so firing means it's fully
+                    // spent (ADR-0023) - zero it, but only for a connected
+                    // seat: a disconnected seat is skipped by
+                    // DISCONNECTED_GRACE alone and keeps its bank.
+                    if let Some(seat) = self.acting_seat()
+                        && self.seats.get(seat).is_some_and(|s| s.tx.is_some())
+                        && let Some(remaining) = self.banks.get_mut(seat)
+                    {
+                        *remaining = 0;
+                    }
                     if let Some((player, kind)) = self.afk_command() {
                         info!(room = %self.code, player = %player, action = ?kind,
                               "turn timeout, playing canonical action");
@@ -354,15 +389,54 @@ impl Room {
     /// How long the acting seat may stall before its canonical action is
     /// auto-played, or `None` for no limit. A disconnected seat (truly AFK)
     /// is skipped after `DISCONNECTED_GRACE` whether or not a turn limit is
-    /// set; a connected but slow player only faces the room's turn limit.
+    /// set - the personal time bank does not apply to them (ADR-0023,
+    /// pulling the plug earns no extra time). A connected but slow player
+    /// gets the room's turn limit extended by whatever bank they have left.
     fn afk_deadline(&self) -> Option<Duration> {
         let seat = self.acting_seat()?;
         let turn_limit = self.settings.turn_seconds.map(Duration::from_secs);
         let connected = self.seats.get(seat).is_some_and(|s| s.tx.is_some());
         if connected {
-            turn_limit
+            let bank = Duration::from_secs(self.banks.get(seat).copied().unwrap_or(0));
+            turn_limit.map(|t| t + bank)
         } else {
             Some(turn_limit.map_or(DISCONNECTED_GRACE, |t| t.min(DISCONNECTED_GRACE)))
+        }
+    }
+
+    /// Drains `seat`'s personal time bank by however long it overran the
+    /// plain turn window (ADR-0023) and returns the amount actually taken,
+    /// for a caller that may need to `refund_bank` it back. A no-op (returns
+    /// 0) with no turn limit, no bank, no overage, or a disconnected seat
+    /// (whose timeout is governed by `DISCONNECTED_GRACE` alone).
+    fn drain_bank(&mut self, seat: Option<usize>, elapsed: Duration) -> u64 {
+        let Some(seat) = seat else { return 0 };
+        if self.seats.get(seat).is_none_or(|s| s.tx.is_none()) {
+            return 0;
+        }
+        let Some(turn_limit) = self.settings.turn_seconds.map(Duration::from_secs) else {
+            return 0;
+        };
+        let overage = elapsed.saturating_sub(turn_limit).as_secs();
+        let Some(remaining) = self.banks.get_mut(seat) else {
+            return 0;
+        };
+        let drained = overage.min(*remaining);
+        *remaining -= drained;
+        drained
+    }
+
+    /// Undoes a `drain_bank` call whose command turned out rejected -
+    /// rejections never mutate (the codebase-wide invariant), and that
+    /// includes this session-layer side effect too.
+    fn refund_bank(&mut self, seat: Option<usize>, amount: u64) {
+        if amount == 0 {
+            return;
+        }
+        if let Some(seat) = seat
+            && let Some(remaining) = self.banks.get_mut(seat)
+        {
+            *remaining += amount;
         }
     }
 
@@ -534,6 +608,7 @@ impl Room {
             reconnect: Some(self.seats[seat_index].reconnect.clone()),
             time_remaining: self.time_remaining_secs(),
             turn_seconds: self.settings.turn_seconds,
+            time_bank_seconds: self.configured_time_bank(),
             settings: self.settings.clone(),
         };
         if tx.send(joined).is_err() {
@@ -638,15 +713,20 @@ impl Room {
         for seat in &mut self.seats {
             seat.feedback_given = false;
         }
+        // Rebuilt from scratch, not extended: seat renumbering across
+        // PlayAgain must never carry a stale bank (ADR-0023).
+        self.banks = vec![self.settings.time_bank_seconds.unwrap_or(0); self.seats.len()];
         info!(room = %self.code, players = self.seats.len(), "game started");
 
         let remaining = self.time_remaining_secs();
         let turn_seconds = self.settings.turn_seconds;
+        let time_bank_seconds = self.configured_time_bank();
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::GameStarted {
                 view: Box::new(ClientView::for_seat(&state, seat)),
                 time_remaining: remaining,
                 turn_seconds,
+                time_bank_seconds,
             })
             .collect();
         self.phase = Phase::Active(state);
@@ -662,6 +742,19 @@ impl Room {
         })
     }
 
+    /// The configured time bank, normalized so `Some(0)` (host explicitly
+    /// set it to zero via `Configure`) and `None` both read as "disabled"
+    /// everywhere this rides the wire (ADR-0023).
+    fn configured_time_bank(&self) -> Option<u64> {
+        self.settings.time_bank_seconds.filter(|&s| s > 0)
+    }
+
+    /// Live per-seat remaining bank for `Update.banks`; `None` when the
+    /// room has no time bank configured.
+    fn banks_field(&self) -> Option<Vec<u64>> {
+        self.configured_time_bank().map(|_| self.banks.clone())
+    }
+
     /// Game clock expired: the richest player wins by net worth (ADR-0010).
     fn handle_game_timeout(&mut self) {
         let Phase::Active(state) = &self.phase else {
@@ -671,10 +764,12 @@ impl Room {
         let GamePhase::Finished { winner } = next.phase else {
             return;
         };
+        let banks = self.banks_field();
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::Update {
                 events: events.clone(), // TimeUp is public
                 view: Box::new(ClientView::for_seat(&next, seat)),
+                banks: banks.clone(),
             })
             .collect();
         self.phase = Phase::Finished(next);
@@ -719,6 +814,7 @@ impl Room {
                 };
                 // One view + event feed per seat: trade offers and their
                 // lifecycle events reach only the two parties (ADR-0007).
+                let banks = self.banks_field();
                 let msgs: Vec<ServerMessage> = (0..self.seats.len())
                     .map(|seat| ServerMessage::Update {
                         events: events
@@ -727,6 +823,7 @@ impl Room {
                             .cloned()
                             .collect(),
                         view: Box::new(ClientView::for_seat(&next, seat)),
+                        banks: banks.clone(),
                     })
                     .collect();
                 self.phase = match finished_winner {
@@ -887,7 +984,7 @@ mod tests {
         let rooms = Rooms::default();
         let memory = Arc::new(MemoryHistory::new());
         let history: Arc<dyn GameHistory> = memory.clone();
-        let code = create_room(&rooms, content, history, None, None)
+        let code = create_room(&rooms, content, history, None, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -975,7 +1072,7 @@ mod tests {
         );
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
-        let code = create_room(&rooms, content, history, None, None)
+        let code = create_room(&rooms, content, history, None, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -1064,7 +1161,7 @@ mod tests {
         );
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
-        let code = create_room(&rooms, content, history, None, None)
+        let code = create_room(&rooms, content, history, None, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -1122,7 +1219,7 @@ mod tests {
         );
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
-        let code = create_room(&rooms, content, history, None, None)
+        let code = create_room(&rooms, content, history, None, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -1169,7 +1266,7 @@ mod tests {
             let rx = &mut client_rxs[seat];
             loop {
                 match rx.try_recv() {
-                    Ok(ServerMessage::Update { events, view }) => break (events, view),
+                    Ok(ServerMessage::Update { events, view, .. }) => break (events, view),
                     Ok(_) => continue,
                     Err(_) => panic!("seat {seat} never received an Update"),
                 }
@@ -1217,7 +1314,7 @@ mod tests {
         let rooms = Rooms::default();
         let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
         // No --turn-timeout: the smart grace alone must skip the AFK seat.
-        let code = create_room(&rooms, content, history, None, None)
+        let code = create_room(&rooms, content, history, None, None, None)
             .await
             .expect("room created");
         let room = rooms.read().await.get(&code).cloned().expect("room handle");
@@ -1291,6 +1388,7 @@ mod tests {
             &rooms,
             content,
             history,
+            None,
             None,
             Some(Duration::from_secs(60)),
         )
@@ -1389,6 +1487,7 @@ mod tests {
             content,
             history,
             Some(Duration::from_secs(30)),
+            Some(Duration::from_secs(45)),
             None,
         )
         .await
@@ -1425,18 +1524,20 @@ mod tests {
                 if let ServerMessage::GameStarted {
                     turn_seconds,
                     time_remaining,
+                    time_bank_seconds,
                     ..
                 } = msg
                 {
-                    return (turn_seconds, time_remaining);
+                    return (turn_seconds, time_remaining, time_bank_seconds);
                 }
             }
-            (None, None)
+            (None, None, None)
         })
         .await
         .expect("GameStarted must arrive");
         assert_eq!(started.0, Some(30), "turn timer must reach the client");
         assert_eq!(started.1, None, "untimed game carries no game clock");
+        assert_eq!(started.2, Some(45), "time bank must reach the client");
     }
 
     fn base_content() -> Arc<ResolvedContent> {
@@ -1454,6 +1555,7 @@ mod tests {
         let settings = RoomSettings {
             game_seconds: None,
             turn_seconds: None,
+            time_bank_seconds: None,
             rules: content.content.rules.clone(),
         };
         Room {
@@ -1466,6 +1568,7 @@ mod tests {
             settings,
             game_deadline: None,
             bot_counter: 0,
+            banks: Vec::new(),
         }
     }
 
@@ -1581,11 +1684,13 @@ mod tests {
         s.rules.max_houses_per_property = 200;
         s.game_seconds = Some(1); // below the 60s floor
         s.turn_seconds = Some(25);
+        s.time_bank_seconds = Some(10_000); // above the 600s ceiling
         room.handle_configure("guest:host", s);
         assert_eq!(room.settings.rules.starting_balance, 1_000_000, "clamped");
         assert_eq!(room.settings.rules.max_houses_per_property, 5, "house cap");
         assert_eq!(room.settings.game_seconds, Some(60), "game floor");
         assert_eq!(room.settings.turn_seconds, Some(25));
+        assert_eq!(room.settings.time_bank_seconds, Some(600), "bank ceiling");
     }
 
     /// The game starts with the host's chosen rules: a rebuilt engine deals
@@ -1624,6 +1729,7 @@ mod tests {
             content,
             history,
             Some(Duration::from_secs(30)),
+            None, // no time bank: a plain hard stop at the turn limit
             None,
         )
         .await
@@ -1668,5 +1774,151 @@ mod tests {
         .await
         .expect("an update must arrive before the mock-clock timeout");
         assert!(auto_rolled, "AFK timer should roll for the idle player");
+    }
+
+    /// Setup shared by the time-bank tests below: a two-player room with the
+    /// given turn limit and bank, started and ready for seat 0 (alice) to
+    /// act.
+    async fn started_room_with_bank(
+        turn_timeout: Option<Duration>,
+        time_bank: Option<Duration>,
+    ) -> (
+        mpsc::Sender<RoomCmd>,
+        Vec<mpsc::UnboundedReceiver<ServerMessage>>,
+    ) {
+        let content = Arc::new(
+            parcello_mods::resolve(
+                Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../mods")),
+                &["base".to_string()],
+            )
+            .expect("base mod loads"),
+        );
+        let rooms = Rooms::default();
+        let history: Arc<dyn GameHistory> = Arc::new(MemoryHistory::new());
+        let code = create_room(&rooms, content, history, turn_timeout, time_bank, None)
+            .await
+            .expect("room created");
+        let room = rooms.read().await.get(&code).cloned().expect("room handle");
+
+        let mut client_rxs = Vec::new();
+        for name in ["alice", "bob"] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let (reply, joined) = oneshot::channel();
+            room.send(RoomCmd::Join {
+                identity: Identity {
+                    player_id: format!("guest:{name}"),
+                    name: name.to_string(),
+                    spoofable: true,
+                },
+                reconnect: None,
+                tx,
+                reply,
+            })
+            .await
+            .expect("room task alive");
+            joined.await.expect("reply sent").expect("join accepted");
+            client_rxs.push(rx);
+        }
+        room.send(RoomCmd::Start {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+        (room, client_rxs)
+    }
+
+    /// A connected seat that overruns the plain turn window but acts before
+    /// its bank is dry is NOT auto-played; the overage is permanently
+    /// deducted from its bank instead (ADR-0023).
+    #[tokio::test(start_paused = true)]
+    async fn time_bank_absorbs_overrun_without_auto_play() {
+        let (room, mut client_rxs) =
+            started_room_with_bank(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
+                .await;
+
+        // Alice stalls 7s (5s over the turn limit, well inside the 20s
+        // bank) then rolls herself - the bank absorbs the 2s overage.
+        tokio::time::sleep(Duration::from_secs(7)).await;
+        room.send(RoomCmd::Game {
+            player_id: "guest:alice".into(),
+            cmd: CommandKind::Roll,
+        })
+        .await
+        .expect("room task alive");
+
+        let (rolled_herself, banks) = tokio::time::timeout(Duration::from_secs(60), async {
+            while let Some(msg) = client_rxs[1].recv().await {
+                if let ServerMessage::Update { events, banks, .. } = msg {
+                    let rolled = events.iter().any(|e| matches!(e, Event::DiceRolled { .. }));
+                    if rolled {
+                        return (true, banks);
+                    }
+                }
+            }
+            (false, None)
+        })
+        .await
+        .expect("an update must arrive");
+        assert!(rolled_herself, "alice's own roll must be accepted");
+        assert_eq!(
+            banks,
+            Some(vec![18, 20]),
+            "alice's bank drains by the 2s overage; bob's is untouched"
+        );
+    }
+
+    /// Once the plain turn window AND the whole bank are exhausted, the
+    /// canonical action auto-plays and the bank reads zero (ADR-0023).
+    #[tokio::test(start_paused = true)]
+    async fn time_bank_hard_stops_when_exhausted() {
+        let (_room, mut client_rxs) =
+            started_room_with_bank(Some(Duration::from_secs(5)), Some(Duration::from_secs(3)))
+                .await;
+
+        let (auto_rolled, banks) = tokio::time::timeout(Duration::from_secs(300), async {
+            while let Some(msg) = client_rxs[1].recv().await {
+                if let ServerMessage::Update { events, banks, .. } = msg
+                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                {
+                    return (true, banks);
+                }
+            }
+            (false, None)
+        })
+        .await
+        .expect("an update must arrive before the mock-clock timeout");
+        assert!(auto_rolled, "AFK timer should roll once the bank is dry");
+        assert_eq!(banks, Some(vec![0, 3]), "alice's bank is fully spent");
+    }
+
+    /// A disconnected seat is skipped after `DISCONNECTED_GRACE` alone; the
+    /// time bank never extends that (ADR-0023: pulling the plug earns no
+    /// extra time).
+    #[tokio::test(start_paused = true)]
+    async fn disconnected_seat_ignores_the_time_bank() {
+        let (room, mut client_rxs) = started_room_with_bank(
+            Some(Duration::from_secs(5)),
+            Some(Duration::from_secs(1000)),
+        )
+        .await;
+        room.send(RoomCmd::Disconnect {
+            player_id: "guest:alice".into(),
+        })
+        .await
+        .expect("room task alive");
+
+        let auto_rolled = tokio::time::timeout(Duration::from_secs(120), async {
+            while let Some(msg) = client_rxs[1].recv().await {
+                if let ServerMessage::Update { events, .. } = msg
+                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("must roll within DISCONNECTED_GRACE, far short of the 1000s bank");
+        assert!(auto_rolled, "a disconnected seat must not draw on its bank");
     }
 }

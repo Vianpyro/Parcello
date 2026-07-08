@@ -638,8 +638,11 @@ impl<'e> Exec<'e> {
     /// Seize a rival's unimproved, unmortgaged property for a premium
     /// (ADR-0011). The former owner is compensated (min of price and what
     /// was paid); the bank keeps any premium above that.
+    /// Takeover happens on the landing tile only (ADR-0022): after rent has
+    /// resolved, at the end of the acting player's own turn, on the exact
+    /// tile they are standing on.
     fn expropriate(&mut self, p: usize, tile_id: &str) -> Result<(), CommandError> {
-        if !matches!(self.st.turn, TurnPhase::AwaitRoll | TurnPhase::AwaitEnd) {
+        if !matches!(self.st.turn, TurnPhase::AwaitEnd) {
             return Err(CommandError::WrongPhase);
         }
         let pct = self.content.rules.expropriation;
@@ -652,6 +655,9 @@ impl<'e> Exec<'e> {
             .ok_or_else(|| CommandError::UnknownTile {
                 tile: tile_id.to_string(),
             })?;
+        if self.st.players[p].position != tile {
+            return Err(CommandError::NotOnTile);
+        }
         let prop = self
             .content
             .property(tile)

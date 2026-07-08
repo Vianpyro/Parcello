@@ -418,7 +418,10 @@ class GameScreen extends StatelessWidget {
             def.isProperty &&
             expro > 0 &&
             ts.houses == 0 &&
-            !ts.mortgaged) {
+            !ts.mortgaged &&
+            s.myTurn &&
+            v.turn.type == 'await_end' &&
+            v.players[s.seat!].position == i) {
           items.add(ListTile(
               title: Text('Seize (\$${price * expro ~/ 100})'),
               subtitle: const Text('take this tile from its owner'),
@@ -468,6 +471,15 @@ class _CenterPanel extends StatelessWidget {
             _Countdown(
                 endsAt: s.turnEndsAt!,
                 icon: Icons.hourglass_bottom,
+                warnSecs: 10),
+          ],
+          // Personal time bank (ADR-0023): counts down to the hard stop
+          // (turn window + whatever reserve is left), never refilled.
+          if (s.bankEndsAt != null && s.view?.finished == false) ...[
+            const SizedBox(width: 6),
+            _Countdown(
+                endsAt: s.bankEndsAt!,
+                icon: Icons.account_balance,
                 warnSecs: 10),
           ],
         ]),
@@ -1077,6 +1089,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
   static const _fields = [
     ('game', 'Game length (min, 0=off)'),
     ('turn', 'Turn limit (s, 0=off)'),
+    ('bank', 'Time bank (s, 0=off)'),
     ('starting_balance', 'Starting balance'),
     ('go_salary', 'GO salary'),
     ('jail_fine', 'Jail fine'),
@@ -1098,6 +1111,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
     _c = {
       'game': TextEditingController(text: '${mins(s.gameSeconds)}'),
       'turn': TextEditingController(text: '${s.turnSeconds ?? 0}'),
+      'bank': TextEditingController(text: '${s.timeBankSeconds ?? 0}'),
       'starting_balance': TextEditingController(text: '${r.startingBalance}'),
       'go_salary': TextEditingController(text: '${r.goSalary}'),
       'jail_fine': TextEditingController(text: '${r.jailFine}'),
@@ -1122,10 +1136,11 @@ class _SettingsPanelState extends State<_SettingsPanel> {
   int _n(String k) => int.tryParse(_c[k]!.text.trim()) ?? 0;
 
   void _apply() {
-    final gameMin = _n('game'), turnSec = _n('turn');
+    final gameMin = _n('game'), turnSec = _n('turn'), bankSec = _n('bank');
     widget.s.configure({
       'game_seconds': gameMin > 0 ? gameMin * 60 : null,
       'turn_seconds': turnSec > 0 ? turnSec : null,
+      'time_bank_seconds': bankSec > 0 ? bankSec : null,
       'rules': {
         'starting_balance': _n('starting_balance'),
         'go_salary': _n('go_salary'),
@@ -1161,7 +1176,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
   String _summary(RoomSettings s) {
     final g = s.gameSeconds == null ? 'off' : '${s.gameSeconds! ~/ 60}min';
     final t = s.turnSeconds == null ? 'off' : '${s.turnSeconds}s';
-    return 'game $g - turn $t';
+    final b = s.timeBankSeconds == null ? 'off' : '${s.timeBankSeconds}s';
+    return 'game $g - turn $t - bank $b';
   }
 
   List<Widget> _hostFields() => [
@@ -1201,6 +1217,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
     final rows = <(String, String)>[
       ('Game length', s.gameSeconds == null ? 'off' : '${s.gameSeconds! ~/ 60} min'),
       ('Turn limit', s.turnSeconds == null ? 'off' : '${s.turnSeconds} s'),
+      ('Time bank', s.timeBankSeconds == null ? 'off' : '${s.timeBankSeconds} s'),
       ('Starting balance', '\$${r.startingBalance}'),
       ('GO salary', '\$${r.goSalary}'),
       ('Jail fine', '\$${r.jailFine}'),

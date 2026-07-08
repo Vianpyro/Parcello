@@ -84,6 +84,14 @@ class GameSession extends ChangeNotifier {
   int? turnSeconds;
   DateTime? turnEndsAt;
 
+  /// Personal time bank in seconds (ADR-0023); null when off. `banks` is the
+  /// live per-seat remaining amount from the latest Update; `bankEndsAt` is
+  /// derived from it and only starts counting down once `turnEndsAt` passes
+  /// - the bank is a flat reserve until the plain turn window is spent.
+  int? timeBankSeconds;
+  List<int>? banks;
+  DateTime? bankEndsAt;
+
   /// Latest dice roll for the center-of-board display. `diceSeq` bumps on
   /// every roll so the overlay re-triggers even on a repeated value.
   int diceSeq = 0;
@@ -280,6 +288,8 @@ class GameSession extends ChangeNotifier {
         gameEndsAt = _deadlineFrom(msg['time_remaining']);
         turnSeconds = msg['turn_seconds'] as int?;
         turnEndsAt = _deadlineFrom(turnSeconds);
+        timeBankSeconds = msg['time_bank_seconds'] as int?;
+        banks = null;
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
@@ -297,11 +307,19 @@ class GameSession extends ChangeNotifier {
         gameEndsAt = _deadlineFrom(msg['time_remaining']);
         turnSeconds = msg['turn_seconds'] as int?;
         turnEndsAt = _deadlineFrom(turnSeconds);
+        timeBankSeconds = msg['time_bank_seconds'] as int?;
+        banks = null;
         sfx.gameStart();
         _log('Game started.');
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         turnEndsAt = _deadlineFrom(turnSeconds);
+        banks = (msg['banks'] as List?)?.cast<int>();
+        // The bank only starts draining once the plain turn window is
+        // spent; until then it shows the flat reserve (ADR-0023).
+        bankEndsAt = (turnEndsAt != null && banks != null && seat != null)
+            ? turnEndsAt!.add(Duration(seconds: banks![seat!]))
+            : null;
         for (final e in msg['events'] as List) {
           final ev = e as Map<String, dynamic>;
           if (ev['type'] == 'dice_rolled') {

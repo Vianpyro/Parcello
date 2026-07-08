@@ -218,29 +218,27 @@ impl Bot<'_> {
         Some(CommandKind::BoostRent { tile: id })
     }
 
+    /// Takeover only applies to the tile the bot just landed on (ADR-0022),
+    /// so unlike the other asset actions this checks a single tile instead
+    /// of scanning the board.
     fn expropriate_group_completer(&self) -> Option<CommandKind> {
-        if self.content.rules.expropriation <= 0 {
+        if self.content.rules.expropriation <= 0 || !matches!(self.view.turn, TurnPhase::AwaitEnd) {
             return None;
         }
-        let (_, id) = self
-            .content
-            .board
-            .iter()
-            .enumerate()
-            .filter_map(|(i, def)| {
-                let prop = self.content.property(i)?;
-                let owner = self.view.tiles[i].owner?;
-                let cost = prop.price * self.content.rules.expropriation / 100;
-                (owner != self.me
-                    && !self.view.players[owner].bankrupt
-                    && !self.view.tiles[i].mortgaged
-                    && self.view.tiles[i].houses == 0
-                    && self.cash_after(cost) >= BUILD_RESERVE
-                    && self.completes_group(i))
-                .then_some((i, def.id.clone()))
-            })
-            .max_by_key(|&(i, _)| self.tile_priority(i))?;
-        Some(CommandKind::Expropriate { tile: id })
+        let i = self.view.players[self.me].position;
+        let def = self.content.board.get(i)?;
+        let prop = self.content.property(i)?;
+        let owner = self.view.tiles[i].owner?;
+        let cost = prop.price * self.content.rules.expropriation / 100;
+        (owner != self.me
+            && !self.view.players[owner].bankrupt
+            && !self.view.tiles[i].mortgaged
+            && self.view.tiles[i].houses == 0
+            && self.cash_after(cost) >= BUILD_RESERVE
+            && self.completes_group(i))
+        .then(|| CommandKind::Expropriate {
+            tile: def.id.clone(),
+        })
     }
 
     fn owned_properties(&self) -> impl Iterator<Item = (usize, String)> + '_ {
@@ -640,6 +638,7 @@ mod tests {
         let mut v = advanced_view(1000, TurnPhase::AwaitEnd);
         v.tiles[1].owner = Some(0);
         v.tiles[2].owner = Some(1);
+        v.players[0].position = 2; // landed on "b", the rival tile
         assert!(matches!(
             decide(&c, &v, 0),
             Some(CommandKind::Expropriate { tile }) if tile == "b"
@@ -647,6 +646,21 @@ mod tests {
 
         v.tiles[1].owner = None;
         assert!(matches!(decide(&c, &v, 0), Some(CommandKind::EndTurn)));
+    }
+
+    #[test]
+    fn does_not_seize_off_the_landing_tile() {
+        // ADR-0022: takeover only applies to the tile just landed on, even
+        // when a rival tile elsewhere would complete a group.
+        let c = advanced_content();
+        let mut v = advanced_view(1000, TurnPhase::AwaitEnd);
+        v.tiles[1].owner = Some(0);
+        v.tiles[2].owner = Some(1);
+        v.players[0].position = 0; // landed on "go", not on "b"
+        assert!(!matches!(
+            decide(&c, &v, 0),
+            Some(CommandKind::Expropriate { .. })
+        ));
     }
 
     #[test]

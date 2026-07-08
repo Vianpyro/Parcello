@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.name.as_deref().unwrap_or("(identity token)")
     );
     println!(
-        "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | seize <t> | boost <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
+        "commands: start | roll | buy | no | bid <n> | pass | build <t> | sell <t> | seize <t> (landing tile only, end of turn) | boost <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
     );
     println!(
         "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
@@ -258,6 +258,7 @@ fn apply_setting(s: &mut RoomSettings, field: &str, value: &str) -> Option<()> {
     match field {
         "game" => s.game_seconds = opt_secs(value)?,
         "turn" => s.turn_seconds = opt_secs(value)?,
+        "bank" => s.time_bank_seconds = opt_secs(value)?,
         "starting_balance" => r.starting_balance = value.parse().ok()?,
         "go_salary" => r.go_salary = value.parse().ok()?,
         "jail_fine" => r.jail_fine = value.parse().ok()?,
@@ -302,6 +303,7 @@ impl Ctx {
                 reconnect,
                 time_remaining,
                 turn_seconds,
+                time_bank_seconds,
                 settings,
             } => {
                 self.my_seat = Some(seat);
@@ -316,6 +318,9 @@ impl Ctx {
                 }
                 if let Some(secs) = turn_seconds {
                     println!("* turn timer: {secs}s per turn");
+                }
+                if let Some(secs) = time_bank_seconds {
+                    println!("* time bank: {secs}s personal reserve, never refilled");
                 }
                 self.print_lobby(&players);
                 self.print_settings();
@@ -338,6 +343,7 @@ impl Ctx {
                 view,
                 time_remaining,
                 turn_seconds,
+                time_bank_seconds,
             } => {
                 println!("* game started");
                 if let Some(secs) = time_remaining {
@@ -346,12 +352,25 @@ impl Ctx {
                 if let Some(secs) = turn_seconds {
                     println!("* turn timer: {secs}s per turn");
                 }
+                if let Some(secs) = time_bank_seconds {
+                    println!("* time bank: {secs}s personal reserve, never refilled");
+                }
                 self.print_view(&view);
                 self.view = Some(view);
             }
-            ServerMessage::Update { events, view } => {
+            ServerMessage::Update {
+                events,
+                view,
+                banks,
+            } => {
                 for event in &events {
                     println!("  {}", self.describe(event));
+                }
+                if let Some(banks) = banks
+                    && let Some(seat) = self.my_seat
+                    && let Some(&remaining) = banks.get(seat)
+                {
+                    println!("  (time bank: {remaining}s left)");
                 }
                 self.print_view(&view);
                 self.view = Some(view);
@@ -386,11 +405,12 @@ impl Ctx {
         let r = &s.rules;
         let secs = |v: Option<u64>| v.map_or("off".to_string(), |n| format!("{n}s"));
         println!(
-            "* settings: game={} turn={} | starting_balance={} go_salary={} jail_fine={} \
+            "* settings: game={} turn={} bank={} | starting_balance={} go_salary={} jail_fine={} \
              max_houses={} bankruptcy_threshold={} auction_on_decline={} expropriation={} \
              rent_boost={} win_full_groups={}",
             secs(s.game_seconds),
             secs(s.turn_seconds),
+            secs(s.time_bank_seconds),
             r.starting_balance,
             r.go_salary,
             r.jail_fine,
@@ -446,7 +466,10 @@ impl Ctx {
                         view.current,
                         format!("buy | no ({})", self.tile_name(*tile)),
                     ),
-                    TurnPhase::AwaitEnd => (view.current, "end (or build <tile_id>)".to_string()),
+                    TurnPhase::AwaitEnd => (
+                        view.current,
+                        "end (or build/seize <tile_id> on the tile you're standing on)".to_string(),
+                    ),
                     TurnPhase::Auction {
                         tile,
                         high_bid,

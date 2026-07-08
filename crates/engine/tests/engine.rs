@@ -702,6 +702,9 @@ fn expropriation_transfers_and_compensates() {
     let engine = engine_with_rules(&[], |r| r.expropriation = 200);
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)
+    // Takeover only fires on the landing tile, at end of turn (ADR-0022).
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 2;
 
     let (st, ev) = step(
         &engine,
@@ -733,6 +736,7 @@ fn expropriation_is_gated() {
     let engine = engine_with(plain_board(), &[]);
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1);
+    st.turn = TurnPhase::AwaitEnd;
     assert_eq!(
         engine
             .apply(
@@ -748,8 +752,41 @@ fn expropriation_is_gated() {
         CommandError::ExpropriationDisabled
     );
 
+    // Wrong phase / off the landing tile reject before anything else.
     let engine = engine_with_rules(&[], |r| r.expropriation = 200);
     let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1);
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Expropriate {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::WrongPhase
+    );
+    st.turn = TurnPhase::AwaitEnd;
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Expropriate {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::NotOnTile,
+        "p0 is still at position 0, not on ave_a"
+    );
+    st.players[0].position = 2;
     // Own tile, improved tile, and broke seizer all reject.
     st.tiles[2].owner = Some(0);
     assert_eq!(
@@ -906,6 +943,8 @@ fn win_by_controlling_full_groups() {
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0);
     st.tiles[6].owner = Some(1);
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 6;
     let (st, ev) = step(
         &engine,
         &st,
@@ -934,6 +973,8 @@ fn group_win_is_off_by_default() {
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0);
     st.tiles[6].owner = Some(1);
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 6;
     let (st, ev) = step(
         &engine,
         &st,
@@ -946,6 +987,32 @@ fn group_win_is_off_by_default() {
     );
     assert!(!ev.iter().any(|e| matches!(e, Event::WonByGroups { .. })));
     assert_eq!(st.phase, GamePhase::Active);
+}
+
+#[test]
+fn expropriation_requires_landing_on_the_tile() {
+    // Rival-owned, unimproved, unmortgaged, and otherwise perfectly legal -
+    // but the seizer is standing elsewhere (ADR-0022: takeover only applies
+    // to the tile just landed on).
+    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1);
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 5;
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::Expropriate {
+                        tile: "ave_a".into()
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::NotOnTile
+    );
 }
 
 #[test]

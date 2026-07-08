@@ -15,7 +15,10 @@ Parcello's architecture.
 **Done so far (2026-07):** the default `mods/base` is now a 32-tile fast
 board (9x9 ring, no Community Chest, two resorts instead of four stations,
 slightly less starting cash); the 40-tile Monopoly-like board moved to
-`mods/classic`; the clients render any `4*(d-1)` square ring. The rest of
+`mods/classic`; the clients render any `4*(d-1)` square ring. V2 build
+order step 1 also landed: the blitz clock (12 s turns, 45 s personal time
+bank, ADR-0023) and landing-only takeover legality (ADR-0022, the
+building-liquidation half still waits on step 2's pools). The rest of
 this note is still ahead. The remaining engine mechanics (below) are what
 make it genuinely *Business Tour* rather than "short Monopoly".
 
@@ -49,9 +52,12 @@ Build order (each step keeps `cargo test --workspace --locked` green
 and updates web + CLI + Flutter + bot together; every step is a
 protocol break, so version accordingly):
 
-1. ADR-0023 server defaults (12 s turns) + ADR-0022 landing-only
-   legality - both run on the current engine.
-2. ADR-0019 pools + the building-liquidation half of ADR-0022 (they
+1. **DONE (2026-07).** ADR-0023 server defaults (12 s turns + a 45 s
+   personal time bank, never refilled) + ADR-0022 landing-only legality
+   (`AwaitEnd`, tile == current position) - both ran on the current
+   engine, no pools needed yet.
+2. ADR-0019 pools + the building-liquidation half of ADR-0022 (improved
+   tiles become seizable once buildings can return to shared pools; they
    share the pool accounting).
 3. ADR-0021 market forecast (independent).
 4. ADR-0018 sealed bids (before points: points measure ownership).

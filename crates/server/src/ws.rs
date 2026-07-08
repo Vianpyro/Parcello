@@ -91,6 +91,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     content,
                     app.history.clone(),
                     app.turn_timeout,
+                    app.time_bank,
                     app.game_timeout,
                 )
                 .await

@@ -23,6 +23,12 @@ pub struct RoomSettings {
     /// fixed grace regardless.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_seconds: Option<u64>,
+    /// Personal reserve in seconds a connected acting seat may draw on to
+    /// overrun `turn_seconds`, for the whole match, never refilled
+    /// (ADR-0023). `None`/`0` disables it - the turn limit then hard-stops
+    /// with no overrun.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_bank_seconds: Option<u64>,
     /// The effective rule scalars used when the game starts.
     pub rules: RuleParams,
 }
@@ -135,6 +141,10 @@ pub enum ServerMessage {
         /// per-turn countdown, reset on each Update.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_seconds: Option<u64>,
+        /// Configured personal time bank in seconds (ADR-0023); absent when
+        /// off. The live per-seat remaining amount rides `Update.banks`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_bank_seconds: Option<u64>,
         /// Current room settings (timers + rules) for the lobby UI (ADR-0015).
         settings: RoomSettings,
     },
@@ -156,12 +166,22 @@ pub enum ServerMessage {
         /// per-turn countdown, reset on each Update.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         turn_seconds: Option<u64>,
+        /// Configured personal time bank in seconds (ADR-0023); absent when
+        /// off. The live per-seat remaining amount rides `Update.banks`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_bank_seconds: Option<u64>,
     },
     /// Broadcast after every accepted command: what happened, then the new
     /// authoritative projection.
     Update {
         events: Vec<Event>,
         view: Box<ClientView>,
+        /// Live per-seat remaining time bank (ADR-0023), `None` when the
+        /// room has no time bank configured. Server/session-layer display
+        /// data - deliberately not part of `ClientView`, since the engine
+        /// has no clock.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        banks: Option<Vec<u64>>,
     },
     /// Sent only to the offending client on a rejected command.
     Rejected {
@@ -235,7 +255,7 @@ mod tests {
         // Configure carries the timers plus a full rule set; omitted timers
         // deserialize to None (untimed / no per-turn limit).
         let cfg: ClientMessage = serde_json::from_str(
-            r#"{"type":"configure","settings":{"turn_seconds":25,"rules":{
+            r#"{"type":"configure","settings":{"turn_seconds":12,"time_bank_seconds":45,"rules":{
                 "starting_balance":1500,"go_salary":200,"jail_fine":50,
                 "max_houses_per_property":5,"bankruptcy_threshold":0,
                 "auction_on_decline":true,"expropriation":200,"rent_boost":50,
@@ -245,7 +265,8 @@ mod tests {
         assert!(matches!(
             cfg,
             ClientMessage::Configure { settings }
-                if settings.turn_seconds == Some(25)
+                if settings.turn_seconds == Some(12)
+                    && settings.time_bank_seconds == Some(45)
                     && settings.game_seconds.is_none()
                     && settings.rules.win_full_groups == 3
         ));

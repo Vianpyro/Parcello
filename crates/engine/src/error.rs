@@ -63,6 +63,8 @@ pub enum CommandError {
     ExpropriationDisabled,
     #[error("tile is not a rival's seizable property")]
     NotExpropriable,
+    #[error("takeover only applies to the tile you just landed on")]
+    NotOnTile,
     #[error("rent boosting is disabled in this game")]
     RentBoostDisabled,
     #[error("this tile's rent boost is already maxed out")]
