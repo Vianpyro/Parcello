@@ -1,0 +1,61 @@
+# ADR-0018: sealed-bid auctions replace buy/decline
+
+Status: accepted
+
+## Context
+Landing on an unowned property offers it at list price (`AwaitBuy`,
+`Buy`/`Decline`), with a round-robin open auction on decline
+(`TurnPhase::Auction`, `Bid`/`Pass`, gated by `rules.auction_on_decline`).
+The v2 ruleset makes every acquisition contested: landing on a free
+property opens one 5-second, simultaneous, sealed-bid auction. No
+uncontested list-price purchase exists any more.
+
+## Decision
+- New `TurnPhase::BlindAuction { tile, bids }` replaces both `AwaitBuy`
+  and `Auction`; the commands `Buy`, `Decline`, `Bid`, `Pass` and the
+  `auction_on_decline` scalar are removed. New command
+  `SubmitBlindBid { amount }`; `amount = 0` means abstain.
+- The lander (the "discoverer") holds an implicit floor bid equal to the
+  list price, provided their cash covers it; an explicit discoverer bid
+  must be >= that floor. Every other living seat may bid any amount up
+  to their cash (a broke discoverer has no floor and bids like anyone
+  else). Bids are validated against cash at submit time and cash is
+  frozen while the phase is open - trades are rejected, extending
+  today's auction-solvency invariant - so the winner can always pay.
+- Resolution is pure and happens inside `apply` the moment every living
+  seat has a recorded bid: highest amount wins; ties go to the
+  discoverer, then the lowest seat (the house convention); if every
+  recorded bid is 0 the tile stays unsold - exactly today's
+  "no bids = unsold".
+- Discoverer discount: if the discoverer wins at an amount strictly
+  above list price - proof a real auction happened - they pay
+  `amount * 90 / 100`, floored. Winning at exactly the floor pays full
+  list price: finders keepers, no discount. Any other winner pays their
+  bid. Market events (ADR-0021) may scale the settled price.
+- Secrecy: pending bids are hidden state. `ClientView` masks other
+  seats' bids while the phase is open (a seat sees only its own), and
+  the acceptance event carries no amount. The resolution event then
+  reveals every bid - post-hoc transparency, same doctrine as public
+  cash. This is the first `TurnPhase` payload filtered per seat; while
+  the phase is open it joins `rng`/deck order on the never-expose list.
+- Clock: the engine stays clockless. The server arms a 5-second window
+  (like `afk_deadline`) and at expiry injects the canonical
+  `SubmitBlindBid { amount: 0 }` for every silent seat - the same
+  auto-play machinery as AFK turns. Every bid, injected or not, is an
+  ordinary accepted command, so the replay contract (ADR-0001) holds
+  verbatim; unlike `finish_on_time` (ADR-0010) no out-of-log step is
+  needed.
+- Server primitive: this "timed collection window" (arm a deadline,
+  collect one submission per seat, inject canonicals at expiry, let the
+  engine resolve on the last one) is written once and reused by the
+  corruption vote (ADR-0024).
+
+## Consequences
+- Protocol break: four commands removed, one added, the phase shape
+  changed; the buy dialog in all three clients becomes a 5-second bid
+  overlay.
+- `bot::decide` needs a sealed-bid heuristic (value the tile, bid within
+  cash, abstain when poor).
+- Canonical action for the `same_seed` guard and AFK machinery: abstain.
+- Auction tests are rewritten; the trade-freeze tests (ADR-0007) extend
+  to the new phase.

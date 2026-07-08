@@ -1,7 +1,9 @@
 # Design direction: fast, dynamic play (Business Tour, not Monopoly)
 
-Status: direction note (not yet implemented). Records the target design and
-the gap from today's engine, so changes can be planned deliberately.
+Status: direction note. The v2 ruleset is now fully decided (ADRs
+0017-0024, all accepted, 2026-07) - see "V2 ruleset" below for the
+summary and build order. The code still implements v1 until those
+chantiers land.
 
 ## Goal
 
@@ -23,7 +25,58 @@ Championships", "World Tour") and Monopoly's ("Community Chest") are trade
 dress. Parcello already uses original tile names; give these mechanics
 **original names too** rather than copying either game's wording.
 
-## Difference map
+## V2 ruleset (decided 2026-07)
+
+The full Business-Tour-style redesign is specified in ADRs 0017-0024
+(all accepted). Two cross-cutting calls up front: `mods/classic` leaves
+the v2 scope (deleted together with the dice; git history keeps it), so
+there is exactly one movement system and one special-tile type
+(resorts); and short simultaneous per-seat decisions become a
+first-class pattern.
+
+| Mechanic | v2 decision | ADR |
+| --- | --- | --- |
+| Movement | velocity deck: public hand of `velocity_min..=velocity_max`, no dice, no doubles | 0017 |
+| Acquisition | 5 s sealed-bid auction on every landing; discoverer floor = list price; 10% discount only on contested wins | 0018 |
+| Building stock | shared pools sized `round(factor * sqrt(players))`: subsidiaries (lower levels) + conglomerates (top level) | 0019 |
+| Victory | race to 20 reversible VP (+3/group, +2/conglomerate, +1/resort, +2/round to the cash leader - sticky); pool exhaustion ends the game; domination off | 0020 |
+| Events | public 3-slot market forecast; temporary global modifiers, data-calibrated | 0021 |
+| Takeover | on the landing tile only, after rent; improved tiles seizable (buildings liquidate to the pools); mortgaged tiles are the shield | 0022 |
+| Tempo | 12 s turns + one-shot 45 s personal time bank (server defaults) | 0023 |
+| Jail | Legal Route (public locked moves, rents frozen) / Corruption (bribe + 5 s majority vote) / jail card unchanged | 0024 |
+
+Build order (each step keeps `cargo test --workspace --locked` green
+and updates web + CLI + Flutter + bot together; every step is a
+protocol break, so version accordingly):
+
+1. ADR-0023 server defaults (12 s turns) + ADR-0022 landing-only
+   legality - both run on the current engine.
+2. ADR-0019 pools + the building-liquidation half of ADR-0022 (they
+   share the pool accounting).
+3. ADR-0021 market forecast (independent).
+4. ADR-0018 sealed bids (before points: points measure ownership).
+5. ADR-0020 victory points + pool-exhaustion end.
+6. ADR-0017 velocity deck + ADR-0024 jail, together (jail is only
+   redesigned once the dice are gone). The big one - bot plus most of
+   the movement tests - kept last so it never blocks the rest.
+   `mods/classic` is removed here.
+
+Cross-cutting: the server gains ONE timed-collection-window primitive
+(built for ADR-0018, reused for ADR-0024 votes); the auction
+cash-freeze invariant extends to sealed bids and vote windows; every
+new phase defines a canonical action so the AFK/blitz machinery and
+`same_seed_produces_identical_games` keep working.
+
+The client-side face of all this: `docs/visual-identity.md`.
+
+## Difference map (v1 note, kept for history)
+
+Where rows below conflict with the V2 section, the ADRs win. Notably:
+mortgages STAY (they are the takeover shield, ADR-0022, and the
+liquidity valve under pool scarcity - the "remove mortgages" idea is
+dead); the jail rework became ADR-0024; free-destination moves became
+the velocity deck (ADR-0017); the extra win conditions became victory
+points (ADR-0020).
 
 Effort key: **mod** = achievable today with a data-only mod (no code);
 **rules-flag** = one boolean/scalar in `RuleParams` + a small engine branch;
@@ -45,7 +98,7 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Free-destination move | `MoveTo`/`MoveBy` cards only | "world tour": choose your next landing | **engine** (a choose-destination phase/command) |
 | Auctions on decline | on by default | keep - it sustains momentum | already implemented (`rules.auction_on_decline`) |
 
-## Suggested path
+## Suggested path (v1 note, absorbed by the build order above)
 
 1. **Fast board as the default (DONE).** `mods/base` is now the 32-tile
    fast board and the clients render it as a proper 9x9 ring; `mods/classic`

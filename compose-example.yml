@@ -19,12 +19,12 @@ services:
       PARCELLO_TURN_TIMEOUT: "${PARCELLO_TURN_TIMEOUT:-25}"
       PARCELLO_GAME_TIMEOUT: "${PARCELLO_GAME_TIMEOUT:-3600}"
 
-      # Authentication. Guest mode is convenient for LAN/testing; set this to
-      # false and configure identity URLs for production identity-provider use.
+      # Authentication. Guest mode is convenient for LAN/testing. For a real
+      # identity-provider deployment use compose-deploy.yml + docs/deployment.md
+      # instead - this file is the local build-from-source variant.
       PARCELLO_INSECURE_GUEST: "${PARCELLO_INSECURE_GUEST:-true}"
-      # PARCELLO_IDENTITY_URLS: "https://identity.example/.well-known/jwks.json"
+      # PARCELLO_IDENTITY_URLS: "https://auth.example.com/auth/v1/oidc/certs"
       # PARCELLO_IDENTITY_AUDIENCE: "parcello"
-      # PARCELLO_JWT_SECRET: "deprecated-hs256-secret"
 
       # LAN discovery. When enabled on Docker Desktop, host networking rules
       # may still limit multicast/broadcast delivery.

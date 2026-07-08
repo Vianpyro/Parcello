@@ -1,0 +1,90 @@
+# Parcello production deploy: game server + Rauthy identity provider
+# (ADR-0009). TLS and routing are deliberately NOT here: put Nginx Proxy
+# Manager (or any reverse proxy) in front and point it at the two
+# published ports. Full guide - NPM + Cloudflare walkthrough, parallel
+# community servers, independent servers, backups: docs/deployment.md.
+#
+#   cp .env.example .env    # edit the few values at the top
+#   docker compose -f compose-deploy.yml up -d
+
+services:
+  rauthy:
+    # Reference OIDC issuer, signs identity tokens with EdDSA/Ed25519.
+    image: ghcr.io/sebadob/rauthy:0.36.0
+    restart: unless-stopped
+    environment:
+      # Public hostname (no scheme) as reached THROUGH your proxy.
+      PUB_URL: ${RAUTHY_PUB_URL:?set RAUTHY_PUB_URL in .env, e.g. auth.example.com}
+      # TLS terminates at the proxy; Rauthy itself speaks plain HTTP.
+      LISTEN_SCHEME: "http"
+      LISTEN_PORT_HTTP: "8080"
+      PROXY_MODE: "true"
+      # Networks allowed to set proxy headers. Private ranges by default;
+      # tighten to your proxy's actual address when you can.
+      TRUSTED_PROXIES: ${RAUTHY_TRUSTED_PROXIES:-192.168.0.0/16,172.16.0.0/12,10.0.0.0/8}
+      # First boot only: bootstrap the admin account (change the password
+      # after the first login). Leave both unset to get admin@localhost
+      # with a random password printed in the container logs instead.
+      BOOTSTRAP_ADMIN_EMAIL: ${RAUTHY_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD_PLAIN: ${RAUTHY_ADMIN_PASSWORD:-}
+      LOG_LEVEL: ${RAUTHY_LOG_LEVEL:-info}
+    volumes:
+      - rauthy-data:/app/data
+    ports:
+      - "${RAUTHY_PORT:-8080}:8080"
+
+  parcello:
+    # Published by every release (release.yml). Pin a version tag
+    # (vX.Y.Z) for reproducible deploys once you are live; the package
+    # must be public on GHCR (or `docker login ghcr.io` first).
+    image: ghcr.io/vianpyro/parcello-server:${PARCELLO_TAG:-latest}
+    # No published image yet, or deploying a fork? Comment `image:` and:
+    # build: .
+    restart: unless-stopped
+    environment:
+      RUST_LOG: ${PARCELLO_LOG:-info}
+      # EdDSA identity tokens verified against Rauthy's JWKS (ADR-0009).
+      # The internal URL is fine: the fetched keys are the trust anchor,
+      # no need to round-trip through the proxy. Comma-list several URLs
+      # for redundant instances of the same issuer.
+      PARCELLO_IDENTITY_URLS: ${PARCELLO_IDENTITY_URLS:-http://rauthy:8080/auth/v1/oidc/certs}
+      # Must match the Rauthy client id (docs/deployment.md, step 3).
+      PARCELLO_IDENTITY_AUDIENCE: ${PARCELLO_IDENTITY_AUDIENCE:-parcello}
+      # SQLite history (ADR-0005) on the named volume below.
+      PARCELLO_HISTORY: data/parcello.db
+      # Room defaults; hosts can change them per room (ADR-0015). 0 = off.
+      PARCELLO_TURN_TIMEOUT: ${PARCELLO_TURN_TIMEOUT:-25}
+      PARCELLO_GAME_TIMEOUT: ${PARCELLO_GAME_TIMEOUT:-3600}
+      # Guests are spoofable: NEVER enable PARCELLO_INSECURE_GUEST on a
+      # WAN-facing server. Do not set it to "false" either - leave the
+      # variable out entirely (a present env var reads as the flag).
+      #
+      # Mods: the image bundles mods/ (base, classic, highroller). To add
+      # custom mods, bind-mount them and set the load order:
+      # PARCELLO_MODS: base,mymod
+    volumes:
+      - parcello-data:/srv/parcello/data
+      # - ./mods:/srv/parcello/mods:ro   # custom mods, see above
+    ports:
+      - "${PARCELLO_PORT:-7878}:7878"
+    depends_on:
+      - rauthy # start order only: the JWKS thread retries until it works
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7878 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  rauthy-data:
+  parcello-data:
+
+# Dockerized proxy on the same host? Instead of published ports you can
+# attach everything to the proxy's network and target the services by
+# name (rauthy:8080, parcello:7878):
+#
+# networks:
+#   default:
+#     name: npm-proxy
+#     external: true

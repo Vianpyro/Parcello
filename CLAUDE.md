@@ -2,9 +2,9 @@
 
 Parcello: open-source multiplayer board game. Design goal is Business-Tour
 style - fast, dynamic games, NOT Monopoly's slow accumulation - but the
-implemented rules are still Monopoly-close today; the target and the gap
-are in `docs/business-tour-direction.md` (read it before proposing new
-rules). Authoritative Rust server, thin clients, community-hosted servers
+implemented rules are still Monopoly-close today; the v2 ruleset that
+closes the gap is DECIDED - ADRs 0017-0024, summary and build order in
+`docs/business-tour-direction.md` (read both before touching rules). Authoritative Rust server, thin clients, community-hosted servers
 (Minecraft model), data-driven TOML mods. This repo is the complete,
 playable backend V1: pure engine, mod layer, WebSocket server with an
 embedded browser client, terminal test client, SQLite history.
@@ -13,8 +13,9 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0016` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0024` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
+   0017-0024 are the decided-but-not-yet-implemented v2 ruleset.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -63,6 +64,11 @@ cargo run -p parcello-cli -- --name alice --create
 cargo run -p parcello-cli -- --name bob --join ABCDE
 ```
 
+`.devcontainer/` ships the full toolchain in a container (Rust stable +
+pinned 1.96 for MSRV checks, Flutter + Linux desktop, docker CLI against
+the host daemon, cargo-audit/cargo-license, typst). Windows/macOS client
+artifacts and Steam packaging remain CI's job (release.yml).
+
 CI (`.github/workflows/ci.yml`): stable job runs `fmt --check`,
 `clippy --all-targets --locked -- -D warnings`, tests; msrv job builds on
 1.96 with `--locked`.
@@ -78,6 +84,13 @@ step. The release goes live only after all binary jobs succeed
 (draft-then-publish); the docker job is independent. Dependency licenses
 are all permissive (checked 2026-07 with cargo-license; keep it that way
 - commercial distribution is planned).
+
+Self-hosting: `compose-deploy.yml` + `.env.example` deploy the game
+server with a Rauthy issuer behind any reverse proxy (`.env` is
+gitignored - it holds secrets); `docs/deployment.md` is the guide (NPM +
+Cloudflare, parallel community servers sharing the main identity,
+independent servers, guest LAN mode). `compose-example.yml` stays the
+local build-from-source variant.
 
 ## Architecture map
 
@@ -245,19 +258,27 @@ lobby-editable (ADR-0015).
 
 ## Roadmap (agreed next steps, roughly in order of value)
 
-1. Flutter client polish (`clients/flutter` exists: full protocol, board,
+1. **V2 ruleset** (ADRs 0017-0024, accepted 2026-07): six-step build
+   order in `docs/business-tour-direction.md`, "V2 ruleset" section.
+   Every step is a protocol break - update web + CLI + Flutter + bot
+   together. `mods/classic` is removed at step 6.
+2. Flutter client polish (`clients/flutter` exists: full protocol, board,
    trades, tests; still needs real multiplayer playtesting, FX + audio -
    owner priority 2026-07 - and Android/mobile targets, postponed by
-   owner).
-2. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
+   owner). The visual identity is specified in `docs/visual-identity.md`
+   (Art Deco geometry, validated palette, FR+EN via gen-l10n, ranked
+   menu greyed until a matchmaking service exists).
+3. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
    the Flutter client (`oidc.dart`: PKCE + system browser + loopback; web
-   and CLI paste the token manually). Remaining: deploy the Rauthy issuer.
+   and CLI paste the token manually). Remaining: run the deploy on the
+   personal server (`compose-deploy.yml` + `docs/deployment.md`; Rauthy
+   client id `parcello`, EdDSA id tokens, loopback-wildcard redirect).
    HS256 removal is DEFERRED until LAN/WAN playtests have happened (owner
    decision, 2026-07) - do not delete it before then.
-3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
+4. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Unblocked since the MSRV moved
    to 1.96; pick a current Wasmtime.
-4. Richer history queries (SQLx behind `GameHistory` if dashboards ever
+5. Richer history queries (SQLx behind `GameHistory` if dashboards ever
    need it - see ADR-0005 first).
 
 When picking up any item: state assumptions briefly, write the ADR if it

@@ -1,0 +1,51 @@
+{
+  // Full Parcello toolchain: Rust workspace (stable + MSRV 1.96), Flutter
+  // client (analyze/test + Linux desktop build), docker CLI against the
+  // host daemon (Dockerfile / compose-deploy.yml testing), release
+  // hygiene (cargo-audit, cargo-license), typst for docs/architecture.typ.
+  //
+  // Out of scope, on purpose: Windows/macOS client artifacts and Steam
+  // packaging are CI's job (.github/workflows/release.yml) - a Linux
+  // container cannot produce them. steamcmd will join CI once a Steam
+  // app id exists.
+  "name": "Parcello",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    // Docker CLI + compose v2 talking to the HOST daemon (socket mount):
+    // lets you `docker compose -f compose-deploy.yml config|up` in here.
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "forwardPorts": [7878, 8080],
+  "portsAttributes": {
+    "7878": { "label": "parcello-server" },
+    "8080": { "label": "rauthy (compose)" }
+  },
+  // Persist the slow caches across container rebuilds. ~/.cargo/bin is
+  // deliberately NOT on a volume so the image-installed tools survive.
+  "mounts": [
+    "source=parcello-cargo-registry,target=/home/vscode/.cargo/registry,type=volume",
+    "source=parcello-pub-cache,target=/home/vscode/.pub-cache,type=volume"
+  ],
+  "postCreateCommand": "cargo fetch --locked && flutter --version",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "Dart-Code.flutter",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb",
+        "ms-azuretools.vscode-docker",
+        "myriad-dreamin.tinymist"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy"
+      }
+    }
+  },
+  "remoteUser": "vscode"
+  // Notes:
+  // - `flutter run -d linux` needs a display; on Windows hosts WSLg
+  //   usually provides one. Headless work (analyze/test/build) always works.
+  // - LAN discovery (--lan) is UDP multicast and does not cross the
+  //   container boundary; test it on the host.
+}
