@@ -477,12 +477,14 @@ class _CenterPanel extends StatelessWidget {
                 icon: Icons.hourglass_bottom,
                 warnSecs: 10),
           ],
-          // Personal time bank (ADR-0023): counts down to the hard stop
-          // (turn window + whatever reserve is left), never refilled.
+          // Personal time bank (ADR-0023): a flat reserve for the whole
+          // plain turn window, then counts down to the hard stop. Never
+          // refilled.
           if (s.bankEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
             _Countdown(
                 endsAt: s.bankEndsAt!,
+                holdUntil: s.turnEndsAt,
                 icon: Icons.account_balance,
                 warnSecs: 10),
           ],
@@ -565,14 +567,24 @@ class _CenterPanel extends StatelessWidget {
   }
 }
 
-/// Ticking countdown to a deadline. Used for both the timed-game clock
-/// (ADR-0010) and the per-turn AFK timer; turns red under `warnSecs`.
+/// Ticking countdown to a deadline. Used for the timed-game clock
+/// (ADR-0010), the per-turn AFK timer, and the personal time bank
+/// (ADR-0023); turns red under `warnSecs`.
 class _Countdown extends StatefulWidget {
   final DateTime endsAt;
   final IconData icon;
   final int warnSecs;
+  /// While now is before `holdUntil`, the displayed value freezes at
+  /// `endsAt - holdUntil` instead of ticking down from `endsAt - now` - the
+  /// personal time bank must read as a flat reserve for the whole plain
+  /// turn window and only start draining once that window is spent
+  /// (ADR-0023), not from the moment the turn begins.
+  final DateTime? holdUntil;
   const _Countdown(
-      {required this.endsAt, this.icon = Icons.timer, this.warnSecs = 60});
+      {required this.endsAt,
+      this.icon = Icons.timer,
+      this.warnSecs = 60,
+      this.holdUntil});
 
   @override
   State<_Countdown> createState() => _CountdownState();
@@ -587,7 +599,11 @@ class _CountdownState extends State<_Countdown> {
   int? _lastTicked;
 
   int _secsLeft() {
-    final left = widget.endsAt.difference(DateTime.now());
+    final now = DateTime.now();
+    final holdUntil = widget.holdUntil;
+    final reference =
+        (holdUntil != null && now.isBefore(holdUntil)) ? holdUntil : now;
+    final left = widget.endsAt.difference(reference);
     return left.isNegative ? 0 : left.inSeconds;
   }
 
