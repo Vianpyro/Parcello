@@ -407,6 +407,8 @@ mod tests {
             chance: vec![],
             community: vec![],
             rules: RuleParams::default(),
+            market_events: vec![],
+            forecast_gap_turns: 0,
         }
     }
 
@@ -450,6 +452,8 @@ mod tests {
                 rent_boost: 25,
                 ..RuleParams::default()
             },
+            market_events: vec![],
+            forecast_gap_turns: 0,
         }
     }
 
@@ -476,6 +480,7 @@ mod tests {
             pending_trades: vec![],
             subsidiaries_available: None,
             conglomerates_available: None,
+            forecast: Default::default(),
         }
     }
 

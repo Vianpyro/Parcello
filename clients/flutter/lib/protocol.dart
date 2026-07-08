@@ -44,9 +44,27 @@ class TileDef {
   bool get isProperty => kind == 'property';
 }
 
+/// A market event definition (ADR-0021): `id` ties it back to a
+/// `ScheduledEvent`/`ActiveMarketEvent` on the view.
+class MarketEventDef {
+  final String id;
+  final String name;
+  final String effect; // rent_multiplier | acquisition_multiplier | wealth_tax
+  final int magnitudePct;
+  final int durationTurns;
+
+  MarketEventDef.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as String,
+        name = j['name'] as String,
+        effect = j['effect'] as String,
+        magnitudePct = j['magnitude_pct'] as int,
+        durationTurns = j['duration_turns'] as int;
+}
+
 class GameContent {
   final List<TileDef> board;
   final List<String> modIds;
+  final List<MarketEventDef> marketEvents;
 
   /// Rule knobs the clients need to gate UI (ADR-0011/0012): cost percents,
   /// 0 = mechanic disabled.
@@ -57,12 +75,22 @@ class GameContent {
       : board = (resolved['content']['board'] as List)
             .map((t) => TileDef.fromJson(t as Map<String, dynamic>))
             .toList(),
+        marketEvents = (resolved['content']['market_events'] as List? ?? [])
+            .map((e) => MarketEventDef.fromJson(e as Map<String, dynamic>))
+            .toList(),
         expropriation =
             resolved['content']['rules']['expropriation'] as int? ?? 0,
         rentBoost = resolved['content']['rules']['rent_boost'] as int? ?? 0,
         modIds = (resolved['mods'] as List)
             .map((m) => m['id'] as String)
             .toList();
+
+  String marketEventName(String eventId) {
+    for (final e in marketEvents) {
+      if (e.id == eventId) return e.name;
+    }
+    return eventId;
+  }
 }
 
 /// Mirror of the engine `RuleParams` (ADR-0015). Absolute values; the host
@@ -178,6 +206,46 @@ class TradeOffer {
         receiveTiles = (j['receive_tiles'] as List).cast<int>();
 }
 
+/// A drawn-but-not-yet-active market event (ADR-0021).
+class ScheduledEvent {
+  final String eventId;
+  final int startsAtTurn;
+  final int duration;
+
+  ScheduledEvent.fromJson(Map<String, dynamic> j)
+      : eventId = j['event_id'] as String,
+        startsAtTurn = j['starts_at_turn'] as int,
+        duration = j['duration'] as int;
+}
+
+/// The market event currently in effect, if any (ADR-0021).
+class ActiveMarketEvent {
+  final String eventId;
+  final String effect;
+  final int magnitudePct;
+  final int endsAtTurn;
+
+  ActiveMarketEvent.fromJson(Map<String, dynamic> j)
+      : eventId = j['event_id'] as String,
+        effect = j['effect'] as String,
+        magnitudePct = j['magnitude_pct'] as int,
+        endsAtTurn = j['ends_at_turn'] as int;
+}
+
+/// Public market forecast queue (ADR-0021).
+class MarketForecast {
+  final List<ScheduledEvent> queue;
+  final ActiveMarketEvent? active;
+
+  MarketForecast.fromJson(Map<String, dynamic>? j)
+      : queue = (j?['queue'] as List? ?? [])
+            .map((s) => ScheduledEvent.fromJson(s as Map<String, dynamic>))
+            .toList(),
+        active = j?['active'] != null
+            ? ActiveMarketEvent.fromJson(j!['active'] as Map<String, dynamic>)
+            : null;
+}
+
 class ClientView {
   final bool finished;
   final int? winner;
@@ -189,6 +257,7 @@ class ClientView {
   /// Shared building pools (ADR-0019); `null` = unlimited (pooling off).
   final int? subsidiariesAvailable;
   final int? conglomeratesAvailable;
+  final MarketForecast forecast;
 
   ClientView.fromJson(Map<String, dynamic> j)
       : finished = j['phase']['type'] == 'finished',
@@ -205,16 +274,22 @@ class ClientView {
             .map((t) => TradeOffer.fromJson(t as Map<String, dynamic>))
             .toList(),
         subsidiariesAvailable = j['subsidiaries_available'] as int?,
-        conglomeratesAvailable = j['conglomerates_available'] as int?;
+        conglomeratesAvailable = j['conglomerates_available'] as int?,
+        forecast = MarketForecast.fromJson(j['forecast'] as Map<String, dynamic>?);
 }
 
+String _identityEventName(String id) => id;
+
 /// Human-readable line for one engine event (the animation/log feed).
-/// Ported verbatim from the reference web client's `describe`.
+/// Ported verbatim from the reference web client's `describe`. `m` looks up
+/// a market event's display name (ADR-0021); optional so existing callers
+/// (and tests) that don't have content loaded yet still get the raw id.
 String describeEvent(
   Map<String, dynamic> e,
   String Function(int seat) p,
-  String Function(int tile) t,
-) {
+  String Function(int tile) t, [
+  String Function(String eventId) m = _identityEventName,
+]) {
   switch (e['type']) {
     case 'turn_started':
       return "--- ${p(e['player'])}'s turn ---";
@@ -299,6 +374,15 @@ String describeEvent(
       return "Time's up! ${p(e['winner'])} wins on net worth.";
     case 'won_by_groups':
       return "${p(e['winner'])} wins by controlling ${e['groups']} colour groups!";
+    case 'market_event_activated':
+      final pct = e['magnitude_pct'] as int;
+      final sign = pct > 0 ? '+' : '';
+      final duration = e['duration_turns'] as int;
+      return duration == 0
+          ? "Market event: ${m(e['event_id'] as String)} ($sign$pct%)"
+          : "Market event: ${m(e['event_id'] as String)} ($sign$pct% for $duration turns)";
+    case 'market_event_expired':
+      return "Market event ended: ${m(e['event_id'] as String)}";
     default:
       return e.toString();
   }

@@ -467,7 +467,7 @@ function buildBoard() {
     center.id = "center";
     // Interior spans the (d-2) x (d-2) inner cells.
     center.style.gridArea = `2 / 2 / ${d} / ${d}`;
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="forecast" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   } else {
     // Non-ring boards (mods): linear fallback, panel below.
@@ -475,7 +475,7 @@ function buildBoard() {
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");
     center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="forecast" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   }
 }
@@ -489,6 +489,7 @@ function render() {
   }
   const v = st.view;
   renderPools(v);
+  renderForecast(v);
   board().forEach((_, i) => {
     const ts = v.tiles[i];
     const el = $(`#tile-${i}`);
@@ -640,6 +641,27 @@ function renderPools(v) {
   }
   const pool = n => n == null ? "unlimited" : n;
   el.textContent = `Subsidiaries: ${pool(v.subsidiaries_available)} | Conglomerates: ${pool(v.conglomerates_available)}`;
+}
+
+// Public market forecast (ADR-0021): reveals draws already made, not the
+// generator - a compact 3-slot timeline plus whatever is currently active.
+const marketEventName = id => st.content?.market_events?.find(e => e.id === id)?.name ?? id;
+function renderForecast(v) {
+  const el = $("#forecast");
+  if (!el) return;
+  const f = v.forecast;
+  if (!f || (!f.active && (!f.queue || f.queue.length === 0))) {
+    el.textContent = "";
+    return;
+  }
+  const parts = [];
+  if (f.active) {
+    parts.push(`${marketEventName(f.active.event_id)} active (${f.active.magnitude_pct > 0 ? "+" : ""}${f.active.magnitude_pct}%, ends turn ${f.active.ends_at_turn})`);
+  }
+  if (f.queue?.length) {
+    parts.push(`upcoming: ${f.queue.map(s => `${marketEventName(s.event_id)} (turn ${s.starts_at_turn})`).join(", ")}`);
+  }
+  el.textContent = parts.join(" | ");
 }
 
 function renderStatus() {
@@ -911,6 +933,13 @@ function describe(e) {
     case "game_ended": return `Game over — ${P(e.winner)} wins!`;
     case "time_up": return `Time's up! ${P(e.winner)} wins on net worth.`;
     case "won_by_groups": return `${P(e.winner)} wins by controlling ${e.groups} colour groups!`;
+    case "market_event_activated": {
+      const sign = e.magnitude_pct > 0 ? "+" : "";
+      return e.duration_turns === 0
+        ? `Market event: ${marketEventName(e.event_id)} (${sign}${e.magnitude_pct}%)`
+        : `Market event: ${marketEventName(e.event_id)} (${sign}${e.magnitude_pct}% for ${e.duration_turns} turns)`;
+    }
+    case "market_event_expired": return `Market event ended: ${marketEventName(e.event_id)}`;
     default: return JSON.stringify(e);
   }
 }

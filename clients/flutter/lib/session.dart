@@ -328,7 +328,8 @@ class GameSession extends ChangeNotifier {
             diceSeq++;
             sfx.diceRoll();
           }
-          _log(describeEvent(ev, playerName, tileName));
+          _log(describeEvent(
+              ev, playerName, tileName, content?.marketEventName ?? (id) => id));
         }
       case 'rejected':
         sfx.error();

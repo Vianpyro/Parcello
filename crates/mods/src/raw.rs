@@ -3,7 +3,7 @@
 //! Tiles use flat optional fields (friendlier to hand-written TOML than an
 //! internally-tagged enum) and are converted to `TileDef` with validation.
 
-use parcello_engine::{CardDef, PropertyDef, RentModel, TileDef, TileKind};
+use parcello_engine::{CardDef, MarketEventDef, PropertyDef, RentModel, TileDef, TileKind};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -97,4 +97,24 @@ pub(crate) struct RulesFile {
     /// Flat named overrides (V1 hook points, architecture section 7.1.2).
     #[serde(default)]
     pub rules: BTreeMap<String, i64>,
+}
+
+/// `data/events.toml` (ADR-0021): a `[forecast]` scalar block plus a pool
+/// of `[[event]]` defs. `MarketEventDef` deserializes directly, no
+/// conversion layer needed - its fields are uniform enough (unlike
+/// `TileRaw`, which has many type-conditional optional fields).
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct EventsFile {
+    #[serde(default)]
+    pub forecast: ForecastRaw,
+    #[serde(default, rename = "event")]
+    pub events: Vec<MarketEventDef>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct ForecastRaw {
+    /// `None` when the mod doesn't touch it, distinct from an explicit `0`
+    /// - lets `RegistryBuilder` only WARN on a genuine multi-mod conflict.
+    #[serde(default)]
+    pub gap_turns: Option<u32>,
 }

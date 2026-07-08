@@ -492,6 +492,11 @@ class _CenterPanel extends StatelessWidget {
           Text(_poolsLine()!,
               style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
         ],
+        if (_forecastLine() != null) ...[
+          const SizedBox(height: 2),
+          Text(_forecastLine()!,
+              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
+        ],
         const SizedBox(height: 6),
         _Actions(s: s),
         const SizedBox(height: 6),
@@ -509,6 +514,30 @@ class _CenterPanel extends StatelessWidget {
     final congs = v.conglomeratesAvailable;
     if (subs == null && congs == null) return null;
     return 'Subsidiaries: ${subs ?? 'unlimited'} | Conglomerates: ${congs ?? 'unlimited'}';
+  }
+
+  /// Public market forecast (ADR-0021): reveals draws already made, not the
+  /// generator. Null when nothing is scheduled or active.
+  String? _forecastLine() {
+    final v = s.view;
+    final c = s.content;
+    if (v == null || c == null) return null;
+    final f = v.forecast;
+    if (f.active == null && f.queue.isEmpty) return null;
+    final parts = <String>[];
+    if (f.active != null) {
+      final a = f.active!;
+      final sign = a.magnitudePct > 0 ? '+' : '';
+      parts.add(
+          '${c.marketEventName(a.eventId)} active ($sign${a.magnitudePct}%, ends turn ${a.endsAtTurn})');
+    }
+    if (f.queue.isNotEmpty) {
+      final upcoming = f.queue
+          .map((e) => '${c.marketEventName(e.eventId)} (turn ${e.startsAtTurn})')
+          .join(', ');
+      parts.add('upcoming: $upcoming');
+    }
+    return parts.join(' | ');
   }
 
   String _status() {

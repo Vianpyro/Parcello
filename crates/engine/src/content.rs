@@ -15,6 +15,14 @@ pub struct GameContent {
     pub chance: Vec<CardDef>,
     pub community: Vec<CardDef>,
     pub rules: RuleParams,
+    /// Pool of market events the public forecast draws from (ADR-0021); an
+    /// empty pool leaves the forecast fully inert.
+    #[serde(default)]
+    pub market_events: Vec<MarketEventDef>,
+    /// Turns between one scheduled market event and the next; meaningless
+    /// (and unused) while `market_events` is empty.
+    #[serde(default)]
+    pub forecast_gap_turns: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -97,6 +105,41 @@ pub enum CardEffect {
     PayEach {
         amount: i64,
     },
+}
+
+/// A scheduled market event definition (ADR-0021). Calibration
+/// (`magnitude_pct`, `duration_turns`) is data-only - mods edit TOML, never
+/// the engine.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MarketEventDef {
+    /// Stable string key. Mods replace events by id (last-loaded-wins).
+    pub id: String,
+    pub name: String,
+    pub effect: MarketEffect,
+    /// Percent applied to the affected amount; negative for a
+    /// discount/cut, positive for a surcharge. Meaning depends on `effect`.
+    pub magnitude_pct: i64,
+    /// How many turns the effect stays active once it fires; `0` marks a
+    /// one-shot effect (only meaningful for `WealthTax` today).
+    pub duration_turns: u32,
+}
+
+/// What a market event does while active (ADR-0021). Unit variants only -
+/// unlike `CardEffect`, none carry per-variant data (the shared
+/// `magnitude_pct`/`duration_turns` on `MarketEventDef` cover all three),
+/// so this serializes as a bare string (`effect = "rent_multiplier"`),
+/// friendlier for hand-written TOML than `CardEffect`'s tagged shape.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketEffect {
+    /// Scales rent in `resolve_landing`, composing with the ADR-0012 boost.
+    RentMultiplier,
+    /// Scales takeover cost (ADR-0022) - and, once it exists, sealed-bid
+    /// settlement prices (ADR-0018).
+    AcquisitionMultiplier,
+    /// One-shot: every alive player pays `net_worth * magnitude_pct / 100`
+    /// through the normal charge/bankruptcy machinery.
+    WealthTax,
 }
 
 /// Named rule parameters, resolved from `RuleRegistry` keys (V1 hook points).
@@ -255,5 +298,10 @@ impl GameContent {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Looks up a market event definition by id (ADR-0021).
+    pub fn market_event(&self, id: &str) -> Option<&MarketEventDef> {
+        self.market_events.iter().find(|e| e.id == id)
     }
 }

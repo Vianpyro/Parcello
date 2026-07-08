@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use crate::manifest::{ModManifest, parse_version};
-use crate::raw::{CardsFile, PropertiesFile, RulesFile};
+use crate::raw::{CardsFile, EventsFile, PropertiesFile, RulesFile};
 use crate::{ModError, RegistryBuilder};
 
 pub trait ModPlugin {
@@ -94,6 +94,13 @@ impl ModPlugin for TomlModPlugin {
         let rules: RulesFile = self.read_data("rules.toml")?;
         for (key, value) in rules.rules {
             registries.set_rule(&self.manifest.id, &key, value);
+        }
+        let events: EventsFile = self.read_data("events.toml")?;
+        for event in events.events {
+            registries.upsert_market_event(&self.manifest.id, event);
+        }
+        if let Some(gap_turns) = events.forecast.gap_turns {
+            registries.set_forecast_gap_turns(&self.manifest.id, gap_turns);
         }
         Ok(())
     }

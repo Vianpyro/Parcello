@@ -7,9 +7,9 @@ use std::sync::{Arc, Mutex};
 
 use parcello_engine::strategy::StandardRent;
 use parcello_engine::{
-    CardDef, CardEffect, ClientView, CommandError, CommandKind, DicePolicy, Engine, Event,
-    GameContent, GamePhase, GameState, PlayerCommand, PropertyDef, RentCalculator, RentModel,
-    RuleParams, TileDef, TileKind, TurnPhase,
+    ActiveMarketEvent, CardDef, CardEffect, ClientView, CommandError, CommandKind, DicePolicy,
+    Engine, Event, GameContent, GamePhase, GameState, MarketEffect, MarketEventDef, PlayerCommand,
+    PropertyDef, RentCalculator, RentModel, RuleParams, TileDef, TileKind, TurnPhase,
 };
 
 struct FixedDice(Mutex<VecDeque<(u8, u8)>>);
@@ -94,6 +94,8 @@ fn transit_board() -> GameContent {
         chance: vec![],
         community: vec![],
         rules: RuleParams::default(),
+        market_events: vec![],
+        forecast_gap_turns: 0,
     }
 }
 
@@ -127,6 +129,8 @@ fn plain_board() -> GameContent {
         chance: vec![],
         community: vec![],
         rules: RuleParams::default(),
+        market_events: vec![],
+        forecast_gap_turns: 0,
     }
 }
 
@@ -520,6 +524,8 @@ fn card_board(chance: Vec<CardDef>) -> GameContent {
         chance,
         community: vec![],
         rules: RuleParams::default(),
+        market_events: vec![],
+        forecast_gap_turns: 0,
     }
 }
 
@@ -692,6 +698,37 @@ fn finish_on_time_awards_the_richest_and_breaks_ties_low() {
 fn engine_with_rules(rolls: &[(u8, u8)], set: impl FnOnce(&mut RuleParams)) -> Engine {
     let mut content = plain_board();
     set(&mut content.rules);
+    Engine::new(Arc::new(content))
+        .expect("valid content")
+        .with_dice(FixedDice::new(rolls))
+}
+
+/// A single market event definition, for tests that need exactly one.
+fn market_event(
+    id: &str,
+    effect: MarketEffect,
+    magnitude_pct: i64,
+    duration_turns: u32,
+) -> MarketEventDef {
+    MarketEventDef {
+        id: id.into(),
+        name: id.into(),
+        effect,
+        magnitude_pct,
+        duration_turns,
+    }
+}
+
+fn engine_with_forecast(
+    rolls: &[(u8, u8)],
+    events: Vec<MarketEventDef>,
+    gap_turns: u32,
+    set_rules: impl FnOnce(&mut RuleParams),
+) -> Engine {
+    let mut content = plain_board();
+    content.market_events = events;
+    content.forecast_gap_turns = gap_turns;
+    set_rules(&mut content.rules);
     Engine::new(Arc::new(content))
         .expect("valid content")
         .with_dice(FixedDice::new(rolls))
@@ -2228,4 +2265,240 @@ fn takeover_of_conglomerate_tile_returns_one_conglomerate() {
         Some(4),
         "the tile's conglomerate returns, not subsidiaries"
     );
+}
+
+// -- Market forecast (ADR-0021) -----------------------------------------------
+
+#[test]
+fn forecast_seeded_at_new_game_is_deterministic_and_chained() {
+    let events = vec![
+        market_event("bubble", MarketEffect::AcquisitionMultiplier, -30, 5),
+        market_event("crash", MarketEffect::RentMultiplier, -50, 4),
+    ];
+    let engine = engine_with_forecast(&[], events, 5, |_| {});
+    let players = || {
+        vec![
+            ("p0".to_string(), "P0".to_string()),
+            ("p1".to_string(), "P1".to_string()),
+        ]
+    };
+    let st1 = engine.new_game(players(), 42);
+    let st2 = engine.new_game(players(), 42);
+    assert_eq!(
+        st1.forecast, st2.forecast,
+        "same seed schedules identically"
+    );
+    assert_eq!(st1.forecast.queue.len(), 3);
+    let starts: Vec<u32> = st1
+        .forecast
+        .queue
+        .iter()
+        .map(|s| s.starts_at_turn)
+        .collect();
+    assert_eq!(starts, vec![5, 10, 15], "chained gap_turns apart");
+    assert!(st1.forecast.active.is_none());
+}
+
+#[test]
+fn forecast_is_inert_without_market_events() {
+    let engine = engine_with(plain_board(), &[]); // plain_board ships no events
+    let mut st = two_players(&engine);
+    assert!(st.forecast.queue.is_empty());
+    assert!(st.forecast.active.is_none());
+    for i in 0..6 {
+        let actor = if st.current == 0 { "p0" } else { "p1" };
+        st.turn = TurnPhase::AwaitEnd;
+        let (next, _) = step(&engine, &st, cmd(actor, CommandKind::EndTurn));
+        st = next;
+        assert!(st.forecast.queue.is_empty(), "iteration {i}");
+        assert!(st.forecast.active.is_none(), "iteration {i}");
+    }
+}
+
+#[test]
+fn rent_multiplier_composes_with_rent_boost() {
+    let engine = engine_with(plain_board(), &[(1, 1)]); // sum 2 -> lands on ave_a (index 2)
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0); // p0 owns ave_a (price 60, rents[0] = 2)
+    st.tiles[2].boosts = 1; // ADR-0012: base 2 -> boosted 3
+    st.forecast.active = Some(ActiveMarketEvent {
+        event_id: "crash".into(),
+        effect: MarketEffect::RentMultiplier,
+        magnitude_pct: -50,
+        ends_at_turn: 10,
+    });
+    st.current = 1;
+    st.players[1].position = 0;
+    st.turn = TurnPhase::AwaitRoll;
+
+    let (_, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentPaid { amount: 1, .. })),
+        "boosted rent 3, then -50% market crash -> 1"
+    );
+}
+
+#[test]
+fn rent_multiplier_expires_exactly_at_its_scheduled_turn() {
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = two_players(&engine);
+    st.forecast.active = Some(ActiveMarketEvent {
+        event_id: "crash".into(),
+        effect: MarketEffect::RentMultiplier,
+        magnitude_pct: -50,
+        ends_at_turn: 1,
+    });
+    st.turn = TurnPhase::AwaitEnd;
+
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
+    assert_eq!(st.turn_count, 1);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::MarketEventExpired { event_id } if event_id == "crash"))
+    );
+    assert!(st.forecast.active.is_none());
+}
+
+#[test]
+fn acquisition_multiplier_scales_takeover_cost_and_compensation() {
+    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 2;
+    st.forecast.active = Some(ActiveMarketEvent {
+        event_id: "bubble".into(),
+        effect: MarketEffect::AcquisitionMultiplier,
+        magnitude_pct: -60,
+        ends_at_turn: 10,
+    });
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Expropriate {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    // base cost = 60 * 200 / 100 = 120; -60% market discount -> 48, below
+    // the bare price (60), so compensation drops with it (min(price, cost)).
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::Expropriated { cost: 48, .. }))
+    );
+    assert_eq!(
+        st.players[0].cash,
+        1500 - 48,
+        "seizer pays the discounted cost"
+    );
+    assert_eq!(
+        st.players[1].cash,
+        1500 + 48,
+        "compensation caps at the discounted cost, not the bare price"
+    );
+}
+
+#[test]
+fn wealth_tax_charges_every_alive_player_via_bankruptcy_path() {
+    let events = vec![market_event("audit", MarketEffect::WealthTax, 90, 0)];
+    let engine = engine_with_forecast(&[], events, 1, |_| {});
+    let mut st = engine.new_game(
+        vec![
+            ("p0".into(), "P0".into()),
+            ("p1".into(), "P1".into()),
+            ("p2".into(), "P2".into()),
+        ],
+        1,
+    );
+    st.tiles[2].owner = Some(2); // p2 owns ave_a (price 60), cash-poor
+    st.players[2].cash = 5;
+    st.turn = TurnPhase::AwaitEnd;
+
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
+    assert!(
+        ev.iter().any(
+            |e| matches!(e, Event::MarketEventActivated { event_id, .. } if event_id == "audit")
+        )
+    );
+    // p0/p1: net worth 1500, no properties -> 90% = 1350, fully payable.
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::CashAdjusted {
+            player: 0,
+            delta: -1350,
+            ..
+        }
+    )));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::CashAdjusted {
+            player: 1,
+            delta: -1350,
+            ..
+        }
+    )));
+    assert_eq!(st.players[0].cash, 150);
+    assert_eq!(st.players[1].cash, 150);
+    // p2: net worth 65 (5 cash + 60 equity) -> 90% = 58; only 5 cash, and
+    // mortgaging ave_a (+30) still falls short -> forced bankrupt.
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::CashAdjusted {
+            player: 2,
+            delta: -58,
+            ..
+        }
+    )));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::PropertyMortgaged { tile: 2, .. }))
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PlayerBankrupt {
+            player: 2,
+            creditor: None
+        }
+    )));
+    assert!(st.players[2].bankrupt);
+    assert_eq!(st.players[2].cash, 0);
+    assert_eq!(st.tiles[2].owner, None, "bank repossesses");
+    assert!(!st.tiles[2].mortgaged, "bank refurbishes on repossession");
+    assert!(
+        st.forecast.active.is_none(),
+        "wealth tax never occupies the active slot"
+    );
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, Event::MarketEventExpired { .. }))
+    );
+    assert_eq!(st.phase, GamePhase::Active, "2 of 3 players remain");
+}
+
+#[test]
+fn wealth_tax_can_end_the_game() {
+    let events = vec![market_event("audit", MarketEffect::WealthTax, 100, 0)];
+    let engine = engine_with_forecast(&[], events, 1, |_| {});
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)
+    st.players[1].cash = 10;
+    st.turn = TurnPhase::AwaitEnd;
+
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PlayerBankrupt {
+            player: 1,
+            creditor: None
+        }
+    )));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::GameEnded { winner: 0 }))
+    );
+    assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
 }

@@ -1,0 +1,26 @@
+# Public market forecast (ADR-0021): a starter pool, deliberately rough
+# numbers - calibration is a playtest task, never an engine change.
+
+[forecast]
+gap_turns = 6
+
+[[event]]
+id = "market_bubble"
+name = "Market Bubble"
+effect = "acquisition_multiplier"
+magnitude_pct = -30
+duration_turns = 5
+
+[[event]]
+id = "market_crash"
+name = "Market Crash"
+effect = "rent_multiplier"
+magnitude_pct = -50
+duration_turns = 4
+
+[[event]]
+id = "tax_audit"
+name = "Tax Audit"
+effect = "wealth_tax"
+magnitude_pct = 10
+duration_turns = 0

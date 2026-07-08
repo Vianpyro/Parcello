@@ -253,7 +253,8 @@ factors a multiplier scaling `round(factor * sqrt(players))`, 0 = off),
 `cards.chance[*]`,
 `cards.community[*]`, `properties[*]` (including per-tile `rent_model`:
 `houses` (default), `group_scaled` for stations, `dice_scaled` for
-utilities; the scaled models need no `house_cost` and cannot be built on).
+utilities; the scaled models need no `house_cost` and cannot be built on),
+`events[*]` + `[forecast] gap_turns` (ADR-0021, see below).
 
 ## Game rules implemented
 
@@ -305,7 +306,17 @@ rent boosts
 default in the base fast board. Multiple win conditions: last player
 standing, richest at the time limit (ADR-0010), and a domination win -
 control N complete colour groups (`rules.win_full_groups`, 3 in the base
-fast board, ADR-0013).
+fast board, ADR-0013). Public market forecast (ADR-0021, `data/events.toml`):
+a seeded, rolling queue of the next 3 scheduled market events plus whichever
+one is currently active - `rent_multiplier` (composes with the rent boost
+step above), `acquisition_multiplier` (scales takeover cost), and
+`wealth_tax` (one-shot: every alive player pays a percent of net worth
+through the normal bankruptcy machinery). The whole queue is public in every
+view - the draws already made, never the generator (seed/deck order stay
+hidden) - so players can plan around it; `gap_turns` apart, chained,
+deterministic from the game seed. The base mod ships a starter pool (market
+bubble / crash / tax audit) with deliberately rough numbers - calibration is
+a playtest task, never an engine change.
 
 Deliberate V1 simplifications: no immediate interest charge when mortgaged
 tiles change hands (trades and bankruptcy transfer them as-is);
@@ -368,10 +379,12 @@ seats (host-added, yield to humans, shared `bot::decide` heuristic);
 0015 per-room host-editable settings (timers + rules chosen in the lobby,
 clamped server-side; one server runs many independent games); 0019 shared
 building pools (subsidiaries/conglomerates, table-wide scarcity scaled by
-player count); 0022 takeover tightened to the landing tile only, at end of
-turn, and improved tiles seizable with liquidation to the pools (amends
-0011, shares accounting with 0019); 0023 blitz clock: 12s turns plus a 45s
-personal time bank, never refilled (amends 0015).
+player count); 0021 public market forecast (seeded, rolling event queue;
+rent/acquisition multipliers and a one-shot wealth tax); 0022 takeover
+tightened to the landing tile only, at end of turn, and improved tiles
+seizable with liquidation to the pools (amends 0011, shares accounting with
+0019); 0023 blitz clock: 12s turns plus a 45s personal time bank, never
+refilled (amends 0015).
 
 ## Roadmap
 

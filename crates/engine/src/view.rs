@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::{GamePhase, GameState, TileState, TradeOffer, TurnPhase};
+use crate::state::{GamePhase, GameState, MarketForecast, TileState, TradeOffer, TurnPhase};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClientView {
@@ -24,6 +24,10 @@ pub struct ClientView {
     pub subsidiaries_available: Option<u64>,
     #[serde(default)]
     pub conglomerates_available: Option<u64>,
+    /// Public market forecast queue (ADR-0021) - reveals draws already
+    /// made, never the generator (seed/deck order stay hidden).
+    #[serde(default)]
+    pub forecast: MarketForecast,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -74,6 +78,7 @@ impl ClientView {
             pending_trades: state.pending_trades.clone(),
             subsidiaries_available: state.subsidiaries_available,
             conglomerates_available: state.conglomerates_available,
+            forecast: state.forecast.clone(),
         }
     }
 }

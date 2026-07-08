@@ -6,10 +6,10 @@
 //! and rule fragments go through the injected strategies.
 
 use crate::command::{CommandKind, PlayerCommand};
-use crate::content::{CardEffect, GameContent, PropertyDef, RentModel, TileKind};
+use crate::content::{CardEffect, GameContent, MarketEffect, PropertyDef, RentModel, TileKind};
 use crate::error::CommandError;
 use crate::event::{DeckKind, Event};
-use crate::state::{GamePhase, GameState, TradeOffer, TurnPhase};
+use crate::state::{ActiveMarketEvent, GamePhase, GameState, TradeOffer, TurnPhase};
 use crate::{Engine, Strategies};
 
 /// Card chains ("advance to X" landing on another card tile) are bounded to
@@ -708,7 +708,8 @@ impl<'e> Exec<'e> {
             Some(o) if o != p && !ts.mortgaged => o,
             _ => return Err(CommandError::NotExpropriable),
         };
-        let cost = prop.price * pct / 100;
+        let cost = self
+            .apply_market_multiplier(MarketEffect::AcquisitionMultiplier, prop.price * pct / 100);
         if self.st.players[p].cash < cost {
             return Err(CommandError::InsufficientFunds);
         }
@@ -974,6 +975,19 @@ impl<'e> Exec<'e> {
         base * (100 + RENT_BOOST_STEP_PCT * boosts as i64) / 100
     }
 
+    /// Applies the active market event's magnitude to `base` if it matches
+    /// `effect` (ADR-0021); a no-op otherwise, including while nothing is
+    /// active. Shared by rent (`resolve_landing`) and takeover cost
+    /// (`expropriate`).
+    fn apply_market_multiplier(&self, effect: MarketEffect, base: i64) -> i64 {
+        match &self.st.forecast.active {
+            Some(active) if active.effect == effect => {
+                (base * (100 + active.magnitude_pct) / 100).max(0)
+            }
+            _ => base,
+        }
+    }
+
     // -- Landing resolution -----------------------------------------------------
 
     fn resolve_landing(&mut self, p: usize, dice_total: u8, depth: u8) {
@@ -1021,6 +1035,7 @@ impl<'e> Exec<'e> {
                         .rent
                         .rent(self.content, &self.st, tile, dice_total);
                     let rent = Self::boosted_rent(base, self.st.tiles[tile].boosts);
+                    let rent = self.apply_market_multiplier(MarketEffect::RentMultiplier, rent);
                     self.ev.push(Event::RentPaid {
                         from: p,
                         to: owner,
@@ -1239,6 +1254,78 @@ impl<'e> Exec<'e> {
         self.st.turn = TurnPhase::AwaitRoll;
         self.st.turn_count += 1;
         self.ev.push(Event::TurnStarted { player: next });
+        self.tick_forecast();
+    }
+
+    // -- Market forecast (ADR-0021) ------------------------------------------
+
+    /// Turn-transition tick for the public forecast: expires the active
+    /// effect if its window closed, activates the next scheduled event if
+    /// it's due (a `WealthTax` resolves instantly here and never becomes
+    /// "active" - nothing to expire), then refills the queue back to 3.
+    /// Naturally a no-op when the content ships no market events: the
+    /// queue can never hold anything to activate, and `draw_next` itself
+    /// no-ops on an empty pool - no need for an explicit early return, and
+    /// none here on purpose so an `active` effect (however it got there)
+    /// always still expires on schedule.
+    fn tick_forecast(&mut self) {
+        if let Some(active) = &self.st.forecast.active
+            && self.st.turn_count >= active.ends_at_turn
+        {
+            let event_id = active.event_id.clone();
+            self.st.forecast.active = None;
+            self.ev.push(Event::MarketEventExpired { event_id });
+        }
+        let due = self
+            .st
+            .forecast
+            .queue
+            .first()
+            .is_some_and(|next| self.st.turn_count >= next.starts_at_turn);
+        if self.st.forecast.active.is_none() && due {
+            let scheduled = self.st.forecast.queue.remove(0);
+            if let Some(def) = self.content.market_event(&scheduled.event_id) {
+                let effect = def.effect;
+                let magnitude_pct = def.magnitude_pct;
+                self.ev.push(Event::MarketEventActivated {
+                    event_id: scheduled.event_id.clone(),
+                    effect,
+                    magnitude_pct,
+                    duration_turns: scheduled.duration,
+                });
+                if effect == MarketEffect::WealthTax {
+                    self.apply_wealth_tax(magnitude_pct, &scheduled.event_id);
+                } else {
+                    self.st.forecast.active = Some(ActiveMarketEvent {
+                        event_id: scheduled.event_id,
+                        effect,
+                        magnitude_pct,
+                        ends_at_turn: self.st.turn_count + scheduled.duration,
+                    });
+                }
+            }
+            self.st
+                .forecast
+                .draw_next(self.content, &mut self.st.rng, self.st.turn_count);
+        }
+    }
+
+    /// One-shot wealth tax (ADR-0021): every alive player pays `net_worth *
+    /// pct / 100` through the normal charge/bankruptcy machinery, mirroring
+    /// `CardEffect::CollectFromEach`/`PayEach`.
+    fn apply_wealth_tax(&mut self, pct: i64, event_id: &str) {
+        for p in self.st.alive_players().collect::<Vec<_>>() {
+            let amount = (self.st.net_worth(self.content, p) * pct / 100).max(0);
+            self.ev.push(Event::CashAdjusted {
+                player: p,
+                delta: -amount,
+                reason: event_id.to_string(),
+            });
+            self.charge(p, None, amount);
+            if matches!(self.st.phase, GamePhase::Finished { .. }) {
+                return;
+            }
+        }
     }
 
     fn check_win(&mut self) {

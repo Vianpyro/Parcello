@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-use parcello_engine::{CardEffect, RentModel, TileKind};
+use parcello_engine::{CardEffect, MarketEffect, RentModel, TileKind};
 use parcello_mods::{ModError, resolve};
 
 fn write_mod(root: &Path, id: &str, files: &[(&str, &str)]) {
@@ -248,4 +248,75 @@ type = "jail"
 
     let err = resolve(tmp.path(), &["broken".into()]).unwrap_err();
     assert!(matches!(err, ModError::Content(_)));
+}
+
+#[test]
+fn event_pool_override_replaces_by_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_mod(
+        tmp.path(),
+        "base",
+        &[
+            ("properties.toml", BASE_PROPERTIES),
+            ("cards.toml", BASE_CARDS),
+            (
+                "events.toml",
+                r#"
+[forecast]
+gap_turns = 6
+
+[[event]]
+id = "crash"
+name = "Market Crash"
+effect = "rent_multiplier"
+magnitude_pct = -50
+duration_turns = 4
+"#,
+            ),
+        ],
+    );
+    write_mod(
+        tmp.path(),
+        "harsher",
+        &[(
+            "events.toml",
+            r#"
+[[event]]
+id = "crash"
+name = "Bigger Market Crash"
+effect = "rent_multiplier"
+magnitude_pct = -80
+duration_turns = 6
+"#,
+        )],
+    );
+
+    let resolved = resolve(tmp.path(), &["base".into(), "harsher".into()]).unwrap();
+    let events = &resolved.content.market_events;
+    assert_eq!(events.len(), 1, "override must not append a duplicate");
+    assert_eq!(events[0].name, "Bigger Market Crash");
+    assert_eq!(events[0].magnitude_pct, -80);
+    assert_eq!(events[0].effect, MarketEffect::RentMultiplier);
+}
+
+#[test]
+fn forecast_gap_turns_last_loaded_wins() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_mod(
+        tmp.path(),
+        "base",
+        &[
+            ("properties.toml", BASE_PROPERTIES),
+            ("cards.toml", BASE_CARDS),
+            ("events.toml", "[forecast]\ngap_turns = 6\n"),
+        ],
+    );
+    write_mod(
+        tmp.path(),
+        "faster",
+        &[("events.toml", "[forecast]\ngap_turns = 10\n")],
+    );
+
+    let resolved = resolve(tmp.path(), &["base".into(), "faster".into()]).unwrap();
+    assert_eq!(resolved.content.forecast_gap_turns, 10);
 }

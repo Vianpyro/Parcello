@@ -16,10 +16,10 @@ Parcello's architecture.
 board (9x9 ring, no Community Chest, two resorts instead of four stations,
 slightly less starting cash); the 40-tile Monopoly-like board moved to
 `mods/classic`; the clients render any `4*(d-1)` square ring. V2 build
-order steps 1-2 also landed: the blitz clock (12 s turns, 45 s personal
-time bank, ADR-0023), landing-only takeover legality (ADR-0022), shared
-building pools (ADR-0019), and takeover liquidation of improved tiles
-(the rest of ADR-0022). The rest of this note is still ahead. The
+order steps 1-3 also landed: the blitz clock (12 s turns, 45 s personal
+time bank, ADR-0023), landing-only takeover legality and improved-tile
+liquidation (ADR-0022), shared building pools (ADR-0019), and the public
+market forecast (ADR-0021). The rest of this note is still ahead. The
 remaining engine mechanics (below) are what make it genuinely *Business
 Tour* rather than "short Monopoly".
 
@@ -65,7 +65,15 @@ protocol break, so version accordingly):
    full strip when the subsidiary pool can't cover a normal step-down, so
    it can never stall. `mods/classic`/`mods/highroller` deliberately left
    untouched (classic stays unlimited/V1 until its step-6 removal).
-3. ADR-0021 market forecast (independent).
+3. **DONE (2026-07).** ADR-0021 market forecast: `data/events.toml` (a
+   `[forecast] gap_turns` scalar plus a pool of `[[event]]` defs), a
+   seeded rolling queue of 3 scheduled events plus one active effect,
+   ticked every turn transition. Three effects: `rent_multiplier`
+   (composes with the ADR-0012 boost), `acquisition_multiplier` (scales
+   takeover cost - sealed-bid pricing from ADR-0018 doesn't exist yet),
+   `wealth_tax` (one-shot, every alive player pays a percent of net worth
+   through the normal bankruptcy machinery). The base mod ships a starter
+   pool (bubble/crash/audit).
 4. ADR-0018 sealed bids (before points: points measure ownership).
 5. ADR-0020 victory points + pool-exhaustion end.
 6. ADR-0017 velocity deck + ADR-0024 jail, together (jail is only

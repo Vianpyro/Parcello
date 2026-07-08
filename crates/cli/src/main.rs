@@ -456,6 +456,29 @@ impl Ctx {
                 pool(view.conglomerates_available)
             );
         }
+        if let Some(active) = &view.forecast.active {
+            println!(
+                "  market: {} active ({:+}%, ends turn {})",
+                self.market_event_name(&active.event_id),
+                active.magnitude_pct,
+                active.ends_at_turn
+            );
+        }
+        if !view.forecast.queue.is_empty() {
+            let upcoming: Vec<String> = view
+                .forecast
+                .queue
+                .iter()
+                .map(|s| {
+                    format!(
+                        "{} (turn {})",
+                        self.market_event_name(&s.event_id),
+                        s.starts_at_turn
+                    )
+                })
+                .collect();
+            println!("  forecast: {}", upcoming.join(", "));
+        }
         for t in &view.pending_trades {
             println!(
                 "  trade #{}: {} gives {} for {} (to {}: accept {id} | refuse {id})",
@@ -717,6 +740,22 @@ impl Ctx {
                 "{} wins by controlling {groups} colour groups!",
                 self.player(*winner)
             ),
+            Event::MarketEventActivated {
+                event_id,
+                magnitude_pct,
+                duration_turns,
+                ..
+            } => {
+                let name = self.market_event_name(event_id);
+                if *duration_turns == 0 {
+                    format!("market event: {name} ({magnitude_pct:+}%)")
+                } else {
+                    format!("market event: {name} ({magnitude_pct:+}% for {duration_turns} turns)")
+                }
+            }
+            Event::MarketEventExpired { event_id } => {
+                format!("market event ended: {}", self.market_event_name(event_id))
+            }
         }
     }
 
@@ -751,5 +790,12 @@ impl Ctx {
             }
             None => format!("tile {index}"),
         }
+    }
+
+    fn market_event_name(&self, event_id: &str) -> String {
+        self.content
+            .as_ref()
+            .and_then(|c| c.content.market_event(event_id))
+            .map_or_else(|| event_id.to_string(), |def| def.name.clone())
     }
 }

@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use parcello_engine::{CardDef, GameContent, RuleParams, TileDef};
+use parcello_engine::{CardDef, GameContent, MarketEventDef, RuleParams, TileDef};
 use tracing::warn;
 
 use crate::ModError;
@@ -19,6 +19,8 @@ pub struct RegistryBuilder {
     chance: Vec<CardDef>,
     community: Vec<CardDef>,
     rules: BTreeMap<String, i64>,
+    market_events: Vec<MarketEventDef>,
+    forecast_gap_turns: Option<u32>,
 }
 
 impl RegistryBuilder {
@@ -58,6 +60,33 @@ impl RegistryBuilder {
         }
     }
 
+    /// Insert or replace a market event by id (ADR-0021), same merge rule
+    /// as tiles/cards.
+    pub fn upsert_market_event(&mut self, mod_id: &str, event: MarketEventDef) {
+        match self.market_events.iter_mut().find(|e| e.id == event.id) {
+            Some(existing) => {
+                warn!(mod_id, event = %event.id, "market event override (last-loaded-wins)");
+                *existing = event;
+            }
+            None => self.market_events.push(event),
+        }
+    }
+
+    /// Sets the gap between scheduled market events (ADR-0021), same
+    /// last-loaded-wins/WARN-on-conflict rule as `set_rule` - except a mod
+    /// that simply doesn't mention `gap_turns` never counts as a conflict
+    /// (that's the whole reason this takes `Option<u32>` instead of `u32`).
+    pub fn set_forecast_gap_turns(&mut self, mod_id: &str, value: u32) {
+        if let Some(old) = self.forecast_gap_turns.replace(value) {
+            warn!(
+                mod_id,
+                old,
+                new = value,
+                "forecast gap_turns override (last-loaded-wins)"
+            );
+        }
+    }
+
     /// Freeze into validated content. Unknown rule keys are ignored with a
     /// WARN so future keys do not hard-break older game versions.
     pub fn build(self) -> Result<GameContent, ModError> {
@@ -85,6 +114,8 @@ impl RegistryBuilder {
             chance: self.chance,
             community: self.community,
             rules,
+            market_events: self.market_events,
+            forecast_gap_turns: self.forecast_gap_turns.unwrap_or(0),
         };
         content.validate()?;
         Ok(content)

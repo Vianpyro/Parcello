@@ -199,4 +199,15 @@ pub enum Event {
         winner: usize,
         groups: u8,
     },
+    /// A scheduled market event fired (ADR-0021). `WealthTax` never gets a
+    /// matching `MarketEventExpired` - it resolves in the same instant.
+    MarketEventActivated {
+        event_id: String,
+        effect: crate::content::MarketEffect,
+        magnitude_pct: i64,
+        duration_turns: u32,
+    },
+    MarketEventExpired {
+        event_id: String,
+    },
 }

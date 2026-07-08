@@ -601,6 +601,8 @@ fn fuzz_content() -> GameContent {
             conglomerate_pool_factor: 2,
             ..RuleParams::default()
         },
+        market_events: vec![],
+        forecast_gap_turns: 0,
     }
 }
 

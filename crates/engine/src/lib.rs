@@ -20,11 +20,15 @@ mod apply;
 
 pub use command::{CommandKind, PlayerCommand};
 pub use content::{
-    CardDef, CardEffect, GameContent, PropertyDef, RentModel, RuleParams, TileDef, TileKind,
+    CardDef, CardEffect, GameContent, MarketEffect, MarketEventDef, PropertyDef, RentModel,
+    RuleParams, TileDef, TileKind,
 };
 pub use error::{CommandError, ContentError};
 pub use event::{DeckKind, Event};
-pub use state::{GamePhase, GameState, Player, PlayerId, TileState, TradeOffer, TurnPhase};
+pub use state::{
+    ActiveMarketEvent, GamePhase, GameState, MarketForecast, Player, PlayerId, ScheduledEvent,
+    TileState, TradeOffer, TurnPhase,
+};
 pub use strategy::{BankruptcyResolver, DicePolicy, RentCalculator};
 pub use view::{ClientView, PlayerView};
 
