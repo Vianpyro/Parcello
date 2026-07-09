@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::content::GameContent;
 use crate::state::{GamePhase, GameState, MarketForecast, TileState, TradeOffer, TurnPhase};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -41,13 +42,17 @@ pub struct PlayerView {
     #[serde(default)]
     pub jail_cards: u8,
     pub bankrupt: bool,
+    /// Race-to-target score (ADR-0020); see `GameState::victory_points`.
+    /// Meaningless (always 0) when `rules.win_victory_points` is off.
+    #[serde(default)]
+    pub victory_points: i64,
 }
 
 impl ClientView {
     /// Projection for one seat: everything public plus only the trade
     /// offers this seat proposed or received.
-    pub fn for_seat(state: &GameState, seat: usize) -> Self {
-        let mut view = Self::of(state);
+    pub fn for_seat(state: &GameState, content: &GameContent, seat: usize) -> Self {
+        let mut view = Self::of(state, content);
         view.pending_trades
             .retain(|t| t.from == seat || t.to == seat);
         // Sealed-bid secrecy (ADR-0018): a seat sees only its own bid while
@@ -65,13 +70,14 @@ impl ClientView {
 
     /// Omniscient projection (every open offer). Test/replay tooling only:
     /// the server must always send `for_seat` views.
-    pub fn of(state: &GameState) -> Self {
+    pub fn of(state: &GameState, content: &GameContent) -> Self {
         Self {
             phase: state.phase,
             players: state
                 .players
                 .iter()
-                .map(|p| PlayerView {
+                .enumerate()
+                .map(|(i, p)| PlayerView {
                     id: p.id.clone(),
                     name: p.name.clone(),
                     cash: p.cash,
@@ -79,6 +85,7 @@ impl ClientView {
                     in_jail: p.jail_turns.is_some(),
                     jail_cards: p.jail_cards,
                     bankrupt: p.bankrupt,
+                    victory_points: state.victory_points(content, i),
                 })
                 .collect(),
             current: state.current,

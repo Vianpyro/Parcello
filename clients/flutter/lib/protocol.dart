@@ -70,6 +70,8 @@ class GameContent {
   /// 0 = mechanic disabled.
   final int expropriation;
   final int rentBoost;
+  /// Victory-point race target (ADR-0020); 0 = off.
+  final int winVictoryPoints;
 
   GameContent.fromJson(Map<String, dynamic> resolved)
       : board = (resolved['content']['board'] as List)
@@ -81,6 +83,8 @@ class GameContent {
         expropriation =
             resolved['content']['rules']['expropriation'] as int? ?? 0,
         rentBoost = resolved['content']['rules']['rent_boost'] as int? ?? 0,
+        winVictoryPoints =
+            resolved['content']['rules']['win_victory_points'] as int? ?? 0,
         modIds = (resolved['mods'] as List)
             .map((m) => m['id'] as String)
             .toList();
@@ -104,6 +108,9 @@ class RuleParams {
   final int expropriation;
   final int rentBoost;
   final int winFullGroups;
+  /// Race-to-target victory points (ADR-0020); 0 disables. Also gates the
+  /// round bonus and the conglomerate-pool "doom clock".
+  final int winVictoryPoints;
   /// Shared building pool sizing factors (ADR-0019); 0 disables pooling.
   final int subsidiaryPoolFactor;
   final int conglomeratePoolFactor;
@@ -117,6 +124,7 @@ class RuleParams {
         expropriation = j['expropriation'] as int? ?? 0,
         rentBoost = j['rent_boost'] as int? ?? 0,
         winFullGroups = j['win_full_groups'] as int? ?? 0,
+        winVictoryPoints = j['win_victory_points'] as int? ?? 0,
         subsidiaryPoolFactor = j['subsidiary_pool_factor'] as int? ?? 0,
         conglomeratePoolFactor = j['conglomerate_pool_factor'] as int? ?? 0;
 }
@@ -144,6 +152,9 @@ class PlayerView {
   final bool inJail;
   final int jailCards;
   final bool bankrupt;
+  /// Race-to-target score (ADR-0020); meaningless (always 0) when
+  /// `RuleParams.winVictoryPoints` is off.
+  final int victoryPoints;
 
   PlayerView.fromJson(Map<String, dynamic> j)
       : id = j['id'] as String,
@@ -152,7 +163,8 @@ class PlayerView {
         position = j['position'] as int,
         inJail = j['in_jail'] as bool,
         jailCards = j['jail_cards'] as int? ?? 0,
-        bankrupt = j['bankrupt'] as bool;
+        bankrupt = j['bankrupt'] as bool,
+        victoryPoints = j['victory_points'] as int? ?? 0;
 }
 
 class TileState {
@@ -366,6 +378,10 @@ String describeEvent(
       return "Time's up! ${p(e['winner'])} wins on net worth.";
     case 'won_by_groups':
       return "${p(e['winner'])} wins by controlling ${e['groups']} colour groups!";
+    case 'won_by_points':
+      return "${p(e['player'])} wins with ${e['points']} victory points!";
+    case 'won_by_pool_exhaustion':
+      return "The conglomerate pool ran dry -- ${p(e['winner'])} wins on victory points!";
     case 'market_event_activated':
       final pct = e['magnitude_pct'] as int;
       final sign = pct > 0 ? '+' : '';

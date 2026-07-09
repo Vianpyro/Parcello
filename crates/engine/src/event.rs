@@ -190,6 +190,17 @@ pub enum Event {
         winner: usize,
         groups: u8,
     },
+    /// Reached the victory-point target (ADR-0020, `rules.win_victory_points`).
+    WonByPoints {
+        player: usize,
+        points: i64,
+    },
+    /// The shared conglomerate pool ran dry with nobody at the target yet
+    /// (ADR-0019/0020 "doom clock"): highest score wins, ties by net worth
+    /// then the lowest seat.
+    WonByPoolExhaustion {
+        winner: usize,
+    },
     /// A scheduled market event fired (ADR-0021). `WealthTax` never gets a
     /// matching `MarketEventExpired` - it resolves in the same instant.
     MarketEventActivated {

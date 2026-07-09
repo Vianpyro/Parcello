@@ -166,6 +166,11 @@ pub struct RuleParams {
     /// 0 disables. "Control all cities of N colours."
     #[serde(default)]
     pub win_full_groups: i64,
+    /// Race to this many victory points (ADR-0020, `GameState::victory_points`);
+    /// 0 disables. Also gates the round bonus and the conglomerate-pool
+    /// "doom clock" - both are meaningless without an active points race.
+    #[serde(default)]
+    pub win_victory_points: i64,
     /// Shared subsidiary-pool sizing factor (ADR-0019): the table-wide
     /// stock of levels 1..max-1 is `round(factor * sqrt(players))` at game
     /// start; 0 disables pooling (unlimited stock, like today).
@@ -188,6 +193,7 @@ impl Default for RuleParams {
             expropriation: 0,
             rent_boost: 0,
             win_full_groups: 0,
+            win_victory_points: 0,
             subsidiary_pool_factor: 0,
             conglomerate_pool_factor: 0,
         }

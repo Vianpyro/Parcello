@@ -1095,6 +1095,11 @@ class _SidePanel extends StatelessWidget {
                 Text('NW \$${s.netWorth(i)}',
                     style: const TextStyle(
                         fontSize: 11, color: Color(0xFF9AA3B2))),
+              // Victory-point race (ADR-0020): "the race IS the game".
+              if ((s.content?.winVictoryPoints ?? 0) > 0)
+                Text('VP ${p.victoryPoints}/${s.content!.winVictoryPoints}',
+                    style: const TextStyle(
+                        fontSize: 11, color: Color(0xFF9AA3B2))),
             ]),
         ]),
       ));
@@ -1184,6 +1189,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
     ('expropriation', 'Expropriation %'),
     ('rent_boost', 'Rent boost %'),
     ('win_full_groups', 'Domination groups (0=off)'),
+    ('win_points', 'Victory points target (0=off)'),
     ('subsidiary_pool', 'Subsidiary pool factor (0=off)'),
     ('conglomerate_pool', 'Conglomerate pool factor (0=off)'),
   ];
@@ -1208,6 +1214,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       'expropriation': TextEditingController(text: '${r.expropriation}'),
       'rent_boost': TextEditingController(text: '${r.rentBoost}'),
       'win_full_groups': TextEditingController(text: '${r.winFullGroups}'),
+      'win_points': TextEditingController(text: '${r.winVictoryPoints}'),
       'subsidiary_pool':
           TextEditingController(text: '${r.subsidiaryPoolFactor}'),
       'conglomerate_pool':
@@ -1240,6 +1247,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
         'expropriation': _n('expropriation'),
         'rent_boost': _n('rent_boost'),
         'win_full_groups': _n('win_full_groups'),
+        'win_victory_points': _n('win_points'),
         'subsidiary_pool_factor': _n('subsidiary_pool'),
         'conglomerate_pool_factor': _n('conglomerate_pool'),
       },
@@ -1306,6 +1314,10 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       ('Expropriation', r.expropriation == 0 ? 'off' : '${r.expropriation}%'),
       ('Rent boost', r.rentBoost == 0 ? 'off' : '${r.rentBoost}%'),
       ('Domination', r.winFullGroups == 0 ? 'off' : '${r.winFullGroups} groups'),
+      (
+        'Victory points',
+        r.winVictoryPoints == 0 ? 'off' : '${r.winVictoryPoints}'
+      ),
       (
         'Subsidiary pool',
         r.subsidiaryPoolFactor == 0 ? 'off' : 'x${r.subsidiaryPoolFactor}'

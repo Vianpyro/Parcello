@@ -16,12 +16,13 @@ Parcello's architecture.
 board (9x9 ring, no Community Chest, two resorts instead of four stations,
 slightly less starting cash); the 40-tile Monopoly-like board moved to
 `mods/classic`; the clients render any `4*(d-1)` square ring. V2 build
-order steps 1-4 also landed: the blitz clock (12 s turns, 45 s personal
+order steps 1-5 also landed: the blitz clock (12 s turns, 45 s personal
 time bank, ADR-0023), landing-only takeover legality and improved-tile
 liquidation (ADR-0022), shared building pools (ADR-0019), the public
-market forecast (ADR-0021), and sealed-bid auctions (ADR-0018). The rest
-of this note is still ahead. The remaining engine mechanics (below) are
-what make it genuinely *Business Tour* rather than "short Monopoly".
+market forecast (ADR-0021), sealed-bid auctions (ADR-0018), and victory
+points + the pool-exhaustion doom clock (ADR-0020). The rest of this note
+is still ahead. The remaining engine mechanics (below) are what make it
+genuinely *Business Tour* rather than "short Monopoly".
 
 Naming caution (commercial plans, see the Steam note): game *mechanics* are
 not protectable, but Business Tour's specific names ("Lost Island", "World
@@ -91,7 +92,33 @@ protocol break, so version accordingly):
    flags as reusable for ADR-0024's corruption vote. `rules.auction_on_decline`
    is gone (there is no plain decline anymore - landing on an affordable
    tile always commits at least the floor).
-5. ADR-0020 victory points + pool-exhaustion end.
+5. **DONE (2026-07).** ADR-0020 victory points + pool-exhaustion end.
+   `RuleParams.win_victory_points` (base mod: 20, `win_full_groups` turned
+   off so domination doesn't short-circuit the race). `GameState::
+   victory_points`: 3/complete group, 2/conglomerate-level tile,
+   1/group-scaled ("resort") tile owned, plus a stored `Player::
+   round_bonus_vp` - the only non-reversible term, +2 banked to whoever
+   has the strictly highest cash (ties to the lowest seat) each time
+   every surviving player has completed a turn. Checked after every
+   command like `check_group_win`; reaching the target ends the game
+   (`Event::WonByPoints`). Doom clock: if a `Build` empties the shared
+   conglomerate pool (ADR-0019) and nobody just crossed the target, the
+   game ends immediately - highest score wins, ties by net worth then
+   the lowest seat (`Event::WonByPoolExhaustion`); both checks are pure
+   game state, no wall clock, ordered so a simultaneous cross is always a
+   points win. **Interim decision, revisit at step 6:** the round bonus
+   needs "the round" - ADR-0020 defines it as the minimum `hands_cycled`
+   (ADR-0017's velocity deck) across surviving players, but ADR-0017
+   isn't built yet. Bridged with `Player.hands_cycled: u32`, incremented
+   once per completed turn under today's dice movement - "a hand cycled"
+   already means "a turn completed" under dice, so only the movement
+   mechanism should need to change at step 6, not this field or its
+   increment site (`advance_turn`). `ClientView`/`PlayerView` gained
+   `victory_points` (computed once server-side, not reimplemented per
+   client, learning from `net_worth`'s past triplication) - the first
+   `ClientView` methods to need `&GameContent`, so `of`/`for_seat` grew a
+   `content` parameter (5 call sites in `server/room.rs`, mechanical).
+   `bot::decide` is untouched this step, per the ADR's own allowance.
 6. ADR-0017 velocity deck + ADR-0024 jail, together (jail is only
    redesigned once the dice are gone). The big one - bot plus most of
    the movement tests - kept last so it never blocks the rest.
@@ -127,7 +154,7 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Stations (gares) | 4 group-scaled tiles | removed, or repurposed as "resorts" | DONE - two resorts on `base` |
 | Mortgages | full mortgage/redeem flow | removed (slows games) | **rules-flag** (`rules.mortgage`; today the 4 commands are always available - add a disable branch) |
 | Jail | jail tile, fine, doubles, cards | "blocked several turns" island | keep the mechanic, **rename** (mod cosmetic); tuning turn count is small **engine** |
-| Win condition | last player standing + richest at time limit + control N full groups | also: own all resorts, own a whole side | mostly DONE (time-limit wealth win ADR-0010, domination win ADR-0013); resorts need a string rule, a "side" needs ring geometry - both deferred |
+| Win condition | last player standing + richest at time limit + control N full groups | victory-point race to a target, reversible with the board | DONE - superseded by the ADR-0020 victory-point race (step 5); last-standing and time-limit wealth (ADR-0010) survive as backstops, domination (ADR-0013) is off by default so it doesn't short-circuit the race |
 | Time-boxed game | `--game-timeout`: richest by net worth wins at the buzzer | 15/30 min presets, host-chosen | DONE (ADR-0010); host-chosen per-room duration is a follow-up |
 | Expropriation | `rules.expropriation`: seize a rival's unimproved property at a premium (owner compensated) | tune cost / allow improved targets | DONE (ADR-0011) |
 | Rent multiplier boost | `rules.rent_boost`: pay to raise an owned tile's rent +50%/step, cap 3 | theme it ("championships"), tie to a board event | DONE (ADR-0012) |

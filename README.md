@@ -246,9 +246,10 @@ are allowlist-validated server-side. Examples: play the long game with
 
 V1 hook points: `rules.{starting_balance, go_salary, jail_fine,
 max_houses_per_property, bankruptcy_threshold,
-expropriation, rent_boost, win_full_groups, subsidiary_pool_factor,
-conglomerate_pool_factor}` (booleans as 0/1; `expropriation`/`rent_boost`
-are cost percents, `win_full_groups` a group count, and the two pool
+expropriation, rent_boost, win_full_groups, win_victory_points,
+subsidiary_pool_factor, conglomerate_pool_factor}` (booleans as 0/1;
+`expropriation`/`rent_boost` are cost percents, `win_full_groups` a group
+count, `win_victory_points` a point target (ADR-0020), and the two pool
 factors a multiplier scaling `round(factor * sqrt(players))`, 0 = off),
 `cards.chance[*]`,
 `cards.community[*]`, `properties[*]` (including per-tile `rent_model`:
@@ -318,9 +319,22 @@ on top of the usual compensation and returning to the shared pools) and
 rent boosts
 (pay to raise an owned tile's rent one step, capped, ADR-0012) - both on by
 default in the base fast board. Multiple win conditions: last player
-standing, richest at the time limit (ADR-0010), and a domination win -
-control N complete colour groups (`rules.win_full_groups`, 3 in the base
-fast board, ADR-0013). Public market forecast (ADR-0021, `data/events.toml`):
+standing, richest at the time limit (ADR-0010), a domination win - control
+N complete colour groups (`rules.win_full_groups`, off by default in the
+base fast board, ADR-0013) - and the primary v2 win condition, a race to
+`rules.win_victory_points` (20 in the base fast board, ADR-0020):
+`PlayerView.victory_points` is `3` per complete colour group, `2` per
+conglomerate-level tile, `1` per group-scaled ("resort") tile owned, plus
+a stored `+2`/round bonus that permanently banks to whoever has the
+strictly highest cash each time every surviving player has completed a
+turn (ties to the lowest seat) - everything but the round bonus is a live
+recomputation of the current board, so a hostile takeover (ADR-0022) both
+gains and costs points in the same instant. Reaching the target ends the
+game instantly (`Event::WonByPoints`); if nobody gets there first and a
+`Build` empties the shared conglomerate pool (ADR-0019), the game ends
+immediately too - highest score wins, ties by net worth then the lowest
+seat (`Event::WonByPoolExhaustion`, the "doom clock"). Public market
+forecast (ADR-0021, `data/events.toml`):
 a seeded, rolling queue of the next 3 scheduled market events plus whichever
 one is currently active - `rent_multiplier` (composes with the rent boost
 step above), `acquisition_multiplier` (scales takeover cost), and
@@ -365,10 +379,11 @@ deck rotation once drawn.
   away (ADR-0014). Removed via "Remove bot" / `rmbot`.
 - The host sets each game's options in the lobby (ADR-0015): the three
   timers (game, turn, time bank) and every rule scalar (starting balance, GO
-  salary, jail fine, max houses, bankruptcy threshold,
-  expropriation %, rent boost %, domination groups, subsidiary/conglomerate
-  pool factors). Edits broadcast live to the lobby; the server clamps every
-  value. New rooms default to a 60-minute game with a 12 s turn limit and a
+  salary, jail fine, max houses, bankruptcy threshold, expropriation %,
+  rent boost %, domination groups, victory point target,
+  subsidiary/conglomerate pool factors). Edits broadcast live to the
+  lobby; the server clamps every value. New rooms default to a 60-minute
+  game with a 12 s turn limit and a
   45 s personal time bank (ADR-0023). One server runs many rooms, each with
   its own settings - no orchestrator needed. `--turn-timeout` /
   `--time-bank-seconds` / `--game-timeout` set the per-room defaults (0
@@ -391,18 +406,21 @@ worth (server clock, engine rule); 0011 expropriation; 0012 rent boosts;
 0013 domination win (control N full colour groups); 0014 server-side bot
 seats (host-added, yield to humans, shared `bot::decide` heuristic);
 0015 per-room host-editable settings (timers + rules chosen in the lobby,
-clamped server-side; one server runs many independent games); 0018 sealed-bid auctions on every landing (replaces buy/decline and the
-open round-robin auction; a server-timed 5s window collected from every
-living seat at once, not a single actor - the first simultaneous
-multi-seat command phase, and the model for ADR-0024's corruption vote);
-0019 shared
+clamped server-side; one server runs many independent games); 0018
+sealed-bid auctions on every landing (replaces buy/decline and the open
+round-robin auction; a server-timed 5s window collected from every living
+seat at once, not a single actor - the first simultaneous multi-seat
+command phase, and the model for ADR-0024's corruption vote); 0019 shared
 building pools (subsidiaries/conglomerates, table-wide scarcity scaled by
-player count); 0021 public market forecast (seeded, rolling event queue;
-rent/acquisition multipliers and a one-shot wealth tax); 0022 takeover
-tightened to the landing tile only, at end of turn, and improved tiles
-seizable with liquidation to the pools (amends 0011, shares accounting with
-0019); 0023 blitz clock: 12s turns plus a 45s personal time bank, never
-refilled (amends 0015).
+player count); 0020 victory points + pool-exhaustion end (the primary v2
+win condition; the round bonus reads `Player.hands_cycled`, an interim
+"turns taken" counter standing in for ADR-0017's not-yet-built velocity
+deck - same meaning, source changes at that step); 0021 public market
+forecast (seeded, rolling event queue; rent/acquisition multipliers and a
+one-shot wealth tax); 0022 takeover tightened to the landing tile only,
+at end of turn, and improved tiles seizable with liquidation to the pools
+(amends 0011, shares accounting with 0019); 0023 blitz clock: 12s turns
+plus a 45s personal time bank, never refilled (amends 0015).
 
 ## Roadmap
 

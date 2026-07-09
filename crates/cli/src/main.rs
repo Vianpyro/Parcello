@@ -265,6 +265,7 @@ fn apply_setting(s: &mut RoomSettings, field: &str, value: &str) -> Option<()> {
         "expropriation" => r.expropriation = value.parse().ok()?,
         "rent_boost" => r.rent_boost = value.parse().ok()?,
         "win_full_groups" => r.win_full_groups = value.parse().ok()?,
+        "win_points" => r.win_victory_points = value.parse().ok()?,
         "subsidiary_pool" => r.subsidiary_pool_factor = value.parse().ok()?,
         "conglomerate_pool" => r.conglomerate_pool_factor = value.parse().ok()?,
         _ => return None,
@@ -406,7 +407,7 @@ impl Ctx {
         println!(
             "* settings: game={} turn={} bank={} | starting_balance={} go_salary={} jail_fine={} \
              max_houses={} bankruptcy_threshold={} expropriation={} \
-             rent_boost={} win_full_groups={} subsidiary_pool={} conglomerate_pool={}",
+             rent_boost={} win_full_groups={} win_victory_points={} subsidiary_pool={} conglomerate_pool={}",
             secs(s.game_seconds),
             secs(s.turn_seconds),
             secs(s.time_bank_seconds),
@@ -418,6 +419,7 @@ impl Ctx {
             r.expropriation,
             r.rent_boost,
             r.win_full_groups,
+            r.win_victory_points,
             r.subsidiary_pool_factor,
             r.conglomerate_pool_factor,
         );
@@ -426,6 +428,12 @@ impl Ctx {
     fn print_view(&mut self, view: &ClientView) {
         self.names = view.players.iter().map(|p| p.name.clone()).collect();
         self.ids = view.players.iter().map(|p| p.id.clone()).collect();
+        // Victory-point race (ADR-0020): "the race IS the game" when on,
+        // so show progress toward the target next to every player.
+        let vp_target = self
+            .content
+            .as_ref()
+            .map_or(0, |c| c.content.rules.win_victory_points);
         for (i, p) in view.players.iter().enumerate() {
             let marker = if i == view.current { ">" } else { " " };
             let me = if Some(i) == self.my_seat { "*" } else { " " };
@@ -436,12 +444,16 @@ impl Ctx {
             } else {
                 String::new()
             };
+            let vp = if vp_target > 0 {
+                format!(" VP:{}/{vp_target}", p.victory_points)
+            } else {
+                String::new()
+            };
             println!(
-                "{marker}{me} {} ${} @ {}{}",
+                "{marker}{me} {} ${} @ {}{status}{vp}",
                 p.name,
                 p.cash,
                 self.tile_name(p.position),
-                status
             );
         }
         if view.subsidiaries_available.is_some() || view.conglomerates_available.is_some() {
@@ -725,6 +737,16 @@ impl Ctx {
             }
             Event::WonByGroups { winner, groups } => format!(
                 "{} wins by controlling {groups} colour groups!",
+                self.player(*winner)
+            ),
+            Event::WonByPoints { player, points } => {
+                format!(
+                    "{} wins with {points} victory points!",
+                    self.player(*player)
+                )
+            }
+            Event::WonByPoolExhaustion { winner } => format!(
+                "the conglomerate pool ran dry - {} wins on victory points!",
                 self.player(*winner)
             ),
             Event::MarketEventActivated {

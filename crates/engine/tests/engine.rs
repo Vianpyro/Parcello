@@ -1061,6 +1061,253 @@ fn group_win_is_off_by_default() {
 }
 
 #[test]
+fn victory_points_score_groups_and_conglomerates() {
+    let engine = engine_with(plain_board(), &[]);
+    let mut st = two_players(&engine);
+    let content = engine.content();
+
+    // A full brown group: +3.
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    assert_eq!(st.victory_points(content, 0), 3);
+
+    // One tile built to the conglomerate level (5 houses, plain_board's
+    // default cap): +2 more.
+    st.tiles[2].houses = 5;
+    assert_eq!(st.victory_points(content, 0), 5);
+
+    // Losing the group (a rival buys ave_b) drops the group bonus; the
+    // conglomerate tile is still owned, so its bonus stays.
+    st.tiles[3].owner = Some(1);
+    assert_eq!(
+        st.victory_points(content, 0),
+        2,
+        "group lost, conglomerate tile kept"
+    );
+
+    // Losing the conglomerate tile itself drops to zero: fully reversible.
+    st.tiles[2].owner = None;
+    assert_eq!(st.victory_points(content, 0), 0);
+}
+
+#[test]
+fn victory_points_score_resorts_and_round_bonus() {
+    let engine = engine_with(transit_board(), &[]);
+    let mut st = two_players(&engine);
+    let content = engine.content();
+
+    st.tiles[2].owner = Some(0); // station_a, group-scaled
+    assert_eq!(st.victory_points(content, 0), 1, "one resort owned");
+
+    st.tiles[3].owner = Some(0); // station_b: completes the "transit" group too
+    assert_eq!(
+        st.victory_points(content, 0),
+        3 + 2,
+        "group complete (+3) plus both resorts (+1 each)"
+    );
+
+    st.tiles[2].owner = None; // lose one resort and the group completion
+    assert_eq!(
+        st.victory_points(content, 0),
+        1,
+        "reversible: down to the one remaining resort"
+    );
+
+    // Round bonus is the one stored, non-reversible term.
+    st.players[0].round_bonus_vp = 4;
+    assert_eq!(st.victory_points(content, 0), 1 + 4);
+}
+
+#[test]
+fn round_bonus_favors_highest_cash_and_ties_to_lowest_seat() {
+    let engine = engine_with_rules(&[], |r| r.win_victory_points = 1000);
+    let mut st = engine.new_game(
+        vec![
+            ("p0".into(), "P0".into()),
+            ("p1".into(), "P1".into()),
+            ("p2".into(), "P2".into()),
+        ],
+        7,
+    );
+    st.players[1].cash += 500; // p1 uniquely richest for round 1
+    st.turn = TurnPhase::AwaitEnd;
+
+    let (next, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
+    let mut next = next;
+    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = step(&engine, &next, cmd("p1", CommandKind::EndTurn));
+    assert!(
+        next.players.iter().all(|p| p.round_bonus_vp == 0),
+        "round 1 isn't complete until p2 also goes"
+    );
+    let mut next = next;
+    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = step(&engine, &next, cmd("p2", CommandKind::EndTurn));
+    assert_eq!(next.players[1].round_bonus_vp, 2, "p1 was uniquely richest");
+    assert_eq!(next.players[0].round_bonus_vp, 0);
+    assert_eq!(next.players[2].round_bonus_vp, 0);
+
+    // Round 2: p0 and p2 are now tied for richest (both above p1) - the
+    // lowest seat (p0) must win the tie.
+    let mut next = next;
+    next.players[0].cash = 10_000;
+    next.players[2].cash = 10_000;
+    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = step(&engine, &next, cmd("p0", CommandKind::EndTurn));
+    let mut next = next;
+    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = step(&engine, &next, cmd("p1", CommandKind::EndTurn));
+    let mut next = next;
+    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = step(&engine, &next, cmd("p2", CommandKind::EndTurn));
+    assert_eq!(
+        next.players[0].round_bonus_vp, 2,
+        "p0 wins the round-2 tie (round 1's bonus went to p1)"
+    );
+    assert_eq!(next.players[1].round_bonus_vp, 2, "unchanged from round 1");
+    assert_eq!(
+        next.players[2].round_bonus_vp, 0,
+        "never strictly richest in either round"
+    );
+}
+
+#[test]
+fn points_win_fires_exactly_at_the_target() {
+    // Three players so p0's and p1's single EndTurn each don't complete a
+    // full round (p2 hasn't gone yet) - keeps this test isolated from the
+    // round-bonus mechanism, covered separately.
+    let engine = engine_with_rules(&[], |r| r.win_victory_points = 3); // one full group's worth
+    let mut st = engine.new_game(
+        vec![
+            ("p0".into(), "P0".into()),
+            ("p1".into(), "P1".into()),
+            ("p2".into(), "P2".into()),
+        ],
+        7,
+    );
+    st.tiles[2].owner = Some(0); // ave_a only: one tile short of a full group
+    st.turn = TurnPhase::AwaitEnd;
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
+    assert!(!ev.iter().any(|e| matches!(e, Event::WonByPoints { .. })));
+    assert_eq!(st.phase, GamePhase::Active);
+
+    let mut st = st;
+    st.tiles[3].owner = Some(0); // completes the brown group -> 3 points
+    st.turn = TurnPhase::AwaitEnd;
+    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::EndTurn));
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::WonByPoints {
+            player: 0,
+            points: 3
+        }
+    )));
+    assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
+}
+
+#[test]
+fn points_win_takes_priority_over_the_doom_clock_on_the_same_command() {
+    let engine = engine_with_rules(&[], |r| {
+        r.subsidiary_pool_factor = 1; // pool = 1 for 2 players
+        r.conglomerate_pool_factor = 1; // pool = 1 for 2 players
+        r.win_victory_points = 5; // exactly what this build reaches
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[2].houses = 4;
+    st.tiles[3].houses = 4;
+    st.players[0].cash = 1_000;
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Build {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert_eq!(
+        st.conglomerates_available,
+        Some(0),
+        "the pool also hit zero on this same command"
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::WonByPoints {
+            player: 0,
+            points: 5
+        }
+    )));
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, Event::WonByPoolExhaustion { .. }))
+    );
+    assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
+}
+
+#[test]
+fn doom_clock_ends_the_game_when_nobody_has_reached_the_target() {
+    let engine = engine_with_rules(&[], |r| {
+        r.subsidiary_pool_factor = 1;
+        r.conglomerate_pool_factor = 1;
+        r.win_victory_points = 100; // far out of reach
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0);
+    st.tiles[3].owner = Some(0);
+    st.tiles[2].houses = 4;
+    st.tiles[3].houses = 4;
+    st.players[0].cash = 1_000;
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Build {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert_eq!(st.conglomerates_available, Some(0));
+    assert!(!ev.iter().any(|e| matches!(e, Event::WonByPoints { .. })));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::WonByPoolExhaustion { winner: 0 }))
+    );
+    assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
+}
+
+#[test]
+fn doom_clock_ties_break_by_net_worth_then_lowest_seat() {
+    let engine = engine_with_rules(&[], |r| {
+        r.conglomerate_pool_factor = 1;
+        r.win_victory_points = 100;
+    });
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(0); // ave_a
+    st.tiles[3].owner = Some(0); // ave_b: brown complete, 3 points
+    st.tiles[6].owner = Some(1); // blvd: navy (singleton) complete, 3 points
+    st.players[1].cash += 50; // p1 pulls ahead on net worth despite the tie
+    st.conglomerates_available = Some(0); // pool already dry (test-only shortcut)
+    st.turn = TurnPhase::AwaitEnd;
+
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::WonByPoolExhaustion { winner: 1 }))
+    );
+    assert_eq!(
+        st.phase,
+        GamePhase::Finished { winner: 1 },
+        "net worth breaks the points tie"
+    );
+}
+
+#[test]
 fn expropriation_requires_landing_on_the_tile() {
     // Rival-owned, unimproved, unmortgaged, and otherwise perfectly legal -
     // but the seizer is standing elsewhere (ADR-0022: takeover only applies
@@ -1090,7 +1337,7 @@ fn expropriation_requires_landing_on_the_tile() {
 fn view_hides_rng_and_deck_order() {
     let engine = engine_with(plain_board(), &[]);
     let st = two_players(&engine);
-    let view = ClientView::of(&st);
+    let view = ClientView::of(&st, engine.content());
     let json = serde_json::to_string(&view).expect("view serializes");
     assert!(!json.contains("rng"));
     assert!(!json.contains("deck"));
@@ -1125,10 +1372,27 @@ fn seat_view_shows_only_own_trade_offers() {
             },
         ),
     );
-    assert_eq!(ClientView::of(&st).pending_trades.len(), 1);
-    assert_eq!(ClientView::for_seat(&st, 0).pending_trades.len(), 1);
-    assert_eq!(ClientView::for_seat(&st, 1).pending_trades.len(), 1);
-    assert!(ClientView::for_seat(&st, 2).pending_trades.is_empty());
+    assert_eq!(
+        ClientView::of(&st, engine.content()).pending_trades.len(),
+        1
+    );
+    assert_eq!(
+        ClientView::for_seat(&st, engine.content(), 0)
+            .pending_trades
+            .len(),
+        1
+    );
+    assert_eq!(
+        ClientView::for_seat(&st, engine.content(), 1)
+            .pending_trades
+            .len(),
+        1
+    );
+    assert!(
+        ClientView::for_seat(&st, engine.content(), 2)
+            .pending_trades
+            .is_empty()
+    );
 }
 
 #[test]

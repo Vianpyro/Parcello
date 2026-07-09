@@ -526,7 +526,7 @@ impl Room {
             if !seat.is_bot {
                 continue;
             }
-            let view = ClientView::for_seat(st, i);
+            let view = ClientView::for_seat(st, self.engine.content(), i);
             // The engine's content carries the effective rules after
             // start_game rebuilds it (ADR-0015), so the bot plays by the
             // room's actual settings.
@@ -650,12 +650,13 @@ impl Room {
             }
         };
 
-        let view = match &self.phase {
-            Phase::Lobby => None,
-            Phase::Active(state) | Phase::Finished(state) => {
-                Some(Box::new(ClientView::for_seat(state, seat_index)))
-            }
-        };
+        let view =
+            match &self.phase {
+                Phase::Lobby => None,
+                Phase::Active(state) | Phase::Finished(state) => Some(Box::new(
+                    ClientView::for_seat(state, self.engine.content(), seat_index),
+                )),
+            };
         let joined = ServerMessage::Joined {
             code: self.code.clone(),
             seat: seat_index,
@@ -783,7 +784,7 @@ impl Room {
         let time_bank_seconds = self.configured_time_bank();
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::GameStarted {
-                view: Box::new(ClientView::for_seat(&state, seat)),
+                view: Box::new(ClientView::for_seat(&state, self.engine.content(), seat)),
                 time_remaining: remaining,
                 turn_seconds,
                 time_bank_seconds,
@@ -828,7 +829,7 @@ impl Room {
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::Update {
                 events: events.clone(), // TimeUp is public
-                view: Box::new(ClientView::for_seat(&next, seat)),
+                view: Box::new(ClientView::for_seat(&next, self.engine.content(), seat)),
                 banks: banks.clone(),
             })
             .collect();
@@ -893,7 +894,7 @@ impl Room {
                             .filter(|e| event_visible_to(e, seat))
                             .cloned()
                             .collect(),
-                        view: Box::new(ClientView::for_seat(&next, seat)),
+                        view: Box::new(ClientView::for_seat(&next, self.engine.content(), seat)),
                         banks: banks.clone(),
                     })
                     .collect();

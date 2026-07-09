@@ -16,8 +16,13 @@ bankruptcy_threshold = 0
 # (they get 100% back); rent_boost = pay 100% of price per +50% rent step.
 expropriation = 200
 rent_boost = 100
-# Domination win (ADR-0013): control 3 complete colour groups to win.
-win_full_groups = 3
+# Domination win off: the primary v2 win condition is the victory-point
+# race below (ADR-0020) - 3 groups would short-circuit it at 9 points.
+win_full_groups = 0
+# Race to 20 victory points (ADR-0020): 3 per complete colour group, 2 per
+# conglomerate-level tile, 1 per resort owned, +2/round to the cash
+# leader. Also arms the conglomerate-pool "doom clock" below.
+win_victory_points = 20
 # Shared building pools (ADR-0019): table-wide stock of subsidiaries
 # (levels 1..max-1) and conglomerates (the top level), sized
 # round(factor * sqrt(players)) at game start.

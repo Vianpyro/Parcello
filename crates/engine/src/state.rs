@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::content::GameContent;
-use crate::content::{MarketEffect, RuleParams};
+use crate::content::{MarketEffect, RentModel, RuleParams};
 use crate::rng;
 
 /// Global player identity issued by the identity service ("provider:sub")
@@ -105,6 +105,17 @@ pub struct Player {
     #[serde(default)]
     pub jail_cards: u8,
     pub bankrupt: bool,
+    /// Turns this player has completed (ADR-0020). A placeholder for
+    /// `hands_cycled` (ADR-0017's velocity deck, not yet built): under
+    /// today's dice movement, "a hand cycled" is "a turn completed", so
+    /// this field already carries the meaning ADR-0017 will formalize -
+    /// only the movement mechanism changes later, not this counter.
+    #[serde(default)]
+    pub hands_cycled: u32,
+    /// Permanent victory points banked from round-bonus wins (ADR-0020);
+    /// the only non-reversible term in `GameState::victory_points`.
+    #[serde(default)]
+    pub round_bonus_vp: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -236,6 +247,8 @@ impl GameState {
                     doubles_streak: 0,
                     jail_cards: 0,
                     bankrupt: false,
+                    hands_cycled: 0,
+                    round_bonus_vp: 0,
                 })
                 .collect(),
             current: 0,
@@ -284,6 +297,31 @@ impl GameState {
             .iter()
             .filter(|g| self.owns_full_group(content, player, g))
             .count()
+    }
+
+    /// Race-to-target score (ADR-0020): 3 per complete colour group, 2 per
+    /// conglomerate-level tile (`houses == max_houses_per_property`), 1 per
+    /// group-scaled ("resort") tile owned, plus the stored round bonus.
+    /// Fully reversible except the round bonus - lose the group/tile, lose
+    /// the points.
+    pub fn victory_points(&self, content: &GameContent, player: usize) -> i64 {
+        let cap = content.rules.max_houses_per_property.min(5);
+        let mut points = 3 * self.full_groups_owned(content, player) as i64;
+        for (i, tile) in self.tiles.iter().enumerate() {
+            if tile.owner != Some(player) {
+                continue;
+            }
+            let Some(prop) = content.property(i) else {
+                continue;
+            };
+            if tile.houses >= cap {
+                points += 2;
+            }
+            if prop.rent_model == RentModel::GroupScaled {
+                points += 1;
+            }
+        }
+        points + self.players[player].round_bonus_vp
     }
 
     /// Total assets of `player`: cash plus property equity. An unmortgaged

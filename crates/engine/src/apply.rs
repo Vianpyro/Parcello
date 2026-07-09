@@ -108,6 +108,11 @@ pub(crate) fn apply(
     // Instant win by controlling enough full groups (ADR-0013), checked
     // after any holdings-changing command.
     exec.check_group_win();
+    // Victory-point race and doom clock (ADR-0020); order matters - a
+    // Build that both crosses the target and empties the pool is a
+    // points win, not a pool-exhaustion win.
+    exec.check_points_win();
+    exec.check_pool_exhaustion_win();
 
     Ok((exec.st, exec.ev))
 }
@@ -1173,7 +1178,9 @@ impl<'e> Exec<'e> {
         if !matches!(self.st.phase, GamePhase::Active) {
             return;
         }
+        let round_before = self.round_number();
         self.st.players[self.st.current].doubles_streak = 0;
+        self.st.players[self.st.current].hands_cycled += 1;
         let n = self.st.players.len();
         let mut next = self.st.current;
         for _ in 0..n {
@@ -1187,6 +1194,35 @@ impl<'e> Exec<'e> {
         self.st.turn_count += 1;
         self.ev.push(Event::TurnStarted { player: next });
         self.tick_forecast();
+        if self.content.rules.win_victory_points > 0 && self.round_number() > round_before {
+            self.award_round_bonus();
+        }
+    }
+
+    /// Round number (ADR-0020): the minimum turns-taken across surviving
+    /// players. See `Player::hands_cycled`'s doc comment for why this reads
+    /// that field instead of a dedicated ADR-0017 hand counter.
+    fn round_number(&self) -> u32 {
+        self.st
+            .alive_players()
+            .map(|p| self.st.players[p].hands_cycled)
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// Round bonus (ADR-0020): the strictly-highest-cash alive player (ties
+    /// to the lowest seat, `alive_players` yields in seat order) banks +2
+    /// permanent victory points.
+    fn award_round_bonus(&mut self) {
+        let winner = self
+            .st
+            .alive_players()
+            .map(|p| (p, self.st.players[p].cash))
+            .reduce(|best, cur| if cur.1 > best.1 { cur } else { best })
+            .map(|(p, _)| p);
+        if let Some(p) = winner {
+            self.st.players[p].round_bonus_vp += 2;
+        }
     }
 
     // -- Market forecast (ADR-0021) ------------------------------------------
@@ -1294,6 +1330,64 @@ impl<'e> Exec<'e> {
                 });
                 return;
             }
+        }
+    }
+
+    /// Instant win by reaching `rules.win_victory_points` (ADR-0020).
+    fn check_points_win(&mut self) {
+        if !matches!(self.st.phase, GamePhase::Active) {
+            return;
+        }
+        let target = self.content.rules.win_victory_points;
+        if target <= 0 {
+            return;
+        }
+        for p in self.st.alive_players().collect::<Vec<_>>() {
+            let points = self.st.victory_points(self.content, p);
+            if points >= target {
+                self.st.phase = GamePhase::Finished { winner: p };
+                self.ev.push(Event::WonByPoints { player: p, points });
+                return;
+            }
+        }
+    }
+
+    /// Doom clock (ADR-0020): once the shared conglomerate pool runs dry
+    /// with nobody having crossed the point target (checked first, by
+    /// `check_points_win`), the game ends immediately - highest score
+    /// wins, ties broken by net worth then the lowest seat. Only relevant
+    /// to the points ruleset: a no-op when `win_victory_points` is off.
+    fn check_pool_exhaustion_win(&mut self) {
+        if !matches!(self.st.phase, GamePhase::Active) {
+            return;
+        }
+        if self.content.rules.win_victory_points <= 0 {
+            return;
+        }
+        if self.st.conglomerates_available != Some(0) {
+            return;
+        }
+        let winner = self
+            .st
+            .alive_players()
+            .map(|p| {
+                (
+                    p,
+                    self.st.victory_points(self.content, p),
+                    self.st.net_worth(self.content, p),
+                )
+            })
+            .reduce(|best, cur| {
+                if (cur.1, cur.2) > (best.1, best.2) {
+                    cur
+                } else {
+                    best
+                }
+            })
+            .map(|(p, ..)| p);
+        if let Some(winner) = winner {
+            self.st.phase = GamePhase::Finished { winner };
+            self.ev.push(Event::WonByPoolExhaustion { winner });
         }
     }
 }

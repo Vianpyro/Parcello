@@ -452,6 +452,7 @@ mod tests {
             in_jail: false,
             jail_cards: 0,
             bankrupt: false,
+            victory_points: 0,
         }
     }
 

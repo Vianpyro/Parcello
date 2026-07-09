@@ -149,6 +149,7 @@
           <label>Expropriation %<input id="set_expropriation" type="number" min="0"></label>
           <label>Rent boost %<input id="set_rent_boost" type="number" min="0"></label>
           <label>Domination groups (0=off)<input id="set_win_groups" type="number" min="0"></label>
+          <label>Victory points target (0=off)<input id="set_win_points" type="number" min="0"></label>
           <label>Subsidiary pool factor (0=off)<input id="set_subsidiary_pool" type="number" min="0"></label>
           <label>Conglomerate pool factor (0=off)<input id="set_conglomerate_pool" type="number" min="0"></label>
         </div>
@@ -569,10 +570,12 @@ function renderPlayers() {
   el.innerHTML = "";
   const rows = st.view
     ? st.view.players.map((p, i) => ({ i, name: p.name, cash: p.cash, dead: p.bankrupt,
+        victoryPoints: p.victory_points,
         extra: (p.in_jail ? " [jail]" : "") + (p.jail_cards ? ` [${p.jail_cards} jail card${p.jail_cards > 1 ? "s" : ""}]` : ""),
         connected: st.seats[i]?.connected ?? true, bot: st.seats[i]?.is_bot ?? false }))
     : st.seats.map(s => ({ i: s.seat, name: s.name, cash: null, dead: false,
-        extra: "", connected: s.connected, bot: s.is_bot }));
+        victoryPoints: 0, extra: "", connected: s.connected, bot: s.is_bot }));
+  const vpTarget = st.content?.rules.win_victory_points ?? 0;
   rows.forEach(r => {
     const d = document.createElement("div");
     d.className = "player"
@@ -582,10 +585,13 @@ function renderPlayers() {
     // Net worth decides a timed game (ADR-0010), so surface it then.
     const nw = (r.cash !== null && st.gameEndsAt)
       ? ` <span class="muted">NW $${netWorth(r.i)}</span>` : "";
+    // Victory points race (ADR-0020): "the race IS the game" when on.
+    const vp = (r.cash !== null && vpTarget > 0)
+      ? ` <span class="muted">VP ${r.victoryPoints}/${vpTarget}</span>` : "";
     const label = r.bot ? " \u{1F916}" : (r.connected ? "" : " (offline)");
     d.innerHTML = `<div class="dot" style="background:${PAWN_COLORS[r.i % 6]}"></div>
       <span class="nm">${escapeHtml(r.name)}${r.extra}${label}</span>
-      ${r.cash === null ? "" : `<span class="cash">$${r.cash}${nw}</span>`}`;
+      ${r.cash === null ? "" : `<span class="cash">$${r.cash}${nw}${vp}</span>`}`;
     el.appendChild(d);
   });
   $("#lobbyctl").style.display = st.view ? "none" : "flex";
@@ -621,6 +627,7 @@ function renderSettings() {
   put("set_expropriation", r.expropriation);
   put("set_rent_boost", r.rent_boost);
   put("set_win_groups", r.win_full_groups);
+  put("set_win_points", r.win_victory_points);
   put("set_subsidiary_pool", r.subsidiary_pool_factor);
   put("set_conglomerate_pool", r.conglomerate_pool_factor);
   $("#applysettings").style.display = host ? "inline" : "none";
@@ -642,6 +649,7 @@ function applySettings() {
       expropriation: n("set_expropriation"),
       rent_boost: n("set_rent_boost"),
       win_full_groups: n("set_win_groups"),
+      win_victory_points: n("set_win_points"),
       subsidiary_pool_factor: n("set_subsidiary_pool"),
       conglomerate_pool_factor: n("set_conglomerate_pool"),
     },
@@ -957,6 +965,8 @@ function describe(e) {
     case "game_ended": return `Game over — ${P(e.winner)} wins!`;
     case "time_up": return `Time's up! ${P(e.winner)} wins on net worth.`;
     case "won_by_groups": return `${P(e.winner)} wins by controlling ${e.groups} colour groups!`;
+    case "won_by_points": return `${P(e.player)} wins with ${e.points} victory points!`;
+    case "won_by_pool_exhaustion": return `The conglomerate pool ran dry — ${P(e.winner)} wins on victory points!`;
     case "market_event_activated": {
       const sign = e.magnitude_pct > 0 ? "+" : "";
       return e.duration_turns === 0
