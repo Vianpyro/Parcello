@@ -284,10 +284,11 @@ impl Room {
             let game = tokio::time::sleep_until(self.game_deadline.unwrap_or(now + IDLE_TIMEOUT));
             // Bot seats (ADR-0014): if any bot has a move to make, play it
             // after a short think delay, anchored to the last progress so
-            // moves stay evenly paced.
+            // moves stay evenly paced - except during a `BlindAuction`,
+            // where `bot_think_delay` collapses the pause to zero (ADR-0018).
             let bot_action = self.next_bot_action();
             let bot_armed = bot_action.is_some();
-            let bot = tokio::time::sleep_until(last_progress + BOT_THINK);
+            let bot = tokio::time::sleep_until(last_progress + self.bot_think_delay());
             // Sealed-bid window (ADR-0018): a separate, parallel timer -
             // does not touch last_progress/banks, matching acting_seat()
             // returning None for the whole phase.
@@ -512,6 +513,26 @@ impl Room {
             self.handle_game(&player_id, CommandKind::SubmitBlindBid { amount: 0 });
         }
         self.bid_deadline = None;
+    }
+
+    /// How long to pause before playing `next_bot_action`'s move. Normal
+    /// turns use `BOT_THINK` so a table of bots reads at human pace
+    /// (ADR-0014). A `BlindAuction` is simultaneous by definition
+    /// (ADR-0018) - every seat bids blind and `ClientView` already hides
+    /// other bids while it's open, so pacing bots one `BOT_THINK` apart adds
+    /// nothing but risk: with several bot seats it can eat a real fraction
+    /// of the 5s `BID_WINDOW` and get a late seat auto-abstained by
+    /// `inject_silent_bids` instead of playing its real bid. Bots bid as
+    /// fast as the room task can process them instead.
+    fn bot_think_delay(&self) -> Duration {
+        let Phase::Active(state) = &self.phase else {
+            return BOT_THINK;
+        };
+        if matches!(state.turn, TurnPhase::BlindAuction { .. }) {
+            Duration::ZERO
+        } else {
+            BOT_THINK
+        }
     }
 
     /// The first bot seat with something to do right now and the command it
@@ -1680,6 +1701,38 @@ mod tests {
             room.next_bot_action(),
             Some((id, CommandKind::Roll)) if id == "bot:1"
         ));
+    }
+
+    /// A `BlindAuction` is simultaneous by construction (ADR-0018), so the
+    /// human-paced `BOT_THINK` gap between bot moves collapses to zero
+    /// while one is open - otherwise a table with several bot seats could
+    /// eat a real fraction of the 5s `BID_WINDOW` just staggering bids that
+    /// were never staggered for any game-design reason.
+    #[test]
+    fn bot_think_delay_collapses_during_a_blind_auction() {
+        let content = base_content();
+        let engine = Engine::new(Arc::new(content.content.clone())).unwrap();
+        let state = engine.new_game(
+            vec![
+                ("bot:1".into(), "Bot 1".into()),
+                ("guest:al".into(), "Al".into()),
+            ],
+            7,
+        );
+        let mut room = test_room(content);
+        room.seats = vec![human_seat("bot:1"), human_seat("guest:al")];
+        room.seats[0].is_bot = true;
+        room.phase = Phase::Active(state);
+        assert_eq!(room.bot_think_delay(), BOT_THINK);
+
+        let Phase::Active(state) = &mut room.phase else {
+            unreachable!()
+        };
+        state.turn = TurnPhase::BlindAuction {
+            tile: 1,
+            bids: vec![None, None],
+        };
+        assert_eq!(room.bot_think_delay(), Duration::ZERO);
     }
 
     /// Bots fill a room but never lock a human out: joining a full room
