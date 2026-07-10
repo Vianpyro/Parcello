@@ -86,6 +86,12 @@ jobs:
           languages: swift
           build-mode: manual
           queries: security-extended,security-and-quality
+      # Xcode's build service (XCBBuildService) is long-lived; if one was
+      # already running before `init` set up CodeQL's tracer, the actual
+      # compile jobs get dispatched to that untraced instance and CodeQL
+      # sees no source at all. Kill it so the build below spawns a fresh,
+      # traced one.
+      - run: killall XCBBuildService || true
       - run: flutter build macos --release
         working-directory: clients/flutter
       - uses: github/codeql-action/analyze@v4
