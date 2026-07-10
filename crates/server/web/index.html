@@ -64,18 +64,16 @@
     color: #2a2a2a; display: flex; flex-direction: column; padding: 10px; gap: 8px;
     min-height: 0; position: relative;
   }
-  /* Dice result, floating over the middle of the board (ADR: playfeel). */
+  /* Movement card flash, floating over the middle of the board (ADR-0017). */
   #dice {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     gap: 18px; pointer-events: none; opacity: 0; transition: opacity .3s;
   }
   #dice .die {
     width: 66px; height: 66px; background: #fff; border-radius: 12px;
-    box-shadow: 0 4px 10px #0008; display: grid;
-    grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 9px; gap: 3px;
+    box-shadow: 0 4px 10px #0008; display: flex; align-items: center; justify-content: center;
+    font-size: 32px; font-weight: 700; color: #221d0e;
   }
-  #dice .die i { border-radius: 50%; background: #1e1e1e; align-self: center; justify-self: center; width: 12px; height: 12px; }
-  #dice .die i.off { visibility: hidden; }
   #center h2 { margin: 0; font-size: 20px; letter-spacing: 2px; }
   #status { font-weight: 600; }
   .setgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-top: 8px; }
@@ -143,7 +141,8 @@
           <label>Time bank (s, 0=off)<input id="set_bank" type="number" min="0"></label>
           <label>Starting balance<input id="set_starting_balance" type="number" min="0"></label>
           <label>GO salary<input id="set_go_salary" type="number" min="0"></label>
-          <label>Jail fine<input id="set_jail_fine" type="number" min="0"></label>
+          <label>Velocity min<input id="set_velocity_min" type="number" min="1"></label>
+          <label>Velocity max<input id="set_velocity_max" type="number" min="2"></label>
           <label>Max houses (1-5)<input id="set_max_houses" type="number" min="1" max="5"></label>
           <label>Bankruptcy threshold<input id="set_bankruptcy" type="number" min="0"></label>
           <label>Expropriation %<input id="set_expropriation" type="number" min="0"></label>
@@ -221,16 +220,14 @@ const GROUP_COLORS = {
 
 // -- connection state ---------------------------------------------------------
 let ws = null;
-const st = { seat: null, code: null, content: null, view: null, seats: [], gameEndsAt: null, timeBankSeconds: null, banks: null, bankEndsAt: null, bidEndsAt: null };
-// Sealed-bid window (ADR-0018): a local approximation of the server's 5s
-// deadline, set the moment we first see the phase and cleared once it's
-// gone - the server alone resolves the window, this is display-only.
-function trackBidWindow() {
-  if (st.view?.turn.type === "blind_auction") {
-    if (!st.bidEndsAt) st.bidEndsAt = Date.now() + 5000;
-  } else {
-    st.bidEndsAt = null;
-  }
+const st = { seat: null, code: null, content: null, view: null, seats: [], gameEndsAt: null, timeBankSeconds: null, banks: null, bankEndsAt: null, bidEndsAt: null, voteEndsAt: null };
+// Sealed-bid / bribe-vote windows (ADR-0018/ADR-0024): a local
+// approximation of the server's 5s deadline, set the moment we first see
+// the phase and cleared once it's gone - the server alone resolves the
+// window, this is display-only.
+function trackTimedWindows() {
+  st.bidEndsAt = st.view?.turn.type === "blind_auction" ? (st.bidEndsAt || Date.now() + 5000) : null;
+  st.voteEndsAt = st.view?.turn.type === "bribe_vote" ? (st.voteEndsAt || Date.now() + 5000) : null;
 }
 
 function send(cmd) { ws?.send(JSON.stringify({ type: "cmd", cmd })); }
@@ -301,7 +298,7 @@ function handle(msg) {
       $("#roomcode").textContent = msg.code;
       buildBoard();
       if (msg.view) st.view = msg.view;
-      trackBidWindow();
+      trackTimedWindows();
       render();
       log(`Joined room ${msg.code}. Mods: ${msg.content.mods.map(m => m.id).join(", ")}`);
       break;
@@ -319,7 +316,7 @@ function handle(msg) {
       st.turnEndsAt = deadlineFrom(st.turnSeconds);
       st.timeBankSeconds = msg.time_bank_seconds ?? null;
       st.banks = null;
-      trackBidWindow();
+      trackTimedWindows();
       log("Game started.");
       render();
       break;
@@ -327,14 +324,14 @@ function handle(msg) {
       st.view = msg.view;
       st.turnEndsAt = deadlineFrom(st.turnSeconds);
       st.banks = msg.banks ?? null;
-      trackBidWindow();
+      trackTimedWindows();
       // The bank only starts draining once the plain turn window is spent;
       // until then it shows the flat reserve (ADR-0023).
       st.bankEndsAt = (st.turnEndsAt && st.banks)
         ? st.turnEndsAt + (st.banks[st.seat] ?? 0) * 1000
         : null;
       msg.events.forEach(ev => {
-        if (ev.type === "dice_rolled") showDice(ev.d1, ev.d2);
+        if (ev.type === "movement_card_played") showCard(ev.value);
         log(describe(ev));
       });
       render();
@@ -371,19 +368,14 @@ function netWorth(seat) {
   });
   return w;
 }
-// Dice result overlay: two pip dice in the board centre, fading out.
-const DICE_PIPS = { 1:[4], 2:[0,8], 3:[0,4,8], 4:[0,2,6,8], 5:[0,2,4,6,8], 6:[0,2,3,5,6,8] };
-function dieHtml(n) {
-  const on = new Set(DICE_PIPS[n] || []);
-  return `<div class="die">${[...Array(9)].map((_, i) => `<i class="${on.has(i) ? "" : "off"}"></i>`).join("")}</div>`;
-}
-let _diceTimer;
-function showDice(d1, d2) {
+// Movement card flash: the played value, fading out (ADR-0017).
+let _cardTimer;
+function showCard(value) {
   const el = $("#dice"); if (!el) return;
-  el.innerHTML = dieHtml(d1) + dieHtml(d2);
+  el.innerHTML = `<div class="die">${value}</div>`;
   el.style.opacity = "1";
-  clearTimeout(_diceTimer);
-  _diceTimer = setTimeout(() => { el.style.opacity = "0"; }, 2500);
+  clearTimeout(_cardTimer);
+  _cardTimer = setTimeout(() => { el.style.opacity = "0"; }, 1500);
 }
 
 function fmtClock(deadline) {
@@ -435,6 +427,17 @@ function tickCountdown() {
       const [secs, mmss] = fmtClock(st.bidEndsAt);
       biel.textContent = `🔨 ${mmss}`;
       biel.style.color = secs <= 2 ? "var(--danger)" : "inherit";
+    }
+  }
+  // Corruption bribe vote window (ADR-0024): same pattern as the sealed-bid
+  // countdown above.
+  const voel = $("#votetimer");
+  if (voel) {
+    if (!st.voteEndsAt || finished) { voel.textContent = ""; }
+    else {
+      const [secs, mmss] = fmtClock(st.voteEndsAt);
+      voel.textContent = `🗳 ${mmss}`;
+      voel.style.color = secs <= 2 ? "var(--danger)" : "inherit";
     }
   }
 }
@@ -491,7 +494,7 @@ function buildBoard() {
     center.id = "center";
     // Interior spans the (d-2) x (d-2) inner cells.
     center.style.gridArea = `2 / 2 / ${d} / ${d}`;
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span><span id="bidtimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="forecast" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span><span id="bidtimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="votetimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="forecast" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   } else {
     // Non-ring boards (mods): linear fallback, panel below.
@@ -499,7 +502,7 @@ function buildBoard() {
     document.querySelectorAll("#board .tile").forEach(t => { t.style.width = "90px"; t.style.height = "80px"; });
     const center = document.createElement("div");
     center.id = "center"; center.style.width = "100%"; center.style.minHeight = "220px";
-    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span><span id="bidtimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="forecast" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
+    center.innerHTML = `<h2>PARCELLO <span id="countdown" style="float:right;font-size:16px"></span><span id="turntimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="timebank" style="float:right;font-size:16px;margin-right:12px"></span><span id="bidtimer" style="float:right;font-size:16px;margin-right:12px"></span><span id="votetimer" style="float:right;font-size:16px;margin-right:12px"></span></h2><div id="status"></div><div id="pools" class="muted" style="font-size:12px"></div><div id="forecast" class="muted" style="font-size:12px"></div><div id="actions"></div><div id="log"></div><div id="dice"></div>`;
     el.appendChild(center);
   }
 }
@@ -571,7 +574,7 @@ function renderPlayers() {
   const rows = st.view
     ? st.view.players.map((p, i) => ({ i, name: p.name, cash: p.cash, dead: p.bankrupt,
         victoryPoints: p.victory_points,
-        extra: (p.in_jail ? " [jail]" : "") + (p.jail_cards ? ` [${p.jail_cards} jail card${p.jail_cards > 1 ? "s" : ""}]` : ""),
+        extra: (p.in_jail ? " [jail]" : "") + (p.jail_route ? ` [route: ${p.jail_route.join(",")} left]` : "") + (p.jail_cards ? ` [${p.jail_cards} jail card${p.jail_cards > 1 ? "s" : ""}]` : ""),
         connected: st.seats[i]?.connected ?? true, bot: st.seats[i]?.is_bot ?? false }))
     : st.seats.map(s => ({ i: s.seat, name: s.name, cash: null, dead: false,
         victoryPoints: 0, extra: "", connected: s.connected, bot: s.is_bot }));
@@ -621,7 +624,8 @@ function renderSettings() {
   put("set_bank", s.time_bank_seconds ?? 0);
   put("set_starting_balance", r.starting_balance);
   put("set_go_salary", r.go_salary);
-  put("set_jail_fine", r.jail_fine);
+  put("set_velocity_min", r.velocity_min);
+  put("set_velocity_max", r.velocity_max);
   put("set_max_houses", r.max_houses_per_property);
   put("set_bankruptcy", r.bankruptcy_threshold);
   put("set_expropriation", r.expropriation);
@@ -643,7 +647,8 @@ function applySettings() {
     rules: {
       starting_balance: n("set_starting_balance"),
       go_salary: n("set_go_salary"),
-      jail_fine: n("set_jail_fine"),
+      velocity_min: n("set_velocity_min"),
+      velocity_max: n("set_velocity_max"),
       max_houses_per_property: n("set_max_houses"),
       bankruptcy_threshold: n("set_bankruptcy"),
       expropriation: n("set_expropriation"),
@@ -703,6 +708,10 @@ function renderStatus() {
     const pending = t.bids.map((b, i) => b === null ? i : null).filter(i => i !== null);
     const waiting = pending.map(playerName).join(", ") || "nobody";
     setStatus(`Sealed bid on ${tileName(t.tile)} — waiting on: ${waiting}`);
+  } else if (t.type === "bribe_vote") {
+    const pending = t.votes.map((b, i) => (i !== t.briber && b === null) ? i : null).filter(i => i !== null);
+    const waiting = pending.map(playerName).join(", ") || "nobody";
+    setStatus(`${playerName(t.briber)} offers $${t.amount} to leave jail — waiting on: ${waiting}`);
   } else {
     setStatus(`${playerName(v.current)}'s turn`);
   }
@@ -747,13 +756,60 @@ function renderActions() {
     btn("Abstain", { type: "submit_blind_bid", amount: 0 }, "secondary");
     return;
   }
+  if (t.type === "bribe_vote") {
+    // Every living opponent may vote at once (ADR-0024), not a single
+    // actor: show the overlay to anyone except the briber who hasn't
+    // voted yet, regardless of whose turn it nominally is.
+    if (st.seat === t.briber || t.votes[st.seat] !== null || v.players[st.seat].bankrupt) return;
+    const label = document.createElement("span");
+    label.className = "muted";
+    label.textContent = `${playerName(t.briber)} offers $${t.amount} to leave jail: `;
+    el.appendChild(label);
+    btn("Accept", { type: "vote_on_bribe", accept: true });
+    btn("Reject", { type: "vote_on_bribe", accept: false }, "secondary");
+    return;
+  }
   if (!myTurn()) return;
-  if (t.type === "await_roll") {
-    btn("Roll", { type: "roll" });
-    if (v.players[st.seat].in_jail) {
-      btn("Pay fine", { type: "pay_jail_fine" }, "secondary");
-      if (v.players[st.seat].jail_cards > 0)
-        btn("Use jail card", { type: "use_jail_card" }, "secondary");
+  if (t.type === "await_move") {
+    const me = v.players[st.seat];
+    if (me.jail_route) {
+      // Locked Legal Route (ADR-0024): only the front card is legal.
+      btn(`Play ${me.jail_route[0]} (route)`, { type: "play_movement_card", value: me.jail_route[0] });
+    } else if (me.in_jail) {
+      // Three exits: jail card, Corruption bribe, Legal Route.
+      if (me.jail_cards > 0) btn("Use jail card", { type: "use_jail_card" }, "secondary");
+      const routeLabel = document.createElement("span");
+      routeLabel.className = "muted";
+      routeLabel.textContent = "Route order:";
+      el.appendChild(routeLabel);
+      const routeInp = document.createElement("input");
+      routeInp.type = "text";
+      routeInp.placeholder = "e.g. 1,2,3,4,5";
+      routeInp.style.width = "110px";
+      routeInp.value = [...me.hand].sort((a, b) => a - b).join(",");
+      el.appendChild(routeInp);
+      const routeBtn = document.createElement("button");
+      routeBtn.className = "secondary";
+      routeBtn.textContent = "Choose route";
+      routeBtn.onclick = () => send({
+        type: "choose_legal_route",
+        order: routeInp.value.split(",").map(Number).filter(Number.isFinite),
+      });
+      el.appendChild(routeBtn);
+      const bribeInp = document.createElement("input");
+      bribeInp.type = "number";
+      bribeInp.min = 1;
+      bribeInp.value = Math.max(1, Math.min(200, me.cash));
+      bribeInp.style.width = "90px";
+      el.appendChild(bribeInp);
+      const bribeBtn = document.createElement("button");
+      bribeBtn.className = "secondary";
+      bribeBtn.textContent = "Offer bribe";
+      bribeBtn.onclick = () => send({ type: "offer_bribe", amount: Number(bribeInp.value) });
+      el.appendChild(bribeBtn);
+    } else {
+      // Hand of movement cards (ADR-0017): one button per card value.
+      me.hand.forEach(value => btn(String(value), { type: "play_movement_card", value }));
     }
   } else if (t.type === "await_end") {
     btn("End turn", { type: "end_turn" });
@@ -926,7 +982,7 @@ function describe(e) {
   const P = playerName, T = tileName;
   switch (e.type) {
     case "turn_started": return `--- ${P(e.player)}'s turn ---`;
-    case "dice_rolled": return `${P(e.player)} rolled ${e.d1}+${e.d2} = ${e.d1 + e.d2}`;
+    case "movement_card_played": return `${P(e.player)} played movement card ${e.value}`;
     case "moved": return `${P(e.player)} moved to ${T(e.to)}${e.passed_go ? " (passed Go)" : ""}`;
     case "salary_paid": return `${P(e.player)} collected $${e.amount} salary`;
     case "blind_auction_opened": return `${P(e.discoverer)} landed on ${T(e.tile)}: sealed bid open ($${e.floor} floor for ${P(e.discoverer)})`;
@@ -948,7 +1004,12 @@ function describe(e) {
     case "property_mortgaged": return `${P(e.player)} mortgaged ${T(e.tile)} for $${e.value}`;
     case "property_unmortgaged": return `${P(e.player)} redeemed ${T(e.tile)} for $${e.cost}`;
     case "went_to_jail": return `${P(e.player)} went to jail`;
-    case "jail_fine_paid": return `${P(e.player)} paid the $${e.amount} jail fine`;
+    case "legal_route_chosen": return `${P(e.player)} chose a Legal Route [${e.order.join(",")}] (rent-free on their tiles until it's done)`;
+    case "bribe_offered": return `${P(e.player)} offers a $${e.amount} bribe to leave jail`;
+    case "bribe_vote_cast": return `${P(e.player)} voted on the bribe`;
+    case "bribe_resolved": return e.succeeded
+      ? `Bribe accepted (${e.accepts}/${e.total}): ${P(e.briber)} pays $${e.amount}, split among the table`
+      : `Bribe rejected (${e.accepts}/${e.total}): ${P(e.briber)} stays in jail`;
     case "jail_card_received": return `${P(e.player)} received a get-out-of-jail-free card`;
     case "jail_card_used": return `${P(e.player)} used a get-out-of-jail-free card`;
     case "left_jail": return `${P(e.player)} left jail`;

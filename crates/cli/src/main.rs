@@ -1,11 +1,14 @@
 //! Terminal test client. Not a product surface: exists to exercise the
 //! server end-to-end until the Flutter client lands.
 //!
-//! Commands (stdin): start | addbot | rmbot | set <field> <value> | roll | bid <amount>
-//! (0 abstains; landing on an unowned tile opens a 5s sealed-bid window for
-//! every living seat, ADR-0018) | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
+//! Commands (stdin): start | addbot | rmbot | set <field> <value>
+//! | play <n> (movement card from the hand) | route <n,n,...> (Legal Route,
+//! a full permutation of the hand) | bribe <amount> | vote yes|no
+//! (5s window, ADR-0024) | card (jail card) | bid <amount> (0 abstains;
+//! landing on an unowned tile opens a 5s sealed-bid window for every living
+//! seat, ADR-0018) | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
 //! | offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
-//! | accept <id> | refuse <id> | cancel <id> | pay | card | end | resign | quit.
+//! | accept <id> | refuse <id> | cancel <id> | end | resign | quit.
 
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
@@ -90,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.name.as_deref().unwrap_or("(identity token)")
     );
     println!(
-        "commands: start | roll | bid <n> (0 abstains) | build <t> | sell <t> | seize <t> (landing tile only, end of turn) | boost <t> | mortgage <t> | redeem <t> | pay | card | end | resign | quit"
+        "commands: start | play <n> | route <n,n,...> | bribe <amount> | vote yes|no | card | bid <n> (0 abstains) | build <t> | sell <t> | seize <t> (landing tile only, end of turn) | boost <t> | mortgage <t> | redeem <t> | end | resign | quit"
     );
     println!(
         "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
@@ -169,7 +172,22 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
             apply_setting(&mut settings, field, value)?;
             return Some(ClientMessage::Configure { settings });
         }
-        ("roll", None) => CommandKind::Roll,
+        ("play", Some(n)) => CommandKind::PlayMovementCard {
+            value: n.parse().ok()?,
+        },
+        ("route", Some(list)) => CommandKind::ChooseLegalRoute {
+            order: parse_u8_list(list),
+        },
+        ("bribe", Some(n)) => CommandKind::OfferBribe {
+            amount: n.parse().ok()?,
+        },
+        ("vote", Some(v)) => CommandKind::VoteOnBribe {
+            accept: match v {
+                "yes" => true,
+                "no" => false,
+                _ => return None,
+            },
+        },
         ("bid", Some(n)) => CommandKind::SubmitBlindBid {
             amount: n.parse().ok()?,
         },
@@ -221,7 +239,6 @@ fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
                 comment: (!rest.is_empty()).then(|| rest.join(" ")),
             });
         }
-        ("pay", None) => CommandKind::PayJailFine,
         ("card", None) => CommandKind::UseJailCard,
         ("end", None) => CommandKind::EndTurn,
         ("resign", None) => CommandKind::Resign,
@@ -239,6 +256,13 @@ fn parse_tile_list(raw: &str) -> Vec<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// Comma-separated card values for `route <n,n,...>` (ADR-0024); unparseable
+/// entries are dropped rather than rejecting the whole line - the server
+/// validates the permutation and rejects it cleanly if it's wrong.
+fn parse_u8_list(raw: &str) -> Vec<u8> {
+    raw.split(',').filter_map(|s| s.parse().ok()).collect()
 }
 
 /// Applies one `set <field> <value>` edit to a settings copy (ADR-0015).
@@ -259,7 +283,8 @@ fn apply_setting(s: &mut RoomSettings, field: &str, value: &str) -> Option<()> {
         "bank" => s.time_bank_seconds = opt_secs(value)?,
         "starting_balance" => r.starting_balance = value.parse().ok()?,
         "go_salary" => r.go_salary = value.parse().ok()?,
-        "jail_fine" => r.jail_fine = value.parse().ok()?,
+        "velocity_min" => r.velocity_min = value.parse().ok()?,
+        "velocity_max" => r.velocity_max = value.parse().ok()?,
         "max_houses" => r.max_houses_per_property = value.parse().ok()?,
         "bankruptcy_threshold" => r.bankruptcy_threshold = value.parse().ok()?,
         "expropriation" => r.expropriation = value.parse().ok()?,
@@ -405,7 +430,8 @@ impl Ctx {
         let r = &s.rules;
         let secs = |v: Option<u64>| v.map_or("off".to_string(), |n| format!("{n}s"));
         println!(
-            "* settings: game={} turn={} bank={} | starting_balance={} go_salary={} jail_fine={} \
+            "* settings: game={} turn={} bank={} | starting_balance={} go_salary={} \
+             velocity_min={} velocity_max={} \
              max_houses={} bankruptcy_threshold={} expropriation={} \
              rent_boost={} win_full_groups={} win_victory_points={} subsidiary_pool={} conglomerate_pool={}",
             secs(s.game_seconds),
@@ -413,7 +439,8 @@ impl Ctx {
             secs(s.time_bank_seconds),
             r.starting_balance,
             r.go_salary,
-            r.jail_fine,
+            r.velocity_min,
+            r.velocity_max,
             r.max_houses_per_property,
             r.bankruptcy_threshold,
             r.expropriation,
@@ -503,8 +530,46 @@ impl Ctx {
                 println!("=== game over, winner: {} ===", self.player(winner));
             }
             GamePhase::Active => match &view.turn {
-                TurnPhase::AwaitRoll => {
-                    println!("  -> {} to act: roll", self.player(view.current));
+                TurnPhase::AwaitMove => {
+                    let acting = self.player(view.current);
+                    let player = &view.players[view.current];
+                    if let Some(route) = &player.jail_route {
+                        println!(
+                            "  -> {acting} to act: play {} (locked route, {} left: {route:?})",
+                            route[0],
+                            route.len()
+                        );
+                    } else if player.in_jail {
+                        println!(
+                            "  -> {acting} to act: route <permutation of hand, comma-separated> | bribe <amount> | card"
+                        );
+                    } else {
+                        println!("  -> {acting} to act: play <n> (hand: {:?})", player.hand);
+                    }
+                }
+                // Every living opponent may vote at once (ADR-0024), not a
+                // single actor: list who's still pending, and prompt only
+                // when it's our own seat still waiting.
+                TurnPhase::BribeVote {
+                    briber,
+                    amount,
+                    votes,
+                } => {
+                    let pending: Vec<String> = votes
+                        .iter()
+                        .enumerate()
+                        .filter(|&(i, v)| i != *briber && v.is_none())
+                        .map(|(i, _)| self.player(i))
+                        .collect();
+                    let waiting_on_me = self.my_seat.is_some_and(|seat| {
+                        seat != *briber && votes.get(seat).is_some_and(|v| v.is_none())
+                    });
+                    let hint = if waiting_on_me { ": vote yes|no" } else { "" };
+                    println!(
+                        "  -> {} offers a ${amount} bribe (5s window), waiting on: {}{hint}",
+                        self.player(*briber),
+                        pending.join(", ")
+                    );
                 }
                 TurnPhase::AwaitEnd => {
                     println!(
@@ -543,8 +608,8 @@ impl Ctx {
     fn describe(&self, event: &Event) -> String {
         match event {
             Event::TurnStarted { player } => format!("--- {}'s turn ---", self.player(*player)),
-            Event::DiceRolled { player, d1, d2 } => {
-                format!("{} rolled {d1}+{d2} = {}", self.player(*player), d1 + d2)
+            Event::MovementCardPlayed { player, value } => {
+                format!("{} played movement card {value}", self.player(*player))
             }
             Event::Moved {
                 player,
@@ -702,8 +767,35 @@ impl Ctx {
                 self.tile_name(*tile)
             ),
             Event::WentToJail { player } => format!("{} went to jail", self.player(*player)),
-            Event::JailFinePaid { player, amount } => {
-                format!("{} paid the ${amount} jail fine", self.player(*player))
+            Event::LegalRouteChosen { player, order } => format!(
+                "{} chose a Legal Route {order:?} (rent-free on their tiles until it's done)",
+                self.player(*player)
+            ),
+            Event::BribeOffered { player, amount } => format!(
+                "{} offers a ${amount} bribe to leave jail",
+                self.player(*player)
+            ),
+            Event::BribeVoteCast { player } => {
+                format!("{} voted on the bribe", self.player(*player))
+            }
+            Event::BribeResolved {
+                briber,
+                amount,
+                succeeded,
+                accepts,
+                total,
+            } => {
+                if *succeeded {
+                    format!(
+                        "bribe accepted ({accepts}/{total}): {} pays ${amount}, split among the table",
+                        self.player(*briber)
+                    )
+                } else {
+                    format!(
+                        "bribe rejected ({accepts}/{total}): {} stays in jail",
+                        self.player(*briber)
+                    )
+                }
             }
             Event::JailCardReceived { player } => format!(
                 "{} received a get-out-of-jail-free card",

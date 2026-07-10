@@ -17,15 +17,17 @@ const sampleView = {
       'in_jail': false,
       'jail_cards': 1,
       'bankrupt': false,
+      'hand': [1, 2, 4, 5],
     },
     {
       'id': 'guest:bob',
       'name': 'Bob',
       'cash': 1500,
       'position': 0,
-      'in_jail': true,
+      'in_jail': false,
       'jail_cards': 0,
       'bankrupt': false,
+      'jail_route': [3, 5],
     },
   ],
   'current': 1,
@@ -57,7 +59,8 @@ void main() {
     final v = ClientView.fromJson(sampleView);
     expect(v.finished, false);
     expect(v.players[0].jailCards, 1);
-    expect(v.players[1].inJail, true);
+    expect(v.players[0].hand, [1, 2, 4, 5]);
+    expect(v.players[1].jailRoute, [3, 5]);
     expect(v.current, 1);
     expect(v.turn.type, 'blind_auction');
     expect(v.turn.tile, 3);
@@ -65,6 +68,19 @@ void main() {
     expect(v.tiles[1].owner, 0);
     expect(v.tiles[1].mortgaged, true);
     expect(v.pendingTrades.single.giveTiles, [1]);
+  });
+
+  test('TurnPhase parses a Corruption bribe vote (ADR-0024)', () {
+    final t = TurnPhase.fromJson({
+      'type': 'bribe_vote',
+      'briber': 1,
+      'amount': 90,
+      'votes': [null, null, false],
+    });
+    expect(t.type, 'bribe_vote');
+    expect(t.briber, 1);
+    expect(t.amount, 90);
+    expect(t.votes, [null, null, false]);
   });
 
   test('ClientView tolerates pre-trade and pre-jail-card states', () {
@@ -132,8 +148,19 @@ void main() {
       'P0 received a get-out-of-jail-free card',
     );
     expect(
-      describeEvent({'type': 'dice_rolled', 'player': 1, 'd1': 3, 'd2': 4}, p, t),
-      'P1 rolled 3+4 = 7',
+      describeEvent({'type': 'movement_card_played', 'player': 1, 'value': 4}, p, t),
+      'P1 played movement card 4',
+    );
+    expect(
+      describeEvent({
+        'type': 'bribe_resolved',
+        'briber': 0,
+        'amount': 90,
+        'succeeded': true,
+        'accepts': 2,
+        'total': 3,
+      }, p, t),
+      'Bribe accepted (2/3): P0 pays \$90, split among the table',
     );
     expect(
       describeEvent({'type': 'brand_new_event', 'x': 1}, p, t),

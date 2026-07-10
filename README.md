@@ -32,10 +32,11 @@ Patterns from the doc and where they live:
 - Command: `engine::command`, single `Engine::apply` pipeline (ADR-0001).
 - Observer: `engine::event::Event`, broadcast by rooms after each command.
 - State Machine: room `Lobby -> Active -> Finished` (`server::room`),
-  turn `AwaitRoll -> BlindAuction -> AwaitEnd` (`engine::state::TurnPhase`).
+  turn `AwaitMove -> BlindAuction/BribeVote -> AwaitEnd`
+  (`engine::state::TurnPhase`).
 - Registry: `mods::RegistryBuilder` freezes into validated `GameContent`.
-- Strategy: `DicePolicy`, `RentCalculator`, `BankruptcyResolver` behind
-  `dyn` in `Engine` (V2 WASM substitutes implementations here).
+- Strategy: `RentCalculator`, `BankruptcyResolver` behind `dyn` in `Engine`
+  (V2 WASM substitutes implementations here).
 - Repository: `server::history::GameHistory` port with two adapters:
   in-memory (default) and SQLite via a writer thread (`--history`, ADR-0005).
 - Plugin: `mods::ModPlugin` (`on_load`/`on_unload`); V1 ships the TOML
@@ -79,8 +80,9 @@ cargo run -p parcello-cli -- --name bot1 --join ABCDE --bot
 
 # In the host terminal:
 #   start
-# then per the prompts: roll | buy | no | bid <n> | pass | build <t>
-#                       | sell <t> | mortgage <t> | redeem <t> | pay | end | resign
+# then per the prompts: play <n> | route <n,n,...> | bribe <amount> | vote yes|no
+#                       | card | bid <n> | build <t> | sell <t> | mortgage <t>
+#                       | redeem <t> | end | resign
 # trading (any time):   offer <seat> <give$> <tiles|-> <want$> <tiles|->
 #                       accept <id> | refuse <id> | cancel <id>
 ```
@@ -89,8 +91,9 @@ Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 (repeatable, ordered; later mods override earlier ones per key),
 `--insecure-guest`, `--history <file.db>` (SQLite game logs; omit for
 in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
-canonical action - roll/decline/pass/end turn - for a *connected* player
-who stalls that long, unless their time bank still covers the overage;
+canonical action - lowest hand card / ascending Legal Route / decline /
+end turn - for a *connected* player who stalls that long, unless their
+time bank still covers the overage;
 default 12, 0 = disabled - a *disconnected* player is always skipped after a
 30s grace regardless), `--time-bank-seconds <secs>` (personal per-match
 reserve a connected player draws on to overrun the turn limit, never
@@ -122,7 +125,7 @@ accept a pasted token.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 62 tests, formatting, and lints (all must pass before a PR)
+# Rust: 124 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -136,10 +139,10 @@ cargo audit
 
 Always pass `--locked` so builds are reproducible against the committed
 `Cargo.lock`. Engine rules are covered in `crates/engine/tests/engine.rs`
-(scripted dice via `FixedDice`, `plain_board`/`transit_board` fixtures);
-session behaviour (rooms, reconnect tokens, private trades, feedback) has
-async tests in `crates/server/src/room.rs`; the wire format is pinned by
-tests in `parcello-protocol`.
+(scripted movement via `PlayMovementCard`, `plain_board`/`transit_board`
+fixtures); session behaviour (rooms, reconnect tokens, private trades,
+feedback) has async tests in `crates/server/src/room.rs`; the wire format
+is pinned by tests in `parcello-protocol`.
 
 Flutter client (needs the Flutter SDK):
 
@@ -230,36 +233,41 @@ mods/<id>/
 
 The default `mods/base` is the **32-tile fast board** (a 9x9 ring, no
 Community Chest, two "resorts" instead of four stations; the design goal is
-fast, dynamic games). `mods/classic` preserves the 40-tile Monopoly-like
-long game for players who want it. Base is loaded first; merge is
-last-loaded-wins per key: tiles and cards replace in place by id, rule
-scalars override by name; every conflict is logged at WARN. Unknown rule
-keys are ignored with a warning. The resolved bundle is pushed to clients
-on join, so clients never need mod files locally.
+fast, dynamic games). Base is loaded first; merge is last-loaded-wins per
+key: tiles and cards replace in place by id, rule scalars override by
+name; every conflict is logged at WARN. Unknown rule keys are ignored
+with a warning. The resolved bundle is pushed to clients on join, so
+clients never need mod files locally.
 
 Each room can pick its own ordered mod list at creation (ADR-0006): the
 clients expose a "mods" field on create (CLI: repeatable `--mod`), and an
 omitted or empty list selects the server's boot-time default set. Mod ids
-are allowlist-validated server-side. Examples: play the long game with
-`--mod classic`, or `mods/highroller` (rules-only: richer, faster) with
-`base, highroller`.
+are allowlist-validated server-side. Example: `mods/highroller`
+(rules-only: richer, faster) with `base, highroller`.
 
-V1 hook points: `rules.{starting_balance, go_salary, jail_fine,
-max_houses_per_property, bankruptcy_threshold,
+V1 hook points: `rules.{starting_balance, go_salary, velocity_min,
+velocity_max, max_houses_per_property, bankruptcy_threshold,
 expropriation, rent_boost, win_full_groups, win_victory_points,
 subsidiary_pool_factor, conglomerate_pool_factor}` (booleans as 0/1;
+`velocity_min`/`velocity_max` size the movement card hand (ADR-0017;
+also the fixed permutation length for a Legal Route, ADR-0024),
 `expropriation`/`rent_boost` are cost percents, `win_full_groups` a group
 count, `win_victory_points` a point target (ADR-0020), and the two pool
 factors a multiplier scaling `round(factor * sqrt(players))`, 0 = off),
 `cards.chance[*]`,
 `cards.community[*]`, `properties[*]` (including per-tile `rent_model`:
-`houses` (default), `group_scaled` for stations, `dice_scaled` for
-utilities; the scaled models need no `house_cost` and cannot be built on),
+`houses` (default) or `group_scaled` for stations; the scaled model needs
+no `house_cost` and cannot be built on),
 `events[*]` + `[forecast] gap_turns` (ADR-0021, see below).
 
 ## Game rules implemented
 
-Movement with Go salary, sealed-bid auctions on every landing (ADR-0018):
+Movement is a velocity deck (ADR-0017): every player holds a public hand
+of every integer in `rules.velocity_min..=velocity_max` (1-5 by default)
+and plays one card per turn (`PlayMovementCard`), collecting Go salary on
+passing/landing on Go; the hand refills to the full range the instant it
+empties, and full refills are the metronome for the victory-point race's
+round bonus (ADR-0020). Sealed-bid auctions on every landing (ADR-0018):
 a 5s window opens the instant a player lands on an unowned property, and
 every living seat - not just the landing player - submits exactly one bid
 at once (`0` abstains); the landing player (the "discoverer") is treated
@@ -283,7 +291,7 @@ preserve its cash-frozen invariant; capped at 4 open offers per proposer;
 offers are private - only the two parties see them and their lifecycle
 events), rent (full-group doubles
 unimproved rent; a singleton group counts as full; stations scale by
-stations owned, utilities by dice total), building and voluntary house
+stations owned), building and voluntary house
 sales with the classic even-build/even-sell rule (forced liquidation
 follows it too), the full-group requirement, per-tile cap, and
 no-mortgage-in-group rule. Optional shared building pools (ADR-0019,
@@ -300,12 +308,26 @@ back to a one-motion full strip when needed. Mortgage (half
 price out, plus 10% interest floored to redeem; mortgaged tiles collect
 nothing but still count for group ownership; a group must be house-free to
 mortgage), taxes, chance/community decks (cyclic, seeded shuffle, chained
-card moves capped at depth 4), jail (doubles escape, fine, forced fine on
-the third failed roll), get-out-of-jail-free cards (held as a per-player
-count, spent voluntarily before rolling or automatically instead of the
-forced third-roll fine; the decks are immutable cyclic shuffles, so drawn
-cards never leave the rotation), doubles grant an extra roll and three consecutive
-doubles jail you, partial-payment bankruptcy with liquidation (houses at
+card moves capped at depth 4), jail entered the same way as before (the Go
+To Jail tile or a card) but escaped by choice under the blitz clock, not
+dice (ADR-0024): Legal Route (`ChooseLegalRoute`, commit to a locked,
+public permutation of the full hand - the first card plays immediately
+and un-jails you, each following turn only the route's front card is a
+legal `PlayMovementCard`, and while any of the route remains your owned
+tiles charge no rent to visitors; the hand refills normally, one
+`hands_cycled` tick, once the route empties), Corruption (`OfferBribe`,
+1..=cash, opens a 5s simultaneous vote among living opponents reusing
+ADR-0018's timed-collection window; strictly more than half must accept -
+a two-player game needs the lone opponent's yes; on success the amount
+splits by floor division among the opponents, the remainder staying with
+the briber, and you exit with a normal hand and live rents to play your
+move the same turn; on failure no cash moves and the turn just ends,
+retry next turn), and the unchanged get-out-of-jail-free card
+(`UseJailCard`, held as a per-player count, immediate unconditional exit
+then a normal move the same turn; the decks are immutable cyclic
+shuffles, so drawn cards never leave the rotation). A jailed seat's
+canonical/AFK action is the Legal Route in ascending order - nobody rots
+in jail. Partial-payment bankruptcy with liquidation (houses at
 half cost first, then automatic mortgages, highest value first) and asset
 transfer to the creditor (mortgages carry over as-is; the bank refurbishes
 returned tiles), resignation, last-player-standing win. Optional time-boxed games
@@ -379,7 +401,7 @@ deck rotation once drawn.
   away (ADR-0014). Removed via "Remove bot" / `rmbot`.
 - The host sets each game's options in the lobby (ADR-0015): the three
   timers (game, turn, time bank) and every rule scalar (starting balance, GO
-  salary, jail fine, max houses, bankruptcy threshold, expropriation %,
+  salary, velocity min/max, max houses, bankruptcy threshold, expropriation %,
   rent boost %, domination groups, victory point target,
   subsidiary/conglomerate pool factors). Edits broadcast live to the
   lobby; the server clamps every value. New rooms default to a 60-minute
@@ -413,14 +435,19 @@ seat at once, not a single actor - the first simultaneous multi-seat
 command phase, and the model for ADR-0024's corruption vote); 0019 shared
 building pools (subsidiaries/conglomerates, table-wide scarcity scaled by
 player count); 0020 victory points + pool-exhaustion end (the primary v2
-win condition; the round bonus reads `Player.hands_cycled`, an interim
-"turns taken" counter standing in for ADR-0017's not-yet-built velocity
-deck - same meaning, source changes at that step); 0021 public market
+win condition; the round bonus reads `Player.hands_cycled`, ticked once
+per hand refill by ADR-0017's velocity deck); 0021 public market
 forecast (seeded, rolling event queue; rent/acquisition multipliers and a
 one-shot wealth tax); 0022 takeover tightened to the landing tile only,
 at end of turn, and improved tiles seizable with liquidation to the pools
 (amends 0011, shares accounting with 0019); 0023 blitz clock: 12s turns
-plus a 45s personal time bank, never refilled (amends 0015).
+plus a 45s personal time bank, never refilled (amends 0015); 0017 velocity
+deck replaces dice movement (a public per-player hand of
+`rules.velocity_min..=velocity_max`, `PlayMovementCard`; `DicePolicy` and
+`RentModel::DiceScaled` removed outright, `mods/classic` deleted as its
+only user); 0024 jail escape without dice - Legal Route, Corruption, and
+the unchanged jail card replace doubles/fine/third-roll (amends the entry
+side of nothing - Go To Jail is unchanged, only escape is redesigned).
 
 ## Roadmap
 

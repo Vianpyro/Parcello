@@ -95,7 +95,8 @@ impl RegistryBuilder {
             match key.as_str() {
                 "starting_balance" => rules.starting_balance = *value,
                 "go_salary" => rules.go_salary = *value,
-                "jail_fine" => rules.jail_fine = *value,
+                "velocity_min" => rules.velocity_min = (*value).clamp(1, 254) as u8,
+                "velocity_max" => rules.velocity_max = (*value).clamp(2, 255) as u8,
                 "max_houses_per_property" => {
                     rules.max_houses_per_property = (*value).clamp(0, u8::MAX as i64) as u8;
                 }

@@ -36,6 +36,15 @@ impl FuzzRng {
     }
 }
 
+/// In-place Fisher-Yates shuffle, used to build a random valid Legal Route
+/// permutation (ADR-0024: any ordering of the full velocity range works).
+fn shuffle(items: &mut [u8], rng: &mut FuzzRng) {
+    for i in (1..items.len()).rev() {
+        let j = rng.below(i + 1);
+        items.swap(i, j);
+    }
+}
+
 #[test]
 fn fuzz_random_valid_game_states() {
     let iterations = env::var("PARCELLO_FUZZ_ITERS")
@@ -104,19 +113,38 @@ fn next_valid_command(
     rng: &mut FuzzRng,
 ) -> PlayerCommand {
     let (actor, kind) = match &state.turn {
-        TurnPhase::AwaitRoll => {
+        TurnPhase::AwaitMove => {
             let player = &state.players[state.current];
-            if player.jail_turns.is_some() && player.jail_cards > 0 && rng.chance(3) {
-                (state.current, CommandKind::UseJailCard)
-            } else if player.jail_turns.is_some()
-                && player.cash >= content.rules.jail_fine
-                && rng.chance(3)
-            {
-                (state.current, CommandKind::PayJailFine)
+            if let Some(route) = &player.jail_route {
+                // On a locked route, only the front card is a legal move -
+                // asset commands (build/trade/mortgage) stay available too
+                // (ADR-0024: only rent income is frozen).
+                let value = route[0];
+                if let Some(kind) = random_asset_command(content, state, state.current, rng) {
+                    (state.current, kind)
+                } else {
+                    (state.current, CommandKind::PlayMovementCard { value })
+                }
+            } else if player.jailed {
+                if player.jail_cards > 0 && rng.chance(3) {
+                    (state.current, CommandKind::UseJailCard)
+                } else if player.cash > 0 && rng.chance(3) {
+                    let amount = 1 + rng.below(player.cash as usize) as i64;
+                    (state.current, CommandKind::OfferBribe { amount })
+                } else if let Some(kind) = random_asset_command(content, state, state.current, rng)
+                {
+                    (state.current, kind)
+                } else {
+                    let mut order: Vec<u8> =
+                        (content.rules.velocity_min..=content.rules.velocity_max).collect();
+                    shuffle(&mut order, rng);
+                    (state.current, CommandKind::ChooseLegalRoute { order })
+                }
             } else if let Some(kind) = random_asset_command(content, state, state.current, rng) {
                 (state.current, kind)
             } else {
-                (state.current, CommandKind::Roll)
+                let value = player.hand[rng.below(player.hand.len())];
+                (state.current, CommandKind::PlayMovementCard { value })
             }
         }
         TurnPhase::AwaitEnd => {
@@ -146,6 +174,15 @@ fn next_valid_command(
                 0
             };
             (seat, CommandKind::SubmitBlindBid { amount })
+        }
+        TurnPhase::BribeVote { briber, votes, .. } => {
+            let pending: Vec<usize> = state
+                .alive_players()
+                .filter(|&s| s != *briber && votes[s].is_none())
+                .collect();
+            let seat = pending[rng.below(pending.len())];
+            let accept = rng.chance(2);
+            (seat, CommandKind::VoteOnBribe { accept })
         }
     };
 
@@ -303,7 +340,7 @@ fn assert_invariants(
     }
 
     match &state.turn {
-        TurnPhase::AwaitRoll | TurnPhase::AwaitEnd => {}
+        TurnPhase::AwaitMove | TurnPhase::AwaitEnd => {}
         TurnPhase::BlindAuction { tile, bids } => {
             let tile = *tile;
             if tile >= state.tiles.len() || content.property(tile).is_none() {
@@ -323,7 +360,31 @@ fn assert_invariants(
                 }
             }
         }
+        TurnPhase::BribeVote {
+            briber,
+            amount,
+            votes,
+        } => {
+            let briber = *briber;
+            if briber >= state.players.len() || state.players[briber].bankrupt {
+                fail("BribeVote references an invalid briber");
+            }
+            if !state.players[briber].jailed {
+                fail("BribeVote is open for a briber who isn't jailed");
+            }
+            if *amount < 1 || *amount > state.players[briber].cash {
+                fail("BribeVote amount is not within the briber's cash");
+            }
+            if votes.len() != state.players.len() {
+                fail("BribeVote votes vector size mismatches player count");
+            }
+            if votes[briber].is_some() {
+                fail("BribeVote briber slot must stay unvoted");
+            }
+        }
     }
+
+    let full_hand_size = (content.rules.velocity_max - content.rules.velocity_min + 1) as usize;
 
     for (idx, player) in state.players.iter().enumerate() {
         if player.cash < content.rules.bankruptcy_threshold && !player.bankrupt {
@@ -332,11 +393,32 @@ fn assert_invariants(
         if content.rules.bankruptcy_threshold >= 0 && player.cash < 0 {
             fail("negative cash with non-negative bankruptcy threshold");
         }
-        if player.position >= content.board.len() || player.doubles_streak > 2 {
-            fail("player position or doubles streak is invalid");
+        if player.position >= content.board.len() {
+            fail("player position is invalid");
+        }
+        if player.hand.len() > full_hand_size
+            || player
+                .hand
+                .iter()
+                .any(|&v| v < content.rules.velocity_min || v > content.rules.velocity_max)
+        {
+            fail("player hand holds an out-of-range card or too many cards");
+        }
+        if let Some(route) = &player.jail_route {
+            if route.is_empty()
+                || route.len() > full_hand_size
+                || route
+                    .iter()
+                    .any(|&v| v < content.rules.velocity_min || v > content.rules.velocity_max)
+            {
+                fail("jail_route holds an out-of-range card or is empty");
+            }
+            if player.jailed {
+                fail("a player cannot be both jailed and mid-route");
+            }
         }
         if player.bankrupt
-            && (player.jail_turns.is_some() || player.doubles_streak != 0 || player.jail_cards != 0)
+            && (player.jailed || player.jail_route.is_some() || player.jail_cards != 0)
         {
             fail("bankrupt player retains turn-only state");
         }
@@ -407,8 +489,8 @@ fn assert_money_delta(
         .collect();
 
     // Every event type has an exactly-known cash effect except a debt paid
-    // to the bank (Tax/JailFine, or a negative card CashAdjusted - none
-    // have a creditor) that triggers the payer's bankruptcy: the
+    // to the bank (Tax, or a negative card CashAdjusted - neither has a
+    // creditor) that triggers the payer's bankruptcy: the
     // partial-settlement path (`charge()` in apply.rs) deducts only
     // whatever cash liquidation could raise, not the full nominal amount
     // the event logs - so the true contribution is only known to lie
@@ -452,13 +534,6 @@ fn assert_money_delta(
             Event::RentBoosted { cost, .. } => (-*cost, -*cost),
             Event::PropertyMortgaged { value, .. } => (*value, *value),
             Event::PropertyUnmortgaged { cost, .. } => (-*cost, -*cost),
-            Event::JailFinePaid { player, amount, .. } => {
-                if bankrupted.contains(player) {
-                    (-*amount, 0)
-                } else {
-                    (-*amount, -*amount)
-                }
-            }
             _ => (0, 0),
         };
         min_expected += lo;

@@ -344,8 +344,8 @@ class GameScreen extends StatelessWidget {
                 onTileTap: (i) => _tileMenu(context, i),
                 center: _CenterPanel(s: s),
               ),
-              // Dice result, floating over the middle of the board.
-              _DiceRoll(seq: s.diceSeq, d1: s.diceD1, d2: s.diceD2),
+              // Played movement card, floating over the middle of the board.
+              _CardFlash(seq: s.cardSeq, value: s.cardValue),
             ]),
           ),
           const SizedBox(width: 12),
@@ -494,6 +494,11 @@ class _CenterPanel extends StatelessWidget {
             const SizedBox(width: 6),
             _Countdown(endsAt: s.bidEndsAt!, icon: Icons.gavel, warnSecs: 2),
           ],
+          // Corruption bribe vote window (ADR-0024): same pattern.
+          if (s.voteEndsAt != null && s.view?.finished == false) ...[
+            const SizedBox(width: 6),
+            _Countdown(endsAt: s.voteEndsAt!, icon: Icons.how_to_vote, warnSecs: 2),
+          ],
         ]),
         if (_poolsLine() != null) ...[
           const SizedBox(height: 2),
@@ -567,6 +572,15 @@ class _CenterPanel extends StatelessWidget {
             ? 'nobody'
             : pending.map(s.playerName).join(', ');
         return 'Sealed bid on ${s.tileName(t.tile!)} — waiting on: $waiting';
+      case 'bribe_vote':
+        final pending = <int>[
+          for (var i = 0; i < t.votes.length; i++)
+            if (i != t.briber && t.votes[i] == null) i
+        ];
+        final waiting = pending.isEmpty
+            ? 'nobody'
+            : pending.map(s.playerName).join(', ');
+        return '${s.playerName(t.briber!)} offers \$${t.amount} to leave jail — waiting on: $waiting';
       default:
         return "${s.playerName(v.current)}'s turn";
     }
@@ -684,27 +698,28 @@ class _MuteButtonState extends State<_MuteButton> {
   }
 }
 
-/// The dice result, shown big in the middle of the board for a couple of
-/// seconds after each roll, then faded out (like a physical board game).
-class _DiceRoll extends StatefulWidget {
-  final int seq, d1, d2;
-  const _DiceRoll({required this.seq, required this.d1, required this.d2});
+/// The played movement card value, shown big in the middle of the board for
+/// a moment after each play, then faded out (ADR-0017; like a physical board
+/// game's dice result, replaced by a card since movement no longer rolls).
+class _CardFlash extends StatefulWidget {
+  final int seq, value;
+  const _CardFlash({required this.seq, required this.value});
 
   @override
-  State<_DiceRoll> createState() => _DiceRollState();
+  State<_CardFlash> createState() => _CardFlashState();
 }
 
-class _DiceRollState extends State<_DiceRoll> {
+class _CardFlashState extends State<_CardFlash> {
   bool _visible = false;
   Timer? _timer;
 
   @override
-  void didUpdateWidget(_DiceRoll old) {
+  void didUpdateWidget(_CardFlash old) {
     super.didUpdateWidget(old);
     if (widget.seq != old.seq && widget.seq > 0) {
       setState(() => _visible = true);
       _timer?.cancel();
-      _timer = Timer(const Duration(milliseconds: 2500), () {
+      _timer = Timer(const Duration(milliseconds: 1500), () {
         if (mounted) setState(() => _visible = false);
       });
     }
@@ -722,68 +737,23 @@ class _DiceRollState extends State<_DiceRoll> {
       child: AnimatedOpacity(
         opacity: _visible ? 1 : 0,
         duration: const Duration(milliseconds: 300),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          _Die(widget.d1),
-          const SizedBox(width: 18),
-          _Die(widget.d2),
-        ]),
-      ),
-    );
-  }
-}
-
-/// A single pip die face (1-6).
-class _Die extends StatelessWidget {
-  final int value;
-  const _Die(this.value);
-
-  // Lit cells of a 3x3 grid (row*3 + col) per standard pip layout.
-  static const _pips = <int, List<int>>{
-    1: [4],
-    2: [0, 8],
-    3: [0, 4, 8],
-    4: [0, 2, 6, 8],
-    5: [0, 2, 4, 6, 8],
-    6: [0, 2, 3, 5, 6, 8],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final on = (_pips[value] ?? const <int>[]).toSet();
-    return Container(
-      width: 66,
-      height: 66,
-      padding: const EdgeInsets.all(9),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
-          BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        children: [
-          for (var r = 0; r < 3; r++)
-            Expanded(
-              child: Row(children: [
-                for (var c = 0; c < 3; c++)
-                  Expanded(
-                    child: Center(
-                      child: on.contains(r * 3 + c)
-                          ? Container(
-                              width: 12,
-                              height: 12,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF1E1E1E),
-                                shape: BoxShape.circle,
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ),
-              ]),
-            ),
-        ],
+        child: Container(
+          width: 66,
+          height: 66,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+            ],
+          ),
+          child: Text(
+            '${widget.value}',
+            style: const TextStyle(
+                fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF221D0E)),
+          ),
+        ),
       ),
     );
   }
@@ -799,6 +769,8 @@ class _Actions extends StatefulWidget {
 
 class _ActionsState extends State<_Actions> {
   final _bid = TextEditingController();
+  final _route = TextEditingController();
+  final _bribe = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
@@ -861,17 +833,85 @@ class _ActionsState extends State<_Actions> {
         btn('Abstain', {'type': 'submit_blind_bid', 'amount': 0},
             primary: false),
       ]);
+    } else if (t.type == 'bribe_vote') {
+      // Every living opponent may vote at once (ADR-0024), not a single
+      // actor: show the overlay to anyone except the briber who hasn't
+      // voted yet, regardless of whose turn it nominally is.
+      final seat = s.seat;
+      if (seat == null ||
+          seat == t.briber ||
+          t.votes[seat] != null ||
+          v.players[seat].bankrupt) {
+        return const SizedBox.shrink();
+      }
+      children.addAll([
+        Text(
+          '${s.playerName(t.briber!)} offers \$${t.amount} to leave jail:',
+          style: const TextStyle(fontSize: 12),
+        ),
+        btn('Accept', {'type': 'vote_on_bribe', 'accept': true}),
+        btn('Reject', {'type': 'vote_on_bribe', 'accept': false},
+            primary: false),
+      ]);
     } else if (s.myTurn) {
       final me = v.players[s.seat!];
       switch (t.type) {
-        case 'await_roll':
-          children.add(btn('Roll', {'type': 'roll'}));
-          if (me.inJail) {
-            children
-                .add(btn('Pay fine', {'type': 'pay_jail_fine'}, primary: false));
+        case 'await_move':
+          final route = me.jailRoute;
+          if (route != null) {
+            // Locked Legal Route (ADR-0024): only the front card is legal.
+            children.add(btn('Play ${route.first} (route)',
+                {'type': 'play_movement_card', 'value': route.first}));
+          } else if (me.inJail) {
+            // Three exits: jail card, Corruption bribe, Legal Route.
             if (me.jailCards > 0) {
               children.add(btn('Use jail card', {'type': 'use_jail_card'},
                   primary: false));
+            }
+            final sorted = [...me.hand]..sort();
+            _route.text = sorted.join(',');
+            _bribe.text = '${me.cash.clamp(1, 200)}';
+            children.addAll([
+              const Text('Route order:', style: TextStyle(fontSize: 12)),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _route,
+                  style: const TextStyle(color: Color(0xFF2A2A2A)),
+                  decoration: const InputDecoration(
+                      isDense: true, hintText: 'e.g. 1,2,3,4,5'),
+                ),
+              ),
+              btn('Choose route', {
+                'type': 'choose_legal_route',
+                'order': _route.text
+                    .split(',')
+                    .map((x) => int.tryParse(x.trim()))
+                    .whereType<int>()
+                    .toList(),
+              }, primary: false),
+              SizedBox(
+                width: 90,
+                child: TextField(
+                  controller: _bribe,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Color(0xFF2A2A2A)),
+                  decoration: const InputDecoration(isDense: true),
+                ),
+              ),
+              btn(
+                  'Offer bribe',
+                  {
+                    'type': 'offer_bribe',
+                    'amount': int.tryParse(_bribe.text) ?? 0
+                  },
+                  primary: false),
+            ]);
+          } else {
+            // Hand of movement cards (ADR-0017): one button per card value.
+            for (final value in me.hand) {
+              children.add(
+                  btn('$value', {'type': 'play_movement_card', 'value': value}));
             }
           }
         case 'await_end':
@@ -1060,6 +1100,7 @@ class _SidePanel extends StatelessWidget {
       final tags = [
         if (i == s.seat) '(you)',
         if (p?.inJail == true) '[jail]',
+        if (p?.jailRoute != null) '[route: ${p!.jailRoute!.join(',')} left]',
         if ((p?.jailCards ?? 0) > 0) '[${p!.jailCards} jail card]',
         if (seatInfo?.isBot == true)
           '\u{1F916} bot'
@@ -1183,7 +1224,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
     ('bank', 'Time bank (s, 0=off)'),
     ('starting_balance', 'Starting balance'),
     ('go_salary', 'GO salary'),
-    ('jail_fine', 'Jail fine'),
+    ('velocity_min', 'Velocity min'),
+    ('velocity_max', 'Velocity max'),
     ('max_houses', 'Max houses (1-5)'),
     ('bankruptcy_threshold', 'Bankruptcy threshold'),
     ('expropriation', 'Expropriation %'),
@@ -1207,7 +1249,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       'bank': TextEditingController(text: '${s.timeBankSeconds ?? 0}'),
       'starting_balance': TextEditingController(text: '${r.startingBalance}'),
       'go_salary': TextEditingController(text: '${r.goSalary}'),
-      'jail_fine': TextEditingController(text: '${r.jailFine}'),
+      'velocity_min': TextEditingController(text: '${r.velocityMin}'),
+      'velocity_max': TextEditingController(text: '${r.velocityMax}'),
       'max_houses': TextEditingController(text: '${r.maxHousesPerProperty}'),
       'bankruptcy_threshold':
           TextEditingController(text: '${r.bankruptcyThreshold}'),
@@ -1241,7 +1284,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       'rules': {
         'starting_balance': _n('starting_balance'),
         'go_salary': _n('go_salary'),
-        'jail_fine': _n('jail_fine'),
+        'velocity_min': _n('velocity_min'),
+        'velocity_max': _n('velocity_max'),
         'max_houses_per_property': _n('max_houses'),
         'bankruptcy_threshold': _n('bankruptcy_threshold'),
         'expropriation': _n('expropriation'),
@@ -1308,7 +1352,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       ('Time bank', s.timeBankSeconds == null ? 'off' : '${s.timeBankSeconds} s'),
       ('Starting balance', '\$${r.startingBalance}'),
       ('GO salary', '\$${r.goSalary}'),
-      ('Jail fine', '\$${r.jailFine}'),
+      ('Velocity', '${r.velocityMin}-${r.velocityMax}'),
       ('Max houses', '${r.maxHousesPerProperty}'),
       ('Bankruptcy threshold', '\$${r.bankruptcyThreshold}'),
       ('Expropriation', r.expropriation == 0 ? 'off' : '${r.expropriation}%'),

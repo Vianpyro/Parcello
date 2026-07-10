@@ -302,7 +302,7 @@ mod tests {
         let history = SqliteHistory::open(&db).expect("open");
         history.record_start("ABCDE", &["p0".into(), "p1".into()], u64::MAX);
         for kind in [
-            CommandKind::Roll,
+            CommandKind::PlayMovementCard { value: 3 },
             CommandKind::SubmitBlindBid { amount: 0 },
             CommandKind::EndTurn,
         ] {
@@ -337,7 +337,7 @@ mod tests {
             .collect::<Result<_, _>>()
             .expect("rows");
         assert_eq!(jsons.len(), 3);
-        assert!(jsons[0].contains(r#""type":"roll""#));
+        assert!(jsons[0].contains(r#""type":"play_movement_card""#));
         assert!(jsons[2].contains(r#""type":"end_turn""#));
 
         let (player, rating, comment): (String, i64, String) = conn

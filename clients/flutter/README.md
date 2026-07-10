@@ -20,22 +20,23 @@ Layout:
   stays visible at call sites) plus the event-log formatter.
 - `lib/session.dart` - WebSocket connection + game state in one
   `ChangeNotifier` (the equivalent of the web client's `st` object).
-- `lib/board.dart` - classic 40-tile ring on an 11x11 grid, wrap fallback
-  for modded board sizes. Tile text scales with cell size for legibility;
-  pawns ride an animated overlay that hops square by square (eased per tile,
-  ~260ms each) on a normal roll and slides straight for teleports/jail.
+- `lib/board.dart` - any `4*(d-1)` square ring (32 -> 9x9, 40 -> 11x11),
+  wrap fallback for other board sizes. Tile text scales with cell size for
+  legibility; pawns ride an animated overlay that hops square by square
+  (eased per tile, ~260ms each) on a normal move and slides straight for
+  teleports/jail.
 - `lib/oidc.dart` - OIDC Authorization Code + PKCE login against the
   identity provider (ADR-0009): system browser + loopback redirect; the
   id_token stays in memory only.
 - `lib/main.dart` - three screens: **Connect** (server URL + identity, the
   socket stays open), **Menu** (create a private game, join by code, public
   games "coming soon"), and the **Game** screen (per-phase action buttons,
-  tile owner menu, trade composer, dice overlay, play-again/continue).
+  tile owner menu, trade composer, movement card flash, play-again/continue).
   Buttons are full-width and >=46px tall so a mobile port needs little
   rework (`wideButton` helper).
 
 `lib/sfx.dart` plays the sound effects in `assets/sfx/` (via `audioplayers`,
-best-effort/defensive): `dice-roll` on a roll, a `move-pawn-NN` per tile as
+best-effort/defensive): `dice-roll` on a movement card play, a `move-pawn-NN` per tile as
 the pawn hops, a random `stop-pawn` on landing; a mute button toggles
 `sfx.enabled`. Otherwise the only runtime dependency is `web_socket_channel`.
 State management is a single `ChangeNotifier` on purpose - the whole client

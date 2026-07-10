@@ -1,34 +1,16 @@
-//! Engine behavior tests. Dice are injected through a scripted `DicePolicy`
-//! so every scenario is fully deterministic. A few tests reach into public
-//! state fields to set up scenarios directly; this is a test-only shortcut.
+//! Engine behavior tests. Movement is scripted `PlayMovementCard`
+//! commands, fully deterministic without any RNG involvement. A few tests
+//! reach into public state fields to set up scenarios directly; this is a
+//! test-only shortcut.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use parcello_engine::strategy::StandardRent;
 use parcello_engine::{
-    ActiveMarketEvent, CardDef, CardEffect, ClientView, CommandError, CommandKind, DicePolicy,
-    Engine, Event, GameContent, GamePhase, GameState, MarketEffect, MarketEventDef, PlayerCommand,
-    PropertyDef, RentCalculator, RentModel, RuleParams, TileDef, TileKind, TurnPhase,
+    ActiveMarketEvent, CardDef, CardEffect, ClientView, CommandError, CommandKind, Engine, Event,
+    GameContent, GamePhase, GameState, MarketEffect, MarketEventDef, PlayerCommand, PropertyDef,
+    RentCalculator, RentModel, RuleParams, TileDef, TileKind, TurnPhase,
 };
-
-struct FixedDice(Mutex<VecDeque<(u8, u8)>>);
-
-impl FixedDice {
-    fn new(rolls: &[(u8, u8)]) -> Box<Self> {
-        Box::new(Self(Mutex::new(rolls.iter().copied().collect())))
-    }
-}
-
-impl DicePolicy for FixedDice {
-    fn roll(&self, _rng: &mut u64) -> (u8, u8) {
-        self.0
-            .lock()
-            .expect("dice script mutex")
-            .pop_front()
-            .expect("dice script exhausted")
-    }
-}
 
 fn tile(id: &str, name: &str, kind: TileKind) -> TileDef {
     TileDef {
@@ -59,6 +41,7 @@ fn scaled_prop(group: &str, price: i64, rents: [i64; 6], rent_model: RentModel) 
 }
 
 /// 0 go, 1 park, 2-3 transit pair (group-scaled), 4 works (dice-scaled), 5 jail.
+/// 0 go, 1 park, 2-3 transit pair (group-scaled), 4 jail.
 fn transit_board() -> GameContent {
     GameContent {
         board: vec![
@@ -83,11 +66,6 @@ fn transit_board() -> GameContent {
                     [25, 50, 100, 200, 0, 0],
                     RentModel::GroupScaled,
                 ),
-            ),
-            tile(
-                "works_a",
-                "Works A",
-                scaled_prop("works", 150, [4, 10, 0, 0, 0, 0], RentModel::DiceScaled),
             ),
             tile("jail", "Jail", TileKind::Jail),
         ],
@@ -134,10 +112,8 @@ fn plain_board() -> GameContent {
     }
 }
 
-fn engine_with(content: GameContent, rolls: &[(u8, u8)]) -> Engine {
-    Engine::new(Arc::new(content))
-        .expect("valid test content")
-        .with_dice(FixedDice::new(rolls))
+fn engine_with(content: GameContent) -> Engine {
+    Engine::new(Arc::new(content)).expect("valid test content")
 }
 
 fn two_players(engine: &Engine) -> GameState {
@@ -158,12 +134,22 @@ fn step(engine: &Engine, st: &GameState, c: PlayerCommand) -> (GameState, Vec<Ev
     engine.apply(st, &c).expect("command accepted")
 }
 
+/// Plays a movement card for `player` (ADR-0017) - the deterministic
+/// replacement for a dice roll; `value` must be in the player's hand.
+fn play(engine: &Engine, st: &GameState, player: &str, value: u8) -> (GameState, Vec<Event>) {
+    step(
+        engine,
+        st,
+        cmd(player, CommandKind::PlayMovementCard { value }),
+    )
+}
+
 #[test]
 fn discoverer_wins_at_floor_when_uncontested_then_pays_rent() {
-    let engine = engine_with(plain_board(), &[(1, 2), (1, 2)]);
+    let engine = engine_with(plain_board());
     let st = two_players(&engine);
 
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p0", 3);
     assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 3, .. }));
     assert!(ev.iter().any(|e| matches!(
         e,
@@ -201,7 +187,7 @@ fn discoverer_wins_at_floor_when_uncontested_then_pays_rent() {
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
     assert_eq!(st.current, 1);
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     assert!(ev.iter().any(|e| matches!(
         e,
         Event::RentPaid {
@@ -217,7 +203,7 @@ fn discoverer_wins_at_floor_when_uncontested_then_pays_rent() {
 
 #[test]
 fn monopoly_doubles_unimproved_rent_and_allows_building() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0);
@@ -261,8 +247,8 @@ fn monopoly_doubles_unimproved_rent_and_allows_building() {
 
     // Opponent lands on the unimproved half of a full group: double rent.
     st.current = 1;
-    st.turn = TurnPhase::AwaitRoll;
-    let (st3, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    st.turn = TurnPhase::AwaitMove;
+    let (st3, ev) = play(&engine, &st, "p1", 3);
     assert!(ev.iter().any(|e| matches!(
         e,
         Event::RentPaid {
@@ -275,102 +261,17 @@ fn monopoly_doubles_unimproved_rent_and_allows_building() {
 }
 
 #[test]
-fn three_doubles_send_to_jail() {
-    let engine = engine_with(plain_board(), &[(2, 2), (3, 3), (1, 1)]);
-    let st = two_players(&engine);
-
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll)); // -> park (4)
-    assert_eq!(st.turn, TurnPhase::AwaitEnd);
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn)); // doubles: extra roll
-    assert_eq!(st.current, 0);
-    assert_eq!(st.turn, TurnPhase::AwaitRoll);
-
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll)); // wraps to tax (1)
-    assert!(ev.iter().any(|e| matches!(
-        e,
-        Event::SalaryPaid {
-            player: 0,
-            amount: 200
-        }
-    )));
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::TaxPaid { amount: 100, .. }))
-    );
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
-
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll)); // third double
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::WentToJail { player: 0 }))
-    );
-    assert_eq!(st.players[0].position, 5);
-    assert_eq!(st.players[0].jail_turns, Some(0));
-
-    // The jailing double grants no extra roll.
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
-    assert_eq!(st.current, 1);
-}
-
-#[test]
-fn jail_pay_fine_then_roll() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
-    let mut st = two_players(&engine);
-    st.players[0].position = 5;
-    st.players[0].jail_turns = Some(0);
-
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::PayJailFine));
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. }))
-    );
-    assert_eq!(st.players[0].jail_turns, None);
-    assert_eq!(st.players[0].cash, 1450);
-    assert_eq!(st.turn, TurnPhase::AwaitRoll);
-
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert_eq!(st.players[0].position, 8);
-}
-
-#[test]
-fn jail_third_failed_roll_forces_fine_and_moves() {
-    let engine = engine_with(plain_board(), &[(1, 2), (2, 3), (1, 2)]);
-    let mut st = two_players(&engine);
-    st.players[0].position = 5;
-    st.players[0].jail_turns = Some(0);
-
-    for expected_turns in 1..=2u8 {
-        let (next, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-        assert_eq!(next.players[0].jail_turns, Some(expected_turns));
-        assert_eq!(next.players[0].position, 5);
-        st = next;
-        // Test shortcut: hand the turn straight back instead of simulating p1.
-        st.current = 0;
-        st.turn = TurnPhase::AwaitRoll;
-    }
-
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::JailFinePaid { amount: 50, .. }))
-    );
-    assert_eq!(st.players[0].jail_turns, None);
-    assert_eq!(st.players[0].position, 8);
-    assert_eq!(st.players[0].cash, 1450);
-}
-
-#[test]
 fn jail_card_is_held_then_spent_to_leave_jail() {
     let card = CardDef {
         id: "jail_free".into(),
         text: "Get out of jail free.".into(),
         effect: CardEffect::GetOutOfJail,
     };
-    let engine = engine_with(card_board(vec![card]), &[(1, 2), (1, 2)]);
+    let engine = engine_with(card_board(vec![card]));
     let st = two_players(&engine);
 
     // Landing on chance banks the card instead of resolving an effect.
-    let (mut st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (mut st, ev) = play(&engine, &st, "p0", 3);
     assert!(
         ev.iter()
             .any(|e| matches!(e, Event::JailCardReceived { player: 0 }))
@@ -380,8 +281,8 @@ fn jail_card_is_held_then_spent_to_leave_jail() {
 
     // Test shortcut: place p0 in jail with the turn back in hand.
     st.players[0].position = 4;
-    st.players[0].jail_turns = Some(0);
-    st.turn = TurnPhase::AwaitRoll;
+    st.players[0].jailed = true;
+    st.turn = TurnPhase::AwaitMove;
 
     let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::UseJailCard));
     assert!(
@@ -393,17 +294,22 @@ fn jail_card_is_held_then_spent_to_leave_jail() {
             .any(|e| matches!(e, Event::LeftJail { player: 0 }))
     );
     assert_eq!(st.players[0].jail_cards, 0);
-    assert_eq!(st.players[0].jail_turns, None);
+    assert!(!st.players[0].jailed);
     assert_eq!(st.players[0].cash, 1500, "the card costs nothing");
-    assert_eq!(st.turn, TurnPhase::AwaitRoll, "player still rolls normally");
+    assert_eq!(
+        st.turn,
+        TurnPhase::AwaitMove,
+        "player still plays a card normally"
+    );
 
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert_eq!(st.players[0].position, 2);
+    // Card 3 is already spent from the first move; 2 is still in hand.
+    let (st, _) = play(&engine, &st, "p0", 2);
+    assert_eq!(st.players[0].position, 1);
 }
 
 #[test]
 fn jail_card_rejections_never_mutate() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
 
     // Not in jail.
@@ -415,69 +321,386 @@ fn jail_card_rejections_never_mutate() {
     );
     // In jail without a card.
     st.players[0].position = 5;
-    st.players[0].jail_turns = Some(0);
+    st.players[0].jailed = true;
     assert_eq!(
         engine
             .apply(&st, &cmd("p0", CommandKind::UseJailCard))
             .unwrap_err(),
         CommandError::NoJailCard
     );
-    assert_eq!(st.players[0].jail_turns, Some(0));
+    assert!(st.players[0].jailed);
 }
 
 #[test]
-fn jail_third_failed_roll_spends_card_instead_of_fine() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+fn legal_route_rejects_a_non_permutation_order_without_mutating() {
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
-    st.players[0].position = 5;
-    st.players[0].jail_turns = Some(2); // two failed escapes already
-    st.players[0].jail_cards = 1;
+    st.players[0].position = 5; // jail tile
+    st.players[0].jailed = true;
 
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
-    assert!(
-        ev.iter()
-            .any(|e| matches!(e, Event::JailCardUsed { player: 0 }))
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::ChooseLegalRoute {
+                        order: vec![1, 2, 3, 4] // missing 5: not a full permutation
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::InvalidRoute
     );
-    assert!(
-        !ev.iter().any(|e| matches!(e, Event::JailFinePaid { .. })),
-        "the card replaces the forced fine"
-    );
-    assert_eq!(st.players[0].jail_cards, 0);
-    assert_eq!(st.players[0].jail_turns, None);
-    assert_eq!(st.players[0].cash, 1500);
-    assert_eq!(st.players[0].position, 8);
+    assert!(st.players[0].jailed, "rejection must not mutate");
+    assert_eq!(st.players[0].jail_route, None);
 }
 
 #[test]
-fn jail_escape_with_doubles_moves_and_grants_no_extra_roll() {
-    let engine = engine_with(plain_board(), &[(2, 2)]);
+fn legal_route_freezes_rent_and_freeze_ends_when_route_completes() {
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
-    st.players[0].position = 5;
-    st.players[0].jail_turns = Some(0);
+    st.tiles[6].owner = Some(0); // p0's navy tile: singleton full group, rent 20
+    st.players[0].position = 5; // jail tile
+    st.players[0].jailed = true;
 
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let order: Vec<u8> = (1..=5).collect();
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::ChooseLegalRoute {
+                order: order.clone(),
+            },
+        ),
+    );
     assert!(
         ev.iter()
             .any(|e| matches!(e, Event::LeftJail { player: 0 }))
     );
-    // 5 + 4 wraps to Go: salary applies.
-    assert_eq!(st.players[0].position, 0);
-    assert_eq!(st.players[0].cash, 1700);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::LegalRouteChosen { player: 0, order: o } if *o == order
+    )));
+    assert!(!st.players[0].jailed);
+    assert_eq!(st.players[0].jail_route, Some(vec![2, 3, 4, 5]));
+    assert_eq!(
+        st.players[0].position, 6,
+        "route front (1) moved p0 onto their own navy tile"
+    );
 
+    // Hand off to p1: while p0's route is active, p1 pays no rent landing
+    // on p0's tile.
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
-    assert_eq!(st.current, 1, "escape doubles must not grant an extra roll");
+    let mut st = st;
+    st.players[1].hand = vec![5];
+    st.players[1].position = 1; // 1 + 5 = 6
+    let (st, ev) = play(&engine, &st, "p1", 5);
+    assert!(
+        !ev.iter().any(|e| matches!(e, Event::RentPaid { .. })),
+        "visitors play free while the owner is mid-route"
+    );
+    assert_eq!(st.players[1].cash, 1500, "no rent charged");
+    assert_eq!(st.turn, TurnPhase::AwaitEnd);
+
+    // Once the route ends, rent resumes normally.
+    let mut st = st;
+    st.players[0].jail_route = None;
+    st.players[1].hand = vec![5];
+    st.players[1].position = 1;
+    st.turn = TurnPhase::AwaitMove;
+    let (st, ev) = play(&engine, &st, "p1", 5);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::RentPaid {
+            tile: 6,
+            amount: 20,
+            ..
+        }
+    )));
+    assert_eq!(st.players[1].cash, 1500 - 20);
+}
+
+#[test]
+fn corruption_bribe_succeeds_when_the_lone_opponent_accepts() {
+    let engine = engine_with(plain_board());
+    let mut st = two_players(&engine);
+    st.players[0].position = 5; // jail tile
+    st.players[0].jailed = true;
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::OfferBribe { amount: 100 }),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BribeOffered {
+            player: 0,
+            amount: 100
+        }
+    )));
+    assert!(matches!(
+        st.turn,
+        TurnPhase::BribeVote {
+            briber: 0,
+            amount: 100,
+            ..
+        }
+    ));
+
+    // The briber cannot vote on their own bribe.
+    assert_eq!(
+        engine
+            .apply(&st, &cmd("p0", CommandKind::VoteOnBribe { accept: true }))
+            .unwrap_err(),
+        CommandError::NotYourTurn
+    );
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::VoteOnBribe { accept: true }),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BribeResolved {
+            briber: 0,
+            amount: 100,
+            succeeded: true,
+            accepts: 1,
+            total: 1,
+        }
+    )));
+    assert!(!st.players[0].jailed);
+    assert_eq!(st.turn, TurnPhase::AwaitMove);
+    assert_eq!(
+        st.players[0].cash,
+        1500 - 100,
+        "the lone opponent takes the whole amount"
+    );
+    assert_eq!(st.players[1].cash, 1500 + 100);
+}
+
+#[test]
+fn corruption_bribe_succeeds_with_majority_and_splits_by_floor_division() {
+    let engine = engine_with(plain_board());
+    let st = engine.new_game(
+        vec![
+            ("p0".into(), "P0".into()),
+            ("p1".into(), "P1".into()),
+            ("p2".into(), "P2".into()),
+            ("p3".into(), "P3".into()),
+        ],
+        7,
+    );
+    let mut st = st;
+    st.players[0].position = 5;
+    st.players[0].jailed = true;
+
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::OfferBribe { amount: 100 }),
+    );
+
+    // Double-voting rejects without mutating the tally.
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::VoteOnBribe { accept: true }),
+    );
+    assert_eq!(
+        engine
+            .apply(&st, &cmd("p1", CommandKind::VoteOnBribe { accept: false }))
+            .unwrap_err(),
+        CommandError::AlreadyVoted
+    );
+
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p2", CommandKind::VoteOnBribe { accept: false }),
+    );
+    // 2 of 3 opponents accept: strictly more than half, success without unanimity.
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p3", CommandKind::VoteOnBribe { accept: true }),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BribeResolved {
+            briber: 0,
+            amount: 100,
+            succeeded: true,
+            accepts: 2,
+            total: 3,
+        }
+    )));
+    assert!(!st.players[0].jailed);
+    // 100 / 3 = 33 floored; only 99 leaves the briber, the remainder stays.
+    assert_eq!(st.players[0].cash, 1500 - 99);
+    assert_eq!(st.players[1].cash, 1500 + 33);
+    assert_eq!(
+        st.players[2].cash,
+        1500 + 33,
+        "rejecting voters still get a share"
+    );
+    assert_eq!(st.players[3].cash, 1500 + 33);
+}
+
+#[test]
+fn corruption_bribe_fails_without_majority_and_degrades_to_await_end() {
+    let engine = engine_with(plain_board());
+    let mut st = two_players(&engine);
+    st.players[0].position = 5;
+    st.players[0].jailed = true;
+
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::OfferBribe { amount: 100 }),
+    );
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::VoteOnBribe { accept: false }),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BribeResolved {
+            briber: 0,
+            amount: 100,
+            succeeded: false,
+            accepts: 0,
+            total: 1,
+        }
+    )));
+    assert!(st.players[0].jailed, "the bribe failing does not un-jail");
+    assert_eq!(
+        st.turn,
+        TurnPhase::AwaitEnd,
+        "turn degrades, retry available next turn"
+    );
+    assert_eq!(st.players[0].cash, 1500, "no cash moves on a failed bribe");
+    assert_eq!(st.players[1].cash, 1500);
+
+    // Retry next turn: the same jailed player can offer again once back in
+    // AwaitMove - the failure does not lock them out.
+    let mut st = st;
+    st.turn = TurnPhase::AwaitMove;
+    let (_st, ev) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::OfferBribe { amount: 50 }),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BribeOffered {
+            player: 0,
+            amount: 50
+        }
+    )));
+}
+
+#[test]
+fn a_route_landing_on_go_to_jail_revokes_parole_and_refills_the_hand() {
+    let engine = engine_with(plain_board());
+    let mut st = two_players(&engine);
+    st.players[0].position = 5; // jail tile
+    st.players[0].jailed = true;
+
+    // Front card (2) moves p0 from jail (5) straight onto go-to-jail (7).
+    let order = vec![2, 1, 3, 4, 5];
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::ChooseLegalRoute {
+                order: order.clone(),
+            },
+        ),
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::WentToJail { player: 0 }))
+    );
+    assert!(
+        st.players[0].jailed,
+        "landing back on go-to-jail mid-route re-jails the player"
+    );
+    assert_eq!(
+        st.players[0].jail_route, None,
+        "the unfinished route must not survive re-imprisonment"
+    );
+    assert_eq!(st.players[0].position, 5);
+    assert_eq!(
+        st.players[0].hand,
+        vec![1, 2, 3, 4, 5],
+        "a normal hand is waiting for whichever jail exit comes next"
+    );
+    assert_eq!(
+        st.players[0].hands_cycled, 1,
+        "the abandoned route still ticks exactly one refill"
+    );
+}
+
+#[test]
+fn bankruptcy_during_a_route_purges_the_freeze_state_cleanly() {
+    let card = CardDef {
+        id: "crushing_debt".into(),
+        text: "Pay a crushing debt.".into(),
+        effect: CardEffect::Money { amount: -1000 },
+    };
+    let engine = engine_with(card_board(vec![card]));
+    let mut st = two_players(&engine);
+    st.tiles[1].owner = Some(0); // p0 owns ave_a before going bankrupt
+    st.players[0].position = 4; // jail tile
+    st.players[0].jailed = true;
+    st.players[0].cash = 5;
+
+    // A custom (non-ascending) route whose front card lands p0 straight on
+    // the chance tile: 4 (jail) + 4 = 3 (mod 5).
+    let order = vec![4, 1, 2, 3, 5];
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::ChooseLegalRoute {
+                order: order.clone(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PlayerBankrupt {
+            player: 0,
+            creditor: None
+        }
+    )));
+    assert!(st.players[0].bankrupt);
+    assert_eq!(
+        st.players[0].jail_route, None,
+        "the freeze state must not survive a mid-route bankruptcy"
+    );
+    assert!(!st.players[0].jailed);
+    assert_eq!(st.tiles[1].owner, None, "the tile returns to the bank");
 }
 
 #[test]
 fn unpayable_rent_bankrupts_and_ends_the_game() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[6].owner = Some(0);
     st.players[1].cash = 5;
     st.players[1].position = 3;
     st.current = 1;
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     assert!(ev.iter().any(|e| matches!(
         e,
         Event::PlayerBankrupt {
@@ -497,7 +720,7 @@ fn unpayable_rent_bankrupts_and_ends_the_game() {
     assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
     assert_eq!(
         engine
-            .apply(&st, &cmd("p0", CommandKind::Roll))
+            .apply(&st, &cmd("p0", CommandKind::PlayMovementCard { value: 1 }))
             .unwrap_err(),
         CommandError::GameFinished
     );
@@ -505,7 +728,7 @@ fn unpayable_rent_bankrupts_and_ends_the_game() {
 
 #[test]
 fn liquidation_sells_houses_before_bankruptcy() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     // Tile 6 is the only navy tile: owning it is a (singleton) full group,
     // so unimproved rent doubles to 20.
@@ -517,7 +740,7 @@ fn liquidation_sells_houses_before_bankruptcy() {
     st.players[1].position = 3;
     st.current = 1;
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     let sold = ev
         .iter()
         .filter(|e| matches!(e, Event::HouseSold { .. }))
@@ -560,10 +783,10 @@ fn money_card_adjusts_cash() {
         text: "Bank pays you 50.".into(),
         effect: CardEffect::Money { amount: 50 },
     };
-    let engine = engine_with(card_board(vec![card]), &[(1, 2)]);
+    let engine = engine_with(card_board(vec![card]));
     let st = two_players(&engine);
 
-    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p0", 3);
     assert!(ev.iter().any(|e| matches!(e, Event::CardDrawn { .. })));
     assert!(ev.iter().any(|e| matches!(
         e,
@@ -587,10 +810,10 @@ fn move_to_card_collects_salary_and_resolves_landing() {
             collect_go: true,
         },
     };
-    let engine = engine_with(card_board(vec![card]), &[(1, 2)]);
+    let engine = engine_with(card_board(vec![card]));
     let st = two_players(&engine);
 
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (st, _) = play(&engine, &st, "p0", 3);
     assert_eq!(st.players[0].position, 0);
     assert_eq!(st.players[0].cash, 1700);
     assert_eq!(st.turn, TurnPhase::AwaitEnd);
@@ -598,7 +821,7 @@ fn move_to_card_collects_salary_and_resolves_landing() {
 
 #[test]
 fn resign_transfers_assets_to_bank_and_can_end_game() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = engine.new_game(
         vec![
             ("p0".into(), "Alice".into()),
@@ -634,7 +857,7 @@ fn resign_transfers_assets_to_bank_and_can_end_game() {
 
 #[test]
 fn resigning_current_player_advances_the_turn() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let st = engine.new_game(
         vec![
             ("p0".into(), "Alice".into()),
@@ -645,7 +868,7 @@ fn resigning_current_player_advances_the_turn() {
     );
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Resign));
     assert_eq!(st.current, 1);
-    assert_eq!(st.turn, TurnPhase::AwaitRoll);
+    assert_eq!(st.turn, TurnPhase::AwaitMove);
 }
 
 #[test]
@@ -663,7 +886,25 @@ fn same_seed_produces_identical_games() {
                 break;
             }
             let (actor, kind) = match &st.turn {
-                TurnPhase::AwaitRoll => (st.current, CommandKind::Roll),
+                TurnPhase::AwaitMove => {
+                    let p = &st.players[st.current];
+                    if let Some(route) = &p.jail_route {
+                        // On a locked route, only its front value is legal,
+                        // whether or not `jailed` is still set (it clears
+                        // the instant the route is chosen).
+                        (
+                            st.current,
+                            CommandKind::PlayMovementCard { value: route[0] },
+                        )
+                    } else if p.jailed {
+                        let rules = &engine.content().rules;
+                        let order: Vec<u8> = (rules.velocity_min..=rules.velocity_max).collect();
+                        (st.current, CommandKind::ChooseLegalRoute { order })
+                    } else {
+                        let value = *p.hand.iter().min().expect("hand never empty in AwaitMove");
+                        (st.current, CommandKind::PlayMovementCard { value })
+                    }
+                }
                 TurnPhase::AwaitEnd => (st.current, CommandKind::EndTurn),
                 TurnPhase::BlindAuction { bids, .. } => {
                     let seat = st
@@ -671,6 +912,13 @@ fn same_seed_produces_identical_games() {
                         .find(|&s| bids[s].is_none())
                         .expect("a phase stays BlindAuction only while someone is pending");
                     (seat, CommandKind::SubmitBlindBid { amount: 0 })
+                }
+                TurnPhase::BribeVote { briber, votes, .. } => {
+                    let seat = st
+                        .alive_players()
+                        .find(|&s| s != *briber && votes[s].is_none())
+                        .expect("a phase stays BribeVote only while someone is pending");
+                    (seat, CommandKind::VoteOnBribe { accept: false })
                 }
             };
             let actor = st.players[actor].id.clone();
@@ -684,7 +932,7 @@ fn same_seed_produces_identical_games() {
 
 #[test]
 fn net_worth_counts_cash_property_and_houses() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     // p0: 1500 cash + ave_a (60) unmortgaged + ave_b (60) with 2 houses (50 each).
     st.tiles[2].owner = Some(0);
@@ -705,7 +953,7 @@ fn net_worth_counts_cash_property_and_houses() {
 
 #[test]
 fn finish_on_time_awards_the_richest_and_breaks_ties_low() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.players[0].cash = 900;
     st.players[1].cash = 1200;
@@ -724,12 +972,10 @@ fn finish_on_time_awards_the_richest_and_breaks_ties_low() {
     assert!(ev2.is_empty());
 }
 
-fn engine_with_rules(rolls: &[(u8, u8)], set: impl FnOnce(&mut RuleParams)) -> Engine {
+fn engine_with_rules(set: impl FnOnce(&mut RuleParams)) -> Engine {
     let mut content = plain_board();
     set(&mut content.rules);
-    Engine::new(Arc::new(content))
-        .expect("valid content")
-        .with_dice(FixedDice::new(rolls))
+    Engine::new(Arc::new(content)).expect("valid content")
 }
 
 /// A single market event definition, for tests that need exactly one.
@@ -749,7 +995,6 @@ fn market_event(
 }
 
 fn engine_with_forecast(
-    rolls: &[(u8, u8)],
     events: Vec<MarketEventDef>,
     gap_turns: u32,
     set_rules: impl FnOnce(&mut RuleParams),
@@ -758,14 +1003,12 @@ fn engine_with_forecast(
     content.market_events = events;
     content.forecast_gap_turns = gap_turns;
     set_rules(&mut content.rules);
-    Engine::new(Arc::new(content))
-        .expect("valid content")
-        .with_dice(FixedDice::new(rolls))
+    Engine::new(Arc::new(content)).expect("valid content")
 }
 
 #[test]
 fn expropriation_transfers_and_compensates() {
-    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let engine = engine_with_rules(|r| r.expropriation = 200);
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)
     // Takeover only fires on the landing tile, at end of turn (ADR-0022).
@@ -801,7 +1044,7 @@ fn expropriation_transfers_and_compensates() {
 #[test]
 fn expropriation_is_gated() {
     // Disabled by default.
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1);
     st.turn = TurnPhase::AwaitEnd;
@@ -821,7 +1064,7 @@ fn expropriation_is_gated() {
     );
 
     // Wrong phase / off the landing tile reject before anything else.
-    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let engine = engine_with_rules(|r| r.expropriation = 200);
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1);
     assert_eq!(
@@ -910,7 +1153,7 @@ fn expropriation_is_gated() {
 
 #[test]
 fn rent_boost_raises_rent_and_is_capped() {
-    let engine = engine_with_rules(&[(1, 2)], |r| r.rent_boost = 100);
+    let engine = engine_with_rules(|r| r.rent_boost = 100);
     let mut st = two_players(&engine);
     st.tiles[6].owner = Some(0); // blvd, singleton navy -> full group, rent 20
 
@@ -939,8 +1182,8 @@ fn rent_boost_raises_rent_and_is_capped() {
     let mut st = st;
     st.current = 1;
     st.players[1].position = 3;
-    st.turn = TurnPhase::AwaitRoll;
-    let (_st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    st.turn = TurnPhase::AwaitMove;
+    let (_st, ev) = play(&engine, &st, "p1", 3);
     assert!(
         ev.iter()
             .any(|e| matches!(e, Event::RentPaid { amount: 30, .. })),
@@ -950,7 +1193,7 @@ fn rent_boost_raises_rent_and_is_capped() {
 
 #[test]
 fn rent_boost_is_gated_and_bounded() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[6].owner = Some(0);
     assert_eq!(
@@ -968,7 +1211,7 @@ fn rent_boost_is_gated_and_bounded() {
         CommandError::RentBoostDisabled
     );
 
-    let engine = engine_with_rules(&[], |r| r.rent_boost = 10);
+    let engine = engine_with_rules(|r| r.rent_boost = 10);
     let mut st = two_players(&engine);
     st.tiles[6].owner = Some(0);
     // Three boosts allowed, the fourth is capped.
@@ -1006,7 +1249,7 @@ fn rent_boost_is_gated_and_bounded() {
 fn win_by_controlling_full_groups() {
     // Two full groups win. p0 owns brown (ave_a, ave_b); seizing blvd (the
     // singleton navy group) completes a second group -> instant win.
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.win_full_groups = 2;
         r.expropriation = 100;
     });
@@ -1039,7 +1282,7 @@ fn win_by_controlling_full_groups() {
 #[test]
 fn group_win_is_off_by_default() {
     // Same holdings, but no win threshold: seizing must not end the game.
-    let engine = engine_with_rules(&[], |r| r.expropriation = 100);
+    let engine = engine_with_rules(|r| r.expropriation = 100);
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0);
@@ -1062,7 +1305,7 @@ fn group_win_is_off_by_default() {
 
 #[test]
 fn victory_points_score_groups_and_conglomerates() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     let content = engine.content();
 
@@ -1092,7 +1335,7 @@ fn victory_points_score_groups_and_conglomerates() {
 
 #[test]
 fn victory_points_score_resorts_and_round_bonus() {
-    let engine = engine_with(transit_board(), &[]);
+    let engine = engine_with(transit_board());
     let mut st = two_players(&engine);
     let content = engine.content();
 
@@ -1120,7 +1363,11 @@ fn victory_points_score_resorts_and_round_bonus() {
 
 #[test]
 fn round_bonus_favors_highest_cash_and_ties_to_lowest_seat() {
-    let engine = engine_with_rules(&[], |r| r.win_victory_points = 1000);
+    // The round metronome is now a hand refill (ADR-0017), not a raw
+    // EndTurn - force every seat down to a single card that lands on Park
+    // (tile 4, no side effects) so playing it both moves the seat and
+    // empties/refills the hand in the same command.
+    let engine = engine_with_rules(|r| r.win_victory_points = 1000);
     let mut st = engine.new_game(
         vec![
             ("p0".into(), "P0".into()),
@@ -1130,18 +1377,21 @@ fn round_bonus_favors_highest_cash_and_ties_to_lowest_seat() {
         7,
     );
     st.players[1].cash += 500; // p1 uniquely richest for round 1
-    st.turn = TurnPhase::AwaitEnd;
+    for p in &mut st.players {
+        p.hand = vec![4];
+        p.position = 0;
+    }
+    st.turn = TurnPhase::AwaitMove;
 
-    let (next, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
-    let mut next = next;
-    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = play(&engine, &st, "p0", 4);
+    let (next, _) = step(&engine, &next, cmd("p0", CommandKind::EndTurn));
+    let (next, _) = play(&engine, &next, "p1", 4);
     let (next, _) = step(&engine, &next, cmd("p1", CommandKind::EndTurn));
     assert!(
         next.players.iter().all(|p| p.round_bonus_vp == 0),
         "round 1 isn't complete until p2 also goes"
     );
-    let mut next = next;
-    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = play(&engine, &next, "p2", 4);
     let (next, _) = step(&engine, &next, cmd("p2", CommandKind::EndTurn));
     assert_eq!(next.players[1].round_bonus_vp, 2, "p1 was uniquely richest");
     assert_eq!(next.players[0].round_bonus_vp, 0);
@@ -1152,13 +1402,16 @@ fn round_bonus_favors_highest_cash_and_ties_to_lowest_seat() {
     let mut next = next;
     next.players[0].cash = 10_000;
     next.players[2].cash = 10_000;
-    next.turn = TurnPhase::AwaitEnd;
+    for p in &mut next.players {
+        p.hand = vec![4];
+        p.position = 0;
+    }
+    next.turn = TurnPhase::AwaitMove;
+    let (next, _) = play(&engine, &next, "p0", 4);
     let (next, _) = step(&engine, &next, cmd("p0", CommandKind::EndTurn));
-    let mut next = next;
-    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = play(&engine, &next, "p1", 4);
     let (next, _) = step(&engine, &next, cmd("p1", CommandKind::EndTurn));
-    let mut next = next;
-    next.turn = TurnPhase::AwaitEnd;
+    let (next, _) = play(&engine, &next, "p2", 4);
     let (next, _) = step(&engine, &next, cmd("p2", CommandKind::EndTurn));
     assert_eq!(
         next.players[0].round_bonus_vp, 2,
@@ -1176,7 +1429,7 @@ fn points_win_fires_exactly_at_the_target() {
     // Three players so p0's and p1's single EndTurn each don't complete a
     // full round (p2 hasn't gone yet) - keeps this test isolated from the
     // round-bonus mechanism, covered separately.
-    let engine = engine_with_rules(&[], |r| r.win_victory_points = 3); // one full group's worth
+    let engine = engine_with_rules(|r| r.win_victory_points = 3); // one full group's worth
     let mut st = engine.new_game(
         vec![
             ("p0".into(), "P0".into()),
@@ -1207,7 +1460,7 @@ fn points_win_fires_exactly_at_the_target() {
 
 #[test]
 fn points_win_takes_priority_over_the_doom_clock_on_the_same_command() {
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.subsidiary_pool_factor = 1; // pool = 1 for 2 players
         r.conglomerate_pool_factor = 1; // pool = 1 for 2 players
         r.win_victory_points = 5; // exactly what this build reaches
@@ -1250,7 +1503,7 @@ fn points_win_takes_priority_over_the_doom_clock_on_the_same_command() {
 
 #[test]
 fn doom_clock_ends_the_game_when_nobody_has_reached_the_target() {
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.subsidiary_pool_factor = 1;
         r.conglomerate_pool_factor = 1;
         r.win_victory_points = 100; // far out of reach
@@ -1283,7 +1536,7 @@ fn doom_clock_ends_the_game_when_nobody_has_reached_the_target() {
 
 #[test]
 fn doom_clock_ties_break_by_net_worth_then_lowest_seat() {
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.conglomerate_pool_factor = 1;
         r.win_victory_points = 100;
     });
@@ -1312,7 +1565,7 @@ fn expropriation_requires_landing_on_the_tile() {
     // Rival-owned, unimproved, unmortgaged, and otherwise perfectly legal -
     // but the seizer is standing elsewhere (ADR-0022: takeover only applies
     // to the tile just landed on).
-    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let engine = engine_with_rules(|r| r.expropriation = 200);
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1);
     st.turn = TurnPhase::AwaitEnd;
@@ -1335,7 +1588,7 @@ fn expropriation_requires_landing_on_the_tile() {
 
 #[test]
 fn view_hides_rng_and_deck_order() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let st = two_players(&engine);
     let view = ClientView::of(&st, engine.content());
     let json = serde_json::to_string(&view).expect("view serializes");
@@ -1348,7 +1601,7 @@ fn view_hides_rng_and_deck_order() {
 fn seat_view_shows_only_own_trade_offers() {
     // 3 players; p0 offers to p1. p2's view must not contain the offer,
     // the omniscient view keeps it (ADR-0007).
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = engine.new_game(
         vec![
             ("p0".into(), "P0".into()),
@@ -1410,49 +1663,37 @@ fn command_wire_format_is_stable() {
 }
 
 #[test]
-fn scaled_rent_models_follow_group_ownership_and_dice() {
+fn scaled_rent_models_follow_group_ownership() {
     let content = transit_board();
-    let engine = engine_with(content.clone(), &[(1, 2)]);
+    let engine = engine_with(content.clone());
     let mut st = two_players(&engine);
 
     st.tiles[2].owner = Some(0);
-    assert_eq!(
-        StandardRent.rent(&content, &st, 2, 7),
-        25,
-        "one station owned"
-    );
+    assert_eq!(StandardRent.rent(&content, &st, 2), 25, "one station owned");
     st.tiles[3].owner = Some(0);
     assert_eq!(
-        StandardRent.rent(&content, &st, 2, 7),
+        StandardRent.rent(&content, &st, 2),
         50,
         "two stations owned"
     );
 
-    st.tiles[4].owner = Some(0);
-    assert_eq!(
-        StandardRent.rent(&content, &st, 4, 7),
-        28,
-        "dice 7 x table 4"
-    );
-
-    // Wiring check: the dice total from the actual roll reaches the calculator.
+    // Wiring check: the calculator's table value reaches the actual charge.
     st.current = 1;
-    st.players[1].position = 1;
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 2);
     assert!(ev.iter().any(|e| matches!(
         e,
         Event::RentPaid {
-            tile: 4,
-            amount: 12,
+            tile: 2,
+            amount: 50,
             ..
         }
     )));
-    assert_eq!(st.players[1].cash, 1500 - 12);
+    assert_eq!(st.players[1].cash, 1500 - 50);
 }
 
 #[test]
 fn scaled_rent_tiles_reject_building() {
-    let engine = engine_with(transit_board(), &[]);
+    let engine = engine_with(transit_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0); // full group: only the rent model blocks it
@@ -1474,7 +1715,7 @@ fn scaled_rent_tiles_reject_building() {
 
 #[test]
 fn mortgaged_tile_collects_no_rent_and_redeeming_costs_interest() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
 
@@ -1517,7 +1758,7 @@ fn mortgaged_tile_collects_no_rent_and_redeeming_costs_interest() {
     let mut st = st;
     st.current = 1;
     st.players[1].position = 8; // 8 + 3 wraps to 2, collecting Go salary
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     assert!(!ev.iter().any(|e| matches!(e, Event::RentPaid { .. })));
     assert_eq!(st.players[0].cash, 1530);
     assert_eq!(st.players[1].cash, 1700);
@@ -1525,7 +1766,7 @@ fn mortgaged_tile_collects_no_rent_and_redeeming_costs_interest() {
     // Redeeming costs principal + 10% (floored): 30 + 3.
     let mut st = st;
     st.current = 0;
-    st.turn = TurnPhase::AwaitRoll;
+    st.turn = TurnPhase::AwaitMove;
     let (st, ev) = step(
         &engine,
         &st,
@@ -1564,7 +1805,7 @@ fn mortgaged_tile_collects_no_rent_and_redeeming_costs_interest() {
 
 #[test]
 fn mortgage_and_build_enforce_group_constraints() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0);
@@ -1605,7 +1846,7 @@ fn mortgage_and_build_enforce_group_constraints() {
 
 #[test]
 fn liquidation_mortgages_properties_after_houses() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[6].owner = Some(0); // singleton navy monopoly: rent 20
     st.tiles[2].owner = Some(1);
@@ -1614,7 +1855,7 @@ fn liquidation_mortgages_properties_after_houses() {
     st.players[1].position = 3;
     st.current = 1;
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     assert!(ev.iter().any(|e| matches!(
         e,
         Event::PropertyMortgaged {
@@ -1635,11 +1876,11 @@ fn liquidation_mortgages_properties_after_houses() {
 
 #[test]
 fn discoverer_wins_above_floor_with_discount_after_a_contest() {
-    let engine = engine_with(plain_board(), &[(1, 1)]);
+    let engine = engine_with(plain_board());
     let st = two_players(&engine);
 
     // p0 lands on ave_a (tile 2, floor 60): the window opens for both seats.
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (st, _) = play(&engine, &st, "p0", 2);
     assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 2, .. }));
 
     // A discoverer bid below the floor is rejected; an unaffordable bid too.
@@ -1693,10 +1934,10 @@ fn discoverer_wins_above_floor_with_discount_after_a_contest() {
 
 #[test]
 fn all_zero_effective_bids_leave_the_tile_unsold() {
-    let engine = engine_with(plain_board(), &[(1, 1)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.players[0].cash = 10; // broke discoverer: no implicit floor
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (st, _) = play(&engine, &st, "p0", 2);
     let (st, _) = step(
         &engine,
         &st,
@@ -1724,14 +1965,14 @@ fn all_zero_effective_bids_leave_the_tile_unsold() {
 
 #[test]
 fn discoverer_resigning_mid_window_does_not_abort_the_auction() {
-    let engine = engine_with(plain_board(), &[(1, 1)]);
+    let engine = engine_with(plain_board());
     let players = vec![
         ("p0".to_string(), "Alice".to_string()),
         ("p1".to_string(), "Bob".to_string()),
         ("p2".to_string(), "Carol".to_string()),
     ];
     let st = engine.new_game(players, 42);
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (st, _) = play(&engine, &st, "p0", 2);
     assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 2, .. }));
 
     // p1 bids, then the discoverer (p0) resigns while p2 is still pending -
@@ -1768,7 +2009,7 @@ fn discoverer_resigning_mid_window_does_not_abort_the_auction() {
     )));
     assert_eq!(st.tiles[2].owner, Some(1));
     assert_eq!(st.current, 1);
-    assert_eq!(st.turn, TurnPhase::AwaitRoll);
+    assert_eq!(st.turn, TurnPhase::AwaitMove);
 }
 
 fn offer(
@@ -1789,7 +2030,7 @@ fn offer(
 
 #[test]
 fn accepted_trade_swaps_tiles_and_cash_out_of_turn() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0); // ave_a
     st.tiles[6].owner = Some(1); // blvd
@@ -1834,7 +2075,7 @@ fn accepted_trade_swaps_tiles_and_cash_out_of_turn() {
 
 #[test]
 fn trade_proposals_are_validated() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0);
@@ -1882,7 +2123,7 @@ fn trade_proposals_are_validated() {
 
 #[test]
 fn stale_trade_rejects_without_mutation_and_can_be_declined() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
 
@@ -1915,7 +2156,7 @@ fn stale_trade_rejects_without_mutation_and_can_be_declined() {
 
 #[test]
 fn trade_party_rules_and_cancellation() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let st = two_players(&engine);
     let (st, _) = step(&engine, &st, cmd("p0", offer("p1", 25, &[], 0, &[])));
 
@@ -1952,12 +2193,12 @@ fn trade_party_rules_and_cancellation() {
 
 #[test]
 fn trades_are_blocked_during_auctions_and_purged_on_bankruptcy() {
-    let engine = engine_with(plain_board(), &[(1, 1)]);
+    let engine = engine_with(plain_board());
     let st = two_players(&engine);
     let (st, _) = step(&engine, &st, cmd("p0", offer("p1", 25, &[], 0, &[])));
 
     // Land on an unowned tile: a sealed-bid window opens, all trade actions reject.
-    let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Roll));
+    let (st, _) = play(&engine, &st, "p0", 2);
     assert!(matches!(st.turn, TurnPhase::BlindAuction { .. }));
     assert_eq!(
         engine
@@ -1989,7 +2230,7 @@ fn trades_are_blocked_during_auctions_and_purged_on_bankruptcy() {
 
 #[test]
 fn open_offers_per_player_are_capped() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let st = two_players(&engine);
     let mut st = st;
     for _ in 0..4 {
@@ -2031,7 +2272,7 @@ fn trade_wire_format_is_stable() {
 
 #[test]
 fn houses_build_and_sell_evenly_with_half_cost_refund() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0);
     st.tiles[3].owner = Some(0);
@@ -2077,7 +2318,7 @@ fn houses_build_and_sell_evenly_with_half_cost_refund() {
 
 #[test]
 fn forced_liquidation_respects_even_sell() {
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[6].owner = Some(0); // singleton navy: rent 20 owed on landing
     st.tiles[2].owner = Some(1);
@@ -2088,7 +2329,7 @@ fn forced_liquidation_respects_even_sell() {
     st.players[1].position = 3;
     st.current = 1;
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     // One sale (25) covers the 20 debt; it must come from the taller tile.
     let sales: Vec<_> = ev
         .iter()
@@ -2106,7 +2347,7 @@ fn forced_liquidation_respects_even_sell() {
 
 #[test]
 fn build_consumes_and_sell_returns_subsidiary_pool() {
-    let engine = engine_with_rules(&[], |r| r.subsidiary_pool_factor = 1); // pool = 1 for 2 players
+    let engine = engine_with_rules(|r| r.subsidiary_pool_factor = 1); // pool = 1 for 2 players
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0); // ave_a
     st.tiles[3].owner = Some(0); // ave_b
@@ -2177,7 +2418,7 @@ fn build_consumes_and_sell_returns_subsidiary_pool() {
 
 #[test]
 fn conglomerate_build_releases_subsidiaries_and_consumes_one_conglomerate() {
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.subsidiary_pool_factor = 1; // pool = 1 for 2 players
         r.conglomerate_pool_factor = 1; // pool = 1 for 2 players
     });
@@ -2243,7 +2484,7 @@ fn conglomerate_build_releases_subsidiaries_and_consumes_one_conglomerate() {
 
 #[test]
 fn sell_house_off_conglomerate_needs_free_subsidiaries_or_rejects() {
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.subsidiary_pool_factor = 1; // pool = 1 for 2 players, short of cap-1 = 4
         r.conglomerate_pool_factor = 1;
     });
@@ -2321,7 +2562,7 @@ fn pool_sizes_scale_with_player_count() {
 
 #[test]
 fn zero_pool_factor_is_unlimited() {
-    let engine = engine_with(plain_board(), &[]); // RuleParams::default(): factors 0
+    let engine = engine_with(plain_board()); // RuleParams::default(): factors 0
     let mut st = two_players(&engine);
     assert_eq!(st.subsidiaries_available, None);
     assert_eq!(st.conglomerates_available, None);
@@ -2364,7 +2605,7 @@ fn forced_liquidation_steps_normally_when_pool_has_room() {
     // Default rules: unlimited pools, so a top-level tile steps down by one
     // level exactly like `forced_liquidation_respects_even_sell`, not a
     // full strip.
-    let engine = engine_with(plain_board(), &[(1, 2)]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.tiles[6].owner = Some(0); // singleton navy: rent doubled to 20
     st.tiles[2].owner = Some(1);
@@ -2375,7 +2616,7 @@ fn forced_liquidation_steps_normally_when_pool_has_room() {
     st.players[1].position = 3;
     st.current = 1;
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     let sales: Vec<_> = ev
         .iter()
         .filter_map(|e| match e {
@@ -2390,7 +2631,7 @@ fn forced_liquidation_steps_normally_when_pool_has_room() {
 
 #[test]
 fn forced_liquidation_full_strips_when_subsidiary_pool_exhausted() {
-    let engine = engine_with_rules(&[(1, 2)], |r| {
+    let engine = engine_with_rules(|r| {
         r.subsidiary_pool_factor = 1;
         r.conglomerate_pool_factor = 3;
     });
@@ -2406,7 +2647,7 @@ fn forced_liquidation_full_strips_when_subsidiary_pool_exhausted() {
     st.players[1].position = 3;
     st.current = 1;
 
-    let (st, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (st, ev) = play(&engine, &st, "p1", 3);
     let sales: Vec<_> = ev
         .iter()
         .filter_map(|e| match e {
@@ -2444,7 +2685,7 @@ fn bankrupt_releases_pool_units_on_resignation() {
     // so it is the reachable path for `bankrupt()`'s own pool release -
     // debt-driven bankruptcy always fully sells houses first, leaving none
     // for `bankrupt()` to touch.
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.subsidiary_pool_factor = 6; // 8 for 2 players
         r.conglomerate_pool_factor = 3; // 4 for 2 players
     });
@@ -2476,7 +2717,7 @@ fn bankrupt_releases_pool_units_on_resignation() {
 
 #[test]
 fn takeover_liquidates_improved_tile_and_refunds_old_owner() {
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.expropriation = 200;
         r.subsidiary_pool_factor = 6; // 8 for 2 players
     });
@@ -2528,7 +2769,7 @@ fn takeover_liquidates_improved_tile_and_refunds_old_owner() {
 
 #[test]
 fn takeover_of_conglomerate_tile_returns_one_conglomerate() {
-    let engine = engine_with_rules(&[], |r| {
+    let engine = engine_with_rules(|r| {
         r.expropriation = 200;
         r.conglomerate_pool_factor = 3; // 4 for 2 players
     });
@@ -2573,7 +2814,7 @@ fn forecast_seeded_at_new_game_is_deterministic_and_chained() {
         market_event("bubble", MarketEffect::AcquisitionMultiplier, -30, 5),
         market_event("crash", MarketEffect::RentMultiplier, -50, 4),
     ];
-    let engine = engine_with_forecast(&[], events, 5, |_| {});
+    let engine = engine_with_forecast(events, 5, |_| {});
     let players = || {
         vec![
             ("p0".to_string(), "P0".to_string()),
@@ -2599,7 +2840,7 @@ fn forecast_seeded_at_new_game_is_deterministic_and_chained() {
 
 #[test]
 fn forecast_is_inert_without_market_events() {
-    let engine = engine_with(plain_board(), &[]); // plain_board ships no events
+    let engine = engine_with(plain_board()); // plain_board ships no events
     let mut st = two_players(&engine);
     assert!(st.forecast.queue.is_empty());
     assert!(st.forecast.active.is_none());
@@ -2615,7 +2856,7 @@ fn forecast_is_inert_without_market_events() {
 
 #[test]
 fn rent_multiplier_composes_with_rent_boost() {
-    let engine = engine_with(plain_board(), &[(1, 1)]); // sum 2 -> lands on ave_a (index 2)
+    let engine = engine_with(plain_board()); // value 2 lands on ave_a (index 2)
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(0); // p0 owns ave_a (price 60, rents[0] = 2)
     st.tiles[2].boosts = 1; // ADR-0012: base 2 -> boosted 3
@@ -2627,9 +2868,9 @@ fn rent_multiplier_composes_with_rent_boost() {
     });
     st.current = 1;
     st.players[1].position = 0;
-    st.turn = TurnPhase::AwaitRoll;
+    st.turn = TurnPhase::AwaitMove;
 
-    let (_, ev) = step(&engine, &st, cmd("p1", CommandKind::Roll));
+    let (_, ev) = play(&engine, &st, "p1", 2);
     assert!(
         ev.iter()
             .any(|e| matches!(e, Event::RentPaid { amount: 1, .. })),
@@ -2639,7 +2880,7 @@ fn rent_multiplier_composes_with_rent_boost() {
 
 #[test]
 fn rent_multiplier_expires_exactly_at_its_scheduled_turn() {
-    let engine = engine_with(plain_board(), &[]);
+    let engine = engine_with(plain_board());
     let mut st = two_players(&engine);
     st.forecast.active = Some(ActiveMarketEvent {
         event_id: "crash".into(),
@@ -2660,7 +2901,7 @@ fn rent_multiplier_expires_exactly_at_its_scheduled_turn() {
 
 #[test]
 fn acquisition_multiplier_scales_takeover_cost_and_compensation() {
-    let engine = engine_with_rules(&[], |r| r.expropriation = 200);
+    let engine = engine_with_rules(|r| r.expropriation = 200);
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)
     st.turn = TurnPhase::AwaitEnd;
@@ -2703,7 +2944,7 @@ fn acquisition_multiplier_scales_takeover_cost_and_compensation() {
 #[test]
 fn wealth_tax_charges_every_alive_player_via_bankruptcy_path() {
     let events = vec![market_event("audit", MarketEffect::WealthTax, 90, 0)];
-    let engine = engine_with_forecast(&[], events, 1, |_| {});
+    let engine = engine_with_forecast(events, 1, |_| {});
     let mut st = engine.new_game(
         vec![
             ("p0".into(), "P0".into()),
@@ -2780,7 +3021,7 @@ fn wealth_tax_charges_every_alive_player_via_bankruptcy_path() {
 #[test]
 fn wealth_tax_can_end_the_game() {
     let events = vec![market_event("audit", MarketEffect::WealthTax, 100, 0)];
-    let engine = engine_with_forecast(&[], events, 1, |_| {});
+    let engine = engine_with_forecast(events, 1, |_| {});
     let mut st = two_players(&engine);
     st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)
     st.players[1].cash = 10;

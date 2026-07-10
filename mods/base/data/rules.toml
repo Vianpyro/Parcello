@@ -8,7 +8,11 @@
 [rules]
 starting_balance = 1200
 go_salary = 200
-jail_fine = 50
+# Velocity deck (ADR-0017): movement is playing a card from a public hand
+# of every integer in this range, not rolling dice. Also sizes a Legal
+# Route (ADR-0024) - it must play the full range as a fixed permutation.
+velocity_min = 1
+velocity_max = 5
 max_houses_per_property = 5
 bankruptcy_threshold = 0
 # Aggressive mechanics for swingy games (ADR-0011/0012):

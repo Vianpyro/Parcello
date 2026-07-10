@@ -224,11 +224,12 @@ mod tests {
         ));
 
         let cmd: ClientMessage =
-            serde_json::from_str(r#"{"type":"cmd","cmd":{"type":"roll"}}"#).unwrap();
+            serde_json::from_str(r#"{"type":"cmd","cmd":{"type":"play_movement_card","value":3}}"#)
+                .unwrap();
         assert!(matches!(
             cmd,
             ClientMessage::Cmd {
-                cmd: parcello_engine::CommandKind::Roll
+                cmd: parcello_engine::CommandKind::PlayMovementCard { value: 3 }
             }
         ));
 
@@ -256,7 +257,7 @@ mod tests {
         // deserialize to None (untimed / no per-turn limit).
         let cfg: ClientMessage = serde_json::from_str(
             r#"{"type":"configure","settings":{"turn_seconds":12,"time_bank_seconds":45,"rules":{
-                "starting_balance":1500,"go_salary":200,"jail_fine":50,
+                "starting_balance":1500,"go_salary":200,"velocity_min":1,"velocity_max":5,
                 "max_houses_per_property":5,"bankruptcy_threshold":0,
                 "expropriation":200,"rent_boost":50,
                 "win_full_groups":3}}}"#,

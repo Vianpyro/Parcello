@@ -73,6 +73,12 @@ pub enum CommandError {
     RentBoostDisabled,
     #[error("this tile's rent boost is already maxed out")]
     BoostLimit,
+    #[error("that card is not playable right now")]
+    CardNotPlayable,
+    #[error("the route must be a permutation of the full hand")]
+    InvalidRoute,
+    #[error("already voted on this bribe")]
+    AlreadyVoted,
 }
 
 /// Content invariant violations, detected once at room creation.
@@ -92,4 +98,6 @@ pub enum ContentError {
     InvalidProperty(String),
     #[error("card {card} targets unknown tile {tile}")]
     CardTargetsUnknownTile { card: String, tile: String },
+    #[error("velocity_min must be >= 1 and velocity_max must be > velocity_min")]
+    InvalidVelocityRange,
 }

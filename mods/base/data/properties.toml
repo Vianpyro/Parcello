@@ -1,8 +1,8 @@
 # Default board: 32 tiles on a 9x9 ring, tuned for fast/dynamic games
 # (Business-Tour direction, see docs/business-tour-direction.md). Shorter
-# laps than the 40-tile `classic` mod, no Community Chest, two "resorts"
-# (group-scaled) instead of four stations, no utilities. board[0] must be
-# the Go tile; corners sit at 0, 8, 16, 24.
+# laps than a 40-tile Monopoly-style board, no Community Chest, two
+# "resorts" (group-scaled) instead of four stations, no utilities.
+# board[0] must be the Go tile; corners sit at 0, 8, 16, 24.
 
 [[tile]]
 id = "go"

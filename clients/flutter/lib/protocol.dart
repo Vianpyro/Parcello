@@ -102,7 +102,11 @@ class GameContent {
 class RuleParams {
   final int startingBalance;
   final int goSalary;
-  final int jailFine;
+  /// Velocity deck range (ADR-0017): movement is playing a card from a
+  /// public hand of every integer in `velocityMin..=velocityMax`, not
+  /// rolling dice. Also sizes a Legal Route (ADR-0024).
+  final int velocityMin;
+  final int velocityMax;
   final int maxHousesPerProperty;
   final int bankruptcyThreshold;
   final int expropriation;
@@ -118,7 +122,8 @@ class RuleParams {
   RuleParams.fromJson(Map<String, dynamic> j)
       : startingBalance = j['starting_balance'] as int,
         goSalary = j['go_salary'] as int,
-        jailFine = j['jail_fine'] as int,
+        velocityMin = j['velocity_min'] as int? ?? 1,
+        velocityMax = j['velocity_max'] as int? ?? 5,
         maxHousesPerProperty = j['max_houses_per_property'] as int,
         bankruptcyThreshold = j['bankruptcy_threshold'] as int,
         expropriation = j['expropriation'] as int? ?? 0,
@@ -155,6 +160,12 @@ class PlayerView {
   /// Race-to-target score (ADR-0020); meaningless (always 0) when
   /// `RuleParams.winVictoryPoints` is off.
   final int victoryPoints;
+  /// Movement values currently held (ADR-0017); public like cash, never
+  /// masked.
+  final List<int> hand;
+  /// `Some(queue)` while serving a locked, public Legal Route (ADR-0024) -
+  /// transparency is the price of the immediate exit and rent freeze.
+  final List<int>? jailRoute;
 
   PlayerView.fromJson(Map<String, dynamic> j)
       : id = j['id'] as String,
@@ -164,7 +175,9 @@ class PlayerView {
         inJail = j['in_jail'] as bool,
         jailCards = j['jail_cards'] as int? ?? 0,
         bankrupt = j['bankrupt'] as bool,
-        victoryPoints = j['victory_points'] as int? ?? 0;
+        victoryPoints = j['victory_points'] as int? ?? 0,
+        hand = (j['hand'] as List? ?? []).cast<int>(),
+        jailRoute = (j['jail_route'] as List?)?.cast<int>();
 }
 
 class TileState {
@@ -185,16 +198,28 @@ class TileState {
 /// seat at once, not a single actor: `bids` is one slot per seat, `null` =
 /// not yet submitted; a seat's own view shows its own bid, others' are
 /// masked to `null` while the window is open (server-side secrecy).
+/// `bribe_vote` (ADR-0024) is the same pattern for a Corruption bribe:
+/// `briber`/`amount` name the offer, `votes` is one slot per seat (the
+/// briber's own slot always stays `null`), individual votes masked the
+/// same way as sealed bids until resolution.
 class TurnPhase {
-  final String type; // await_roll | blind_auction | await_end
+  final String type; // await_move | blind_auction | bribe_vote | await_end
   final int? tile;
   final List<int?> bids;
+  final int? briber;
+  final int? amount;
+  final List<bool?> votes;
 
   TurnPhase.fromJson(Map<String, dynamic> j)
       : type = j['type'] as String,
         tile = j['tile'] as int?,
         bids = (j['bids'] as List<dynamic>? ?? [])
             .map((b) => b as int?)
+            .toList(),
+        briber = j['briber'] as int?,
+        amount = j['amount'] as int?,
+        votes = (j['votes'] as List<dynamic>? ?? [])
+            .map((v) => v as bool?)
             .toList();
 }
 
@@ -304,8 +329,8 @@ String describeEvent(
   switch (e['type']) {
     case 'turn_started':
       return "--- ${p(e['player'])}'s turn ---";
-    case 'dice_rolled':
-      return "${p(e['player'])} rolled ${e['d1']}+${e['d2']} = ${e['d1'] + e['d2']}";
+    case 'movement_card_played':
+      return "${p(e['player'])} played movement card ${e['value']}";
     case 'moved':
       return "${p(e['player'])} moved to ${t(e['to'])}"
           "${e['passed_go'] == true ? ' (passed Go)' : ''}";
@@ -348,8 +373,20 @@ String describeEvent(
       return "${p(e['player'])} redeemed ${t(e['tile'])} for \$${e['cost']}";
     case 'went_to_jail':
       return "${p(e['player'])} went to jail";
-    case 'jail_fine_paid':
-      return "${p(e['player'])} paid the \$${e['amount']} jail fine";
+    case 'legal_route_chosen':
+      final order = (e['order'] as List).join(',');
+      return "${p(e['player'])} chose a Legal Route [$order] "
+          "(rent-free on their tiles until it's done)";
+    case 'bribe_offered':
+      return "${p(e['player'])} offers a \$${e['amount']} bribe to leave jail";
+    case 'bribe_vote_cast':
+      return "${p(e['player'])} voted on the bribe";
+    case 'bribe_resolved':
+      return e['succeeded'] == true
+          ? "Bribe accepted (${e['accepts']}/${e['total']}): "
+              "${p(e['briber'])} pays \$${e['amount']}, split among the table"
+          : "Bribe rejected (${e['accepts']}/${e['total']}): "
+              "${p(e['briber'])} stays in jail";
     case 'jail_card_received':
       return "${p(e['player'])} received a get-out-of-jail-free card";
     case 'jail_card_used':

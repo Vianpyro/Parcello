@@ -7,17 +7,12 @@
 
 use crate::content::{GameContent, RentModel};
 use crate::event::Event;
-use crate::rng;
 use crate::state::GameState;
-
-pub trait DicePolicy: Send + Sync {
-    fn roll(&self, rng: &mut u64) -> (u8, u8);
-}
 
 pub trait RentCalculator: Send + Sync {
     /// Rent owed for landing on `tile` (guaranteed: owned property, owner is
-    /// not the lander). `dice_total` is provided for dice-scaled variants.
-    fn rent(&self, content: &GameContent, state: &GameState, tile: usize, dice_total: u8) -> i64;
+    /// not the lander).
+    fn rent(&self, content: &GameContent, state: &GameState, tile: usize) -> i64;
 }
 
 /// Called when a player cannot cover a debt from cash. May sell assets back
@@ -36,24 +31,13 @@ pub trait BankruptcyResolver: Send + Sync {
 
 // -- Default implementations -------------------------------------------------
 
-pub struct UniformDice;
-
-impl DicePolicy for UniformDice {
-    fn roll(&self, rng: &mut u64) -> (u8, u8) {
-        let d1 = 1 + rng::below(rng, 6) as u8;
-        let d2 = 1 + rng::below(rng, 6) as u8;
-        (d1, d2)
-    }
-}
-
 /// Classic rules, dispatched on the tile's `RentModel`:
 /// - Houses: rent by house level; unimproved rent doubles on a full group;
-/// - GroupScaled: rent table indexed by tiles of the group owned (stations);
-/// - DiceScaled: same index, multiplied by the dice total (utilities).
+/// - GroupScaled: rent table indexed by tiles of the group owned (stations).
 pub struct StandardRent;
 
 impl RentCalculator for StandardRent {
-    fn rent(&self, content: &GameContent, state: &GameState, tile: usize, dice: u8) -> i64 {
+    fn rent(&self, content: &GameContent, state: &GameState, tile: usize) -> i64 {
         let prop = content
             .property(tile)
             .expect("rent is only computed on property tiles");
@@ -71,9 +55,6 @@ impl RentCalculator for StandardRent {
                 }
             }
             RentModel::GroupScaled => prop.rents[group_rent_index(content, state, owner, prop)],
-            RentModel::DiceScaled => {
-                i64::from(dice) * prop.rents[group_rent_index(content, state, owner, prop)]
-            }
         }
     }
 }

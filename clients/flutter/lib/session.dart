@@ -92,23 +92,26 @@ class GameSession extends ChangeNotifier {
   List<int>? banks;
   DateTime? bankEndsAt;
 
-  /// Sealed-bid window deadline (ADR-0018): a local approximation of the
-  /// server's 5s window, set the moment we first see the phase and cleared
-  /// once it's gone - the server alone resolves the window.
+  /// Sealed-bid / bribe-vote window deadlines (ADR-0018/ADR-0024): a local
+  /// approximation of the server's 5s window, set the moment we first see
+  /// the phase and cleared once it's gone - the server alone resolves the
+  /// window.
   DateTime? bidEndsAt;
-  void _trackBidWindow() {
-    if (view?.turn.type == 'blind_auction') {
-      bidEndsAt ??= DateTime.now().add(const Duration(seconds: 5));
-    } else {
-      bidEndsAt = null;
-    }
+  DateTime? voteEndsAt;
+  void _trackTimedWindows() {
+    bidEndsAt = view?.turn.type == 'blind_auction'
+        ? (bidEndsAt ?? DateTime.now().add(const Duration(seconds: 5)))
+        : null;
+    voteEndsAt = view?.turn.type == 'bribe_vote'
+        ? (voteEndsAt ?? DateTime.now().add(const Duration(seconds: 5)))
+        : null;
   }
 
-  /// Latest dice roll for the center-of-board display. `diceSeq` bumps on
-  /// every roll so the overlay re-triggers even on a repeated value.
-  int diceSeq = 0;
-  int diceD1 = 0;
-  int diceD2 = 0;
+  /// Latest movement card played, for the center-of-board flash (ADR-0017).
+  /// `cardSeq` bumps on every play so the overlay re-triggers even on a
+  /// repeated value.
+  int cardSeq = 0;
+  int cardValue = 0;
 
   /// Net worth of a seat, mirroring `GameState::net_worth` on the server so
   /// the shown ranking predicts the timed-game winner: cash + property
@@ -219,6 +222,7 @@ class GameSession extends ChangeNotifier {
     gameEndsAt = null;
     turnEndsAt = null;
     bidEndsAt = null;
+    voteEndsAt = null;
     loginMessage = '';
     notifyListeners();
   }
@@ -306,7 +310,7 @@ class GameSession extends ChangeNotifier {
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
-        _trackBidWindow();
+        _trackTimedWindows();
         joined = true;
         loginMessage = '';
         _log('Joined room $code. Mods: ${content!.modIds.join(', ')}');
@@ -323,14 +327,14 @@ class GameSession extends ChangeNotifier {
         turnEndsAt = _deadlineFrom(turnSeconds);
         timeBankSeconds = msg['time_bank_seconds'] as int?;
         banks = null;
-        _trackBidWindow();
+        _trackTimedWindows();
         sfx.gameStart();
         _log('Game started.');
       case 'update':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         turnEndsAt = _deadlineFrom(turnSeconds);
         banks = (msg['banks'] as List?)?.cast<int>();
-        _trackBidWindow();
+        _trackTimedWindows();
         // The bank only starts draining once the plain turn window is
         // spent; until then it shows the flat reserve (ADR-0023).
         bankEndsAt = (turnEndsAt != null && banks != null && seat != null)
@@ -338,10 +342,9 @@ class GameSession extends ChangeNotifier {
             : null;
         for (final e in msg['events'] as List) {
           final ev = e as Map<String, dynamic>;
-          if (ev['type'] == 'dice_rolled') {
-            diceD1 = ev['d1'] as int;
-            diceD2 = ev['d2'] as int;
-            diceSeq++;
+          if (ev['type'] == 'movement_card_played') {
+            cardValue = ev['value'] as int;
+            cardSeq++;
             sfx.diceRoll();
           }
           _log(describeEvent(

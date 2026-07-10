@@ -29,7 +29,7 @@ pub use state::{
     ActiveMarketEvent, GamePhase, GameState, MarketForecast, Player, PlayerId, ScheduledEvent,
     TileState, TradeOffer, TurnPhase,
 };
-pub use strategy::{BankruptcyResolver, DicePolicy, RentCalculator};
+pub use strategy::{BankruptcyResolver, RentCalculator};
 pub use view::{ClientView, PlayerView};
 
 use std::sync::Arc;
@@ -42,7 +42,6 @@ use std::sync::Arc;
 /// engine internals.
 pub struct Engine {
     content: Arc<GameContent>,
-    dice: Box<dyn DicePolicy>,
     rent: Box<dyn RentCalculator>,
     bankruptcy: Box<dyn BankruptcyResolver>,
 }
@@ -54,18 +53,12 @@ impl Engine {
         content.validate()?;
         Ok(Self {
             content,
-            dice: Box::new(strategy::UniformDice),
             rent: Box::new(strategy::StandardRent),
             bankruptcy: Box::new(strategy::StandardLiquidation),
         })
     }
 
-    /// Injection points for alternative strategies (mods, tests).
-    pub fn with_dice(mut self, dice: Box<dyn DicePolicy>) -> Self {
-        self.dice = dice;
-        self
-    }
-
+    /// Injection point for an alternative strategy (mods, tests).
     pub fn with_rent(mut self, rent: Box<dyn RentCalculator>) -> Self {
         self.rent = rent;
         self
@@ -82,8 +75,8 @@ impl Engine {
 
     /// Creates the initial state for a new game.
     ///
-    /// `seed` drives every future random draw (dice, deck order). Two games
-    /// with identical players, content, and seed are identical.
+    /// `seed` drives every future random draw (deck order, market events).
+    /// Two games with identical players, content, and seed are identical.
     pub fn new_game(&self, players: Vec<(PlayerId, String)>, seed: u64) -> GameState {
         GameState::new(&self.content, players, seed, &self.content.rules)
     }
@@ -125,7 +118,6 @@ impl Engine {
 }
 
 pub(crate) struct Strategies<'e> {
-    pub dice: &'e dyn DicePolicy,
     pub rent: &'e dyn RentCalculator,
     pub bankruptcy: &'e dyn BankruptcyResolver,
 }
@@ -133,7 +125,6 @@ pub(crate) struct Strategies<'e> {
 impl Engine {
     pub(crate) fn strategies(&self) -> Strategies<'_> {
         Strategies {
-            dice: self.dice.as_ref(),
             rent: self.rent.as_ref(),
             bankruptcy: self.bankruptcy.as_ref(),
         }

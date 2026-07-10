@@ -59,7 +59,7 @@ services:
       # WAN-facing server. Do not set it to "false" either - leave the
       # variable out entirely (a present env var reads as the flag).
       #
-      # Mods: the image bundles mods/ (base, classic, highroller). To add
+      # Mods: the image bundles mods/ (base, highroller). To add
       # custom mods, bind-mount them and set the load order:
       # PARCELLO_MODS: base,mymod
     volumes:

@@ -77,14 +77,24 @@ pub enum GamePhase {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnPhase {
-    /// Waiting for the current player to roll (or pay the jail fine).
-    AwaitRoll,
+    /// Waiting for the current player to play a movement card (ADR-0017),
+    /// or - while jailed - to choose an exit (Legal Route, Corruption, or
+    /// the jail card).
+    AwaitMove,
     /// Landed on an unowned property: a 5s sealed-bid window is open
     /// (ADR-0018). One slot per seat, parallel to `players`; `None` = not
     /// yet submitted. The landing player (`GameState::current`, stable for
     /// the whole window - see the turn-advance guard in `apply.rs`) is the
     /// discoverer and gets an implicit list-price floor bid.
     BlindAuction { tile: usize, bids: Vec<Option<i64>> },
+    /// A jailed player offered a bribe (ADR-0024): a 5s simultaneous vote
+    /// among living opponents. One slot per seat, parallel to `players`;
+    /// `None` = not yet voted; the briber never votes on their own offer.
+    BribeVote {
+        briber: usize,
+        amount: i64,
+        votes: Vec<Option<bool>>,
+    },
     /// Movement resolved; building allowed; waiting for end of turn.
     AwaitEnd,
 }
@@ -95,21 +105,33 @@ pub struct Player {
     pub name: String,
     pub cash: i64,
     pub position: usize,
-    /// `Some(n)` while jailed; `n` = failed escape rolls so far.
-    pub jail_turns: Option<u8>,
-    /// Consecutive doubles this turn; 3 sends the player to jail.
-    pub doubles_streak: u8,
+    /// Whether this player is in jail. Escape is a choice, not a roll
+    /// (ADR-0024: Legal Route, Corruption, or the jail card) - no more
+    /// failed-attempt counter, forced fine, or third-roll rule.
+    pub jailed: bool,
     /// Get-out-of-jail-free cards held. A count, not card identities: the
     /// decks are immutable cyclic shuffles, so drawn cards never leave the
     /// rotation (documented simplification).
     #[serde(default)]
     pub jail_cards: u8,
     pub bankrupt: bool,
-    /// Turns this player has completed (ADR-0020). A placeholder for
-    /// `hands_cycled` (ADR-0017's velocity deck, not yet built): under
-    /// today's dice movement, "a hand cycled" is "a turn completed", so
-    /// this field already carries the meaning ADR-0017 will formalize -
-    /// only the movement mechanism changes later, not this counter.
+    /// Movement values currently held (ADR-0017's velocity deck); public
+    /// like cash. Refills to `velocity_min..=velocity_max` the instant it
+    /// empties (see `Exec::maybe_refill_hand`), which is also the single
+    /// `hands_cycled` tick below.
+    #[serde(default)]
+    pub hand: Vec<u8>,
+    /// `Some(queue)` while serving a locked, public Legal Route (ADR-0024):
+    /// `queue[0]` is the only card `PlayMovementCard` will accept next.
+    /// While `Some`, this player's owned tiles charge no rent to whoever
+    /// lands on them - visitors play free (`resolve_landing` checks the
+    /// tile owner's `jail_route`, independent of whose turn is resolving).
+    /// `None` otherwise.
+    #[serde(default)]
+    pub jail_route: Option<Vec<u8>>,
+    /// Hands fully cycled (ADR-0020's round metronome): incremented once
+    /// per hand refill, i.e. roughly once every `hand` size turns, not
+    /// once per turn.
     #[serde(default)]
     pub hands_cycled: u32,
     /// Permanent victory points banked from round-bonus wins (ADR-0020);
@@ -234,6 +256,7 @@ impl GameState {
         for _ in 0..3 {
             forecast.draw_next(content, &mut rng, 0);
         }
+        let full_hand: Vec<u8> = (rules.velocity_min..=rules.velocity_max).collect();
         Self {
             phase: GamePhase::Active,
             players: players
@@ -243,16 +266,17 @@ impl GameState {
                     name,
                     cash: rules.starting_balance,
                     position: 0,
-                    jail_turns: None,
-                    doubles_streak: 0,
+                    jailed: false,
                     jail_cards: 0,
                     bankrupt: false,
+                    hand: full_hand.clone(),
+                    jail_route: None,
                     hands_cycled: 0,
                     round_bonus_vp: 0,
                 })
                 .collect(),
             current: 0,
-            turn: TurnPhase::AwaitRoll,
+            turn: TurnPhase::AwaitMove,
             tiles: vec![TileState::default(); content.board.len()],
             chance_deck,
             community_deck,

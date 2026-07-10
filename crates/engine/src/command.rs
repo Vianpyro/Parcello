@@ -16,8 +16,13 @@ pub struct PlayerCommand {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandKind {
-    /// Roll and move; while jailed, attempt a doubles escape instead.
-    Roll,
+    /// Play one card from the hand (ADR-0017), moving that many tiles and
+    /// resolving the landing. While `jail_route` is `Some`, only its front
+    /// value is accepted - a jailed player uses `ChooseLegalRoute`,
+    /// `OfferBribe`, or `UseJailCard` instead of this directly.
+    PlayMovementCard {
+        value: u8,
+    },
     /// Build one house on an owned tile (full group required).
     Build {
         tile: String,
@@ -75,9 +80,28 @@ pub enum CommandKind {
     Unmortgage {
         tile: String,
     },
-    /// Pay the fine to leave jail, then roll normally.
-    PayJailFine,
-    /// Spend a held get-out-of-jail-free card, then roll normally.
+    /// Legal Route exit (ADR-0024): `order` must be exactly a permutation
+    /// of the full `velocity_min..=velocity_max` hand. Discards the
+    /// current hand, leaves jail immediately, locks the route (public via
+    /// `PlayerView.jail_route`), and plays its first card this same
+    /// command. Rent income freezes on this player's tiles until the
+    /// route empties.
+    ChooseLegalRoute {
+        order: Vec<u8>,
+    },
+    /// Corruption exit (ADR-0024): offers `amount` (1..=cash) to the
+    /// table instead of moving, opening a 5s simultaneous vote among
+    /// living opponents (`VoteOnBribe`).
+    OfferBribe {
+        amount: i64,
+    },
+    /// Vote on an open bribe (ADR-0024); the briber never votes on their
+    /// own offer. Individual votes stay secret until resolution.
+    VoteOnBribe {
+        accept: bool,
+    },
+    /// Spend a held get-out-of-jail-free card: immediate unconditional
+    /// exit, then a normal `PlayMovementCard` the same turn.
     UseJailCard,
     EndTurn,
     /// Forfeit: assets return to the bank. Allowed at any time.

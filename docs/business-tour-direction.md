@@ -1,9 +1,11 @@
 # Design direction: fast, dynamic play (Business Tour, not Monopoly)
 
-Status: direction note. The v2 ruleset is now fully decided (ADRs
-0017-0024, all accepted, 2026-07) - see "V2 ruleset" below for the
-summary and build order. The code still implements v1 until those
-chantiers land.
+Status: direction note, now historical for the most part. The v2
+ruleset (ADRs 0017-0024, all accepted, 2026-07) is fully **built** - all
+six build-order steps below are done, `mods/classic` is gone, and the
+code implements v2 end to end. This note stays as the design record and
+the difference-map history; see the ADRs themselves for the accepted
+decisions.
 
 ## Goal
 
@@ -12,17 +14,18 @@ games**, not the slow accumulation of Monopoly. This note lists the
 differences that move the game toward fast/dynamic, and how each maps onto
 Parcello's architecture.
 
-**Done so far (2026-07):** the default `mods/base` is now a 32-tile fast
-board (9x9 ring, no Community Chest, two resorts instead of four stations,
-slightly less starting cash); the 40-tile Monopoly-like board moved to
-`mods/classic`; the clients render any `4*(d-1)` square ring. V2 build
-order steps 1-5 also landed: the blitz clock (12 s turns, 45 s personal
-time bank, ADR-0023), landing-only takeover legality and improved-tile
-liquidation (ADR-0022), shared building pools (ADR-0019), the public
-market forecast (ADR-0021), sealed-bid auctions (ADR-0018), and victory
-points + the pool-exhaustion doom clock (ADR-0020). The rest of this note
-is still ahead. The remaining engine mechanics (below) are what make it
-genuinely *Business Tour* rather than "short Monopoly".
+**Done (2026-07):** the default `mods/base` is a 32-tile fast board (9x9
+ring, no Community Chest, two resorts instead of four stations, slightly
+less starting cash); the clients render any `4*(d-1)` square ring. All
+six V2 build-order steps landed: the blitz clock (12 s turns, 45 s
+personal time bank, ADR-0023), landing-only takeover legality and
+improved-tile liquidation (ADR-0022), shared building pools (ADR-0019),
+the public market forecast (ADR-0021), sealed-bid auctions (ADR-0018),
+victory points + the pool-exhaustion doom clock (ADR-0020), and finally
+the velocity deck + jail rework (ADR-0017/0024) - the 40-tile
+`mods/classic` board, the only content using dice-scaled rent, was
+removed in that last step (git history keeps it). The build order is
+complete; what remains is playtesting and tuning, not new mechanics.
 
 Naming caution (commercial plans, see the Steam note): game *mechanics* are
 not protectable, but Business Tour's specific names ("Lost Island", "World
@@ -119,10 +122,29 @@ protocol break, so version accordingly):
    `ClientView` methods to need `&GameContent`, so `of`/`for_seat` grew a
    `content` parameter (5 call sites in `server/room.rs`, mechanical).
    `bot::decide` is untouched this step, per the ADR's own allowance.
-6. ADR-0017 velocity deck + ADR-0024 jail, together (jail is only
-   redesigned once the dice are gone). The big one - bot plus most of
-   the movement tests - kept last so it never blocks the rest.
-   `mods/classic` is removed here.
+6. **DONE (2026-07).** ADR-0017 velocity deck + ADR-0024 jail, together
+   (jail redesigned once the dice were gone). `Roll`/`PayJailFine` and
+   `Event::DiceRolled`/`JailFinePaid` are gone, replaced by
+   `PlayMovementCard { value }` (moves from a public `Player.hand`,
+   refilled to `velocity_min..=velocity_max` the instant it empties -
+   the ADR-0020 round bonus's `hands_cycled` tick moved from
+   `advance_turn` to that refill site, exactly the "only the movement
+   mechanism changes" prediction from step 5) and the three jail exits:
+   `ChooseLegalRoute { order }` (a locked, public permutation of the full
+   hand; the first card plays in the same command, each following turn
+   only the route's front card is legal, and the route holder's tiles
+   charge no rent to visitors until it empties), `OfferBribe { amount }`
+   (opens `TurnPhase::BribeVote`, reusing the ADR-0018 timed-collection
+   window with its own parallel `vote_deadline` timer rather than a
+   shared generic primitive - matching how `game_deadline`/`bid_deadline`
+   already coexist; strictly more than half of living opponents must
+   accept, floor-division split, remainder stays with the briber), and
+   the unchanged `UseJailCard`. `DicePolicy`/`UniformDice` and
+   `RentModel::DiceScaled` are deleted outright (engine purity's PRNG,
+   ADR-0002, is untouched - only the dice *strategy* went); `mods/classic`
+   is removed as its only user. Bot heuristic redesigned (card choice by
+   landing score, jail triage: card > bribe > route). The build order is
+   now complete - see the ADRs for the accepted specifics.
 
 Cross-cutting: the server gains ONE timed-collection-window primitive
 (built for ADR-0018, reused for ADR-0024 votes); the auction
@@ -153,7 +175,7 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Community Chest | second card deck | removed | DONE - dropped from `base` |
 | Stations (gares) | 4 group-scaled tiles | removed, or repurposed as "resorts" | DONE - two resorts on `base` |
 | Mortgages | full mortgage/redeem flow | removed (slows games) | **rules-flag** (`rules.mortgage`; today the 4 commands are always available - add a disable branch) |
-| Jail | jail tile, fine, doubles, cards | "blocked several turns" island | keep the mechanic, **rename** (mod cosmetic); tuning turn count is small **engine** |
+| Jail | jail tile, fine, doubles, cards | "blocked several turns" island | DONE - superseded by the ADR-0024 rework (step 6): Legal Route / Corruption / jail card, no dice |
 | Win condition | last player standing + richest at time limit + control N full groups | victory-point race to a target, reversible with the board | DONE - superseded by the ADR-0020 victory-point race (step 5); last-standing and time-limit wealth (ADR-0010) survive as backstops, domination (ADR-0013) is off by default so it doesn't short-circuit the race |
 | Time-boxed game | `--game-timeout`: richest by net worth wins at the buzzer | 15/30 min presets, host-chosen | DONE (ADR-0010); host-chosen per-room duration is a follow-up |
 | Expropriation | `rules.expropriation`: seize a rival's unimproved property at a premium (owner compensated) | tune cost / allow improved targets | DONE (ADR-0011) |
@@ -164,9 +186,10 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 ## Suggested path (v1 note, absorbed by the build order above)
 
 1. **Fast board as the default (DONE).** `mods/base` is now the 32-tile
-   fast board and the clients render it as a proper 9x9 ring; `mods/classic`
-   keeps the long game. This is the shortest-game lever that needed no new
-   engine mechanics.
+   fast board and the clients render it as a proper 9x9 ring; the
+   40-tile long game (`mods/classic`) was kept alongside it until step 6
+   removed it with the dice it depended on. This is the shortest-game
+   lever that needed no new engine mechanics.
 2. **Rule flags for the slow mechanics.** Add `rules.mortgage` (and
    consider gating jail complexity) so a fast mod can turn them off. Small,
    isolated engine branches behind existing seams.

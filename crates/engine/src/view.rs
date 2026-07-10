@@ -46,6 +46,14 @@ pub struct PlayerView {
     /// Meaningless (always 0) when `rules.win_victory_points` is off.
     #[serde(default)]
     pub victory_points: i64,
+    /// Movement values currently held (ADR-0017); public like cash, never
+    /// masked.
+    #[serde(default)]
+    pub hand: Vec<u8>,
+    /// `Some(queue)` while serving a locked, public Legal Route (ADR-0024) -
+    /// transparency is the price of the immediate exit and rent freeze.
+    #[serde(default)]
+    pub jail_route: Option<Vec<u8>>,
 }
 
 impl ClientView {
@@ -62,6 +70,15 @@ impl ClientView {
             for (i, b) in bids.iter_mut().enumerate() {
                 if i != seat {
                     *b = None;
+                }
+            }
+        }
+        // Bribe vote secrecy (ADR-0024): "individual votes stay secret" -
+        // same masking, same reasoning as sealed-bid amounts above.
+        if let TurnPhase::BribeVote { votes, .. } = &mut view.turn {
+            for (i, v) in votes.iter_mut().enumerate() {
+                if i != seat {
+                    *v = None;
                 }
             }
         }
@@ -82,10 +99,12 @@ impl ClientView {
                     name: p.name.clone(),
                     cash: p.cash,
                     position: p.position,
-                    in_jail: p.jail_turns.is_some(),
+                    in_jail: p.jailed,
                     jail_cards: p.jail_cards,
                     bankrupt: p.bankrupt,
                     victory_points: state.victory_points(content, i),
+                    hand: p.hand.clone(),
+                    jail_route: p.jail_route.clone(),
                 })
                 .collect(),
             current: state.current,

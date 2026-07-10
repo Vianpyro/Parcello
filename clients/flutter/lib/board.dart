@@ -273,7 +273,7 @@ class PawnData {
 }
 
 /// Overlay that draws each pawn and animates it when its tile changes.
-/// A normal roll (short forward distance) hops tile by tile around the
+/// A normal move (short forward distance) hops tile by tile around the
 /// ring; a teleport (card, jail, backward) slides straight to the target.
 class _PawnLayer extends StatefulWidget {
   final int side; // ring grid dimension (d)
@@ -346,7 +346,7 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
     final forward = (to - from) % _boardLen; // 0..39
     final List<int> path;
     if (forward >= 1 && forward <= 12) {
-      // Dice-sized move: hop each tile so the pawn follows the border.
+      // Short move: hop each tile so the pawn follows the border.
       // ~260ms per tile, eased per hop (see _offsetOf), so the step-by-step
       // travel reads clearly rather than as one fast glide.
       path = [for (var k = 0; k <= forward; k++) (from + k) % _boardLen];
@@ -361,7 +361,7 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
     // below (otherwise it lingers at the previous move's end = 1.0).
     a.ctrl.reset();
     setState(() => a.waypoints = path);
-    // A short beat between the dice result and the pawn setting off.
+    // A short beat between the move landing and the pawn setting off.
     Future.delayed(const Duration(milliseconds: 260), () {
       if (!mounted || a.target != to) return; // superseded by a newer move
       a.ctrl.forward(from: 0).whenComplete(() {

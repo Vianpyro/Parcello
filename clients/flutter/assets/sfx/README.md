@@ -5,7 +5,7 @@ with exactly these names:
 
 | File | Played when |
 | --- | --- |
-| `dice-roll.mp3` | a player rolls the dice |
+| `dice-roll.mp3` | a player plays a movement card |
 | `move-pawn-01.mp3` .. `move-pawn-11.mp3` | a pawn hops from tile to tile (one per step, cycling / random) |
 | `stop-pawn-1.mp3` .. `stop-pawn-3.mp3` | a pawn lands on its destination (random) |
 | `button-hover-0.mp3` .. `button-hover-9.mp3` | mouse hovers any button in the app (random) |

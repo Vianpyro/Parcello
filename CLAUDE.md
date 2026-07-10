@@ -1,13 +1,13 @@
 # CLAUDE.md
 
 Parcello: open-source multiplayer board game. Design goal is Business-Tour
-style - fast, dynamic games, NOT Monopoly's slow accumulation - but the
-implemented rules are still Monopoly-close today; the v2 ruleset that
-closes the gap is DECIDED - ADRs 0017-0024, summary and build order in
-`docs/business-tour-direction.md` (read both before touching rules). Authoritative Rust server, thin clients, community-hosted servers
-(Minecraft model), data-driven TOML mods. This repo is the complete,
-playable backend V1: pure engine, mod layer, WebSocket server with an
-embedded browser client, terminal test client, SQLite history.
+style - fast, dynamic games, NOT Monopoly's slow accumulation. The v2
+ruleset that closes the gap is DONE - ADRs 0017-0024, summary and build
+order (complete) in `docs/business-tour-direction.md` (read both before
+touching rules). Authoritative Rust server, thin clients, community-hosted
+servers (Minecraft model), data-driven TOML mods. This repo is the
+complete, playable backend V1: pure engine, mod layer, WebSocket server
+with an embedded browser client, terminal test client, SQLite history.
 
 Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
@@ -15,7 +15,7 @@ Authoritative documents, in order of precedence:
    `docs/adr/` (short: context / decision / consequences).
 2. `docs/adr/0001..0024` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
-   0017-0024 are the decided-but-not-yet-implemented v2 ruleset.
+   0017-0024 are the v2 ruleset (implemented).
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -40,11 +40,12 @@ Authoritative documents, in order of precedence:
   `same_seed_produces_identical_games` guards this; extend it when adding
   phases (it drives canonical actions derived from `TurnPhase`).
 - **`ClientView` must never expose** `GameState.rng` or deck order
-  (dice/cards would become predictable). Cash is public by design; trade
-  offers are visible only to their two parties (ADR-0007) - the server
-  sends `ClientView::for_seat` views, never the omniscient `of`.
+  (chance/community draws and market events would become predictable).
+  Cash is public by design; trade offers are visible only to their two
+  parties (ADR-0007) - the server sends `ClientView::for_seat` views,
+  never the omniscient `of`.
 - **Auction solvency invariant**: cash cannot change while
-  `TurnPhase::Auction` is active. Bids are validated against cash at bid
+  `TurnPhase::BlindAuction` is active. Bids are validated against cash at bid
   time, so the winner can always pay at settlement. This is WHY all four
   trade commands are rejected during auctions - keep it that way, and keep
   the invariant if you add any new cash-moving command.
@@ -56,7 +57,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 73 tests, all must pass
+cargo test  --workspace --locked          # 124 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -98,10 +99,11 @@ Workspace crates and their single responsibility (strict layering,
 architecture doc section 5; dependencies point downward only):
 
 - `crates/engine` - pure synchronous rules. `lib.rs` wires strategies
-  (`DicePolicy`, `RentCalculator`, `BankruptcyResolver` as `Box<dyn>`);
+  (`RentCalculator`, `BankruptcyResolver` as `Box<dyn>`);
   `apply.rs` is the whole command pipeline (validate -> mutate clone ->
-  emit events); `state.rs` (GameState, TurnPhase incl. `Auction` variant,
-  TradeOffer), `content.rs` (GameContent, RentModel), `view.rs`. `bot.rs`
+  emit events); `state.rs` (GameState, TurnPhase incl. `BlindAuction` and
+  `BribeVote` variants, TradeOffer), `content.rs` (GameContent, RentModel),
+  `view.rs`. `bot.rs`
   is the shared autopilot heuristic (`bot::decide(content, view, seat) ->
   Option<CommandKind>`): pure like everything here, used by both the
   server's bot seats and the CLI `--bot` (ADR-0014).
@@ -138,7 +140,11 @@ architecture doc section 5; dependencies point downward only):
   the settings, so the config is frozen and replay-safe once Active; smart
   per-turn AFK timer (`afk_deadline`, recomputed each loop so a mid-turn
   disconnect shortens it): a disconnected acting seat is auto-played the
-  canonical action Roll/Decline/Pass/EndTurn after `DISCONNECTED_GRACE` = 30s
+  canonical action (lowest hand card / ascending Legal Route / EndTurn,
+  ADR-0017/0024 - `BlindAuction`/`BribeVote` have no single actor, so
+  `acting_seat` excludes them and their own parallel `bid_deadline`/
+  `vote_deadline` timers auto-abstain/auto-reject silent seats instead)
+  after `DISCONNECTED_GRACE` = 30s
   always, a connected-but-idle seat when `settings.turn_seconds` is set
   (default 25s, `--turn-timeout` sets the per-room default, 0 = off); any
   accepted command resets the clock; game clock derived from
@@ -168,9 +174,10 @@ architecture doc section 5; dependencies point downward only):
   (it is the cheapest end-to-end protocol check; `addbot`/`rmbot` and
   `set <field> <value>` stdin commands too, ADR-0015; the `discover` bin
   is a headless listener to validate `--lan` announcements). `--bot` turns it into an autopilot seat using the shared
-  `parcello_engine::bot::decide` (buy/bid/build/jail-card, declines trades)
-  so games can be playtested without volunteers; soak it with 3 bots when
-  touching turn flow. Server-side bots (ADR-0014) reuse the same heuristic.
+  `parcello_engine::bot::decide` (bid/build/jail card > bribe > Legal
+  Route, declines trades) so games can be playtested without volunteers;
+  soak it with 3 bots when touching turn flow. Server-side bots
+  (ADR-0014) reuse the same heuristic.
 - `clients/flutter` - Flutter client (Windows desktop first; Dart, not part
   of the cargo workspace). Mirrors the web client feature-for-feature; see
   its README. Requires the Flutter SDK (`flutter analyze && flutter test`).
@@ -182,38 +189,79 @@ may override it at creation via the optional `mods` field on Create
 (ADR-0006; ids are allowlist-validated in `ws.rs` because they become
 filesystem paths). Default `mods/base` is the 32-tile fast board (9x9
 ring, no Community Chest, two resorts, `docs/business-tour-direction.md`);
-`mods/classic` is the 40-tile Monopoly-like long game; `mods/highroller`
-is a rules-only example. Clients render any `4*(d-1)` square ring (32, 40,
-...); other tile counts fall back to a wrap layout.
+`mods/highroller` is a rules-only example. Clients render any `4*(d-1)`
+square ring (32, 40, ...); other tile counts fall back to a wrap layout.
 
 ## Game rules snapshot (what exists)
 
-Movement + Go salary; buy/decline; **auctions on decline** (round-robin
-left of decliner, strict raises, high bidder skipped until outbid, no bids
-= unsold; `rules.auction_on_decline = 0` disables); rent models per tile
-(`houses` default with full-group x2 unimproved - a singleton group counts
-as full; `group_scaled` stations; `dice_scaled` utilities - scaled models
-reject Build); build/sell with even rule; mortgage (price/2 out, +10%
-floored to redeem, house-free group required, mortgaged tiles pay nothing
-but count for ownership); taxes; cyclic seeded decks, card chains capped
-at depth 4; jail (doubles escape without bonus roll, fine, forced fine on
-3rd fail); get-out-of-jail-free cards (per-player count `jail_cards`,
-`UseJailCard` before rolling, auto-spent instead of the forced 3rd-roll
-fine; cards stay in the cyclic deck once drawn - a count, not tradeable
-objects); doubles re-roll, 3 doubles -> jail; partial-payment bankruptcy
+Movement is a velocity deck, no dice (ADR-0017): `PlayMovementCard` plays
+a value from a public `Player.hand`, refilled to
+`rules.velocity_min..=velocity_max` the instant it empties - that refill
+also ticks `Player.hands_cycled`, ADR-0020's round metronome; plus Go
+salary. Sealed-bid auctions on every landing (ADR-0018): a 5s
+`TurnPhase::BlindAuction` window, every living seat bids at once via
+`SubmitBlindBid` (0 abstains), the discoverer gets an implicit list-price
+floor bid if silent and solvent, wins at the floor pay full price, wins
+above it after a contest pay 90% floored, ties favour the discoverer then
+the lowest seat, an all-zero result leaves the tile unsold - no plain
+decline any more. Rent models per tile (`houses` default with full-group
+x2 unimproved - a singleton group counts as full; `group_scaled` stations
+- scaled models reject Build). Build/sell with the even rule (forced
+liquidation follows it too). Shared building pools (ADR-0019,
+`rules.subsidiary_pool_factor`/`conglomerate_pool_factor`,
+`round(factor * sqrt(players))`, 0 = unlimited): `Build` draws from the
+matching pool and rejects when empty, the top level converts a
+conglomerate and releases subsidiaries, forced (bankruptcy) liquidation
+always succeeds, falling back to a one-motion full strip when the pool
+can't cover a normal step-down. Mortgage (price/2 out, +10% floored to
+redeem, house-free group required, mortgaged tiles pay nothing but count
+for ownership); taxes; cyclic seeded decks, card chains capped at depth
+4. Jail is entered unchanged (Go To Jail tile/card) but escaped by choice
+under the blitz clock, not dice (ADR-0024): Legal Route
+(`ChooseLegalRoute`, a locked public permutation of the full hand - the
+first card plays in the same command, un-jailing immediately; each
+following turn only the route's front card is a legal
+`PlayMovementCard`; while any of it remains, the route holder's tiles
+charge no rent to visitors; the hand refills normally, one
+`hands_cycled` tick, once the route empties), Corruption (`OfferBribe`,
+`1..=cash`, opens `TurnPhase::BribeVote` - a 5s simultaneous vote among
+living opponents reusing the ADR-0018 timed-collection-window pattern
+with its own parallel `vote_deadline`, not a shared primitive; strictly
+more than half must accept; on success the amount splits by floor
+division among the opponents, remainder stays with the briber, briber
+exits with a normal hand and live rents; on failure no cash moves, the
+turn just ends, retry next turn), and the unchanged jail card
+(`UseJailCard`, per-player count `jail_cards`, immediate unconditional
+exit then a normal `PlayMovementCard`; cards stay in the cyclic deck once
+drawn - a count, not tradeable objects). A jailed seat's canonical/AFK
+action is the Legal Route in ascending order. Partial-payment bankruptcy
 with even-aware liquidation (houses then auto-mortgages) and transfer to
 creditor (mortgages carry as-is; bank refurbishes); **trading**
-(asynchronous offers, any solvent player any time EXCEPT during auctions;
-exempt from turn check like Resign; re-validated at acceptance - stale
-offers reject without mutation; purged on bankruptcy; max 4 open per
-proposer; offers and their lifecycle events are private to the two
-parties, ADR-0007); resign; win conditions: last-player-standing, richest
-at the time limit (`--game-timeout`, ADR-0010), domination
-(`rules.win_full_groups` complete groups, ADR-0013, 3 in base); optional
-expropriation (`rules.expropriation`, seize a rival's unimproved property
-at a premium, owner compensated, ADR-0011) and rent boosts
-(`rules.rent_boost`, +50%/step, cap 3, reset on transfer, ADR-0012) - both
-on in the base fast mod.
+(asynchronous offers, any solvent player any time EXCEPT during a
+`BlindAuction`/`BribeVote`; exempt from turn check like Resign;
+re-validated at acceptance - stale offers reject without mutation; purged
+on bankruptcy; max 4 open per proposer; offers and their lifecycle events
+are private to the two parties, ADR-0007); resign; win conditions:
+last-player-standing, richest at the time limit (`--game-timeout`,
+ADR-0010), domination (`rules.win_full_groups` complete groups, ADR-0013,
+off by default so it doesn't short-circuit the race), and the primary v2
+condition - a race to `rules.win_victory_points` (ADR-0020, 20 in base:
+3/complete colour group, 2/conglomerate-level tile, 1/group-scaled
+"resort" tile owned, plus a stored, non-reversible `+2`/round bonus to
+whoever has the strictly highest cash each time every surviving player
+has completed a hand refill, ties to the lowest seat; reaching the target
+ends the game instantly, `Event::WonByPoints`; if a `Build` empties the
+conglomerate pool first, the game ends immediately too - highest score
+wins, ties by net worth then lowest seat, `Event::WonByPoolExhaustion`,
+the "doom clock"). Optional expropriation (`rules.expropriation`, seize a
+rival's property at a premium, landing tile only, end of turn; improved
+tiles liquidate to the shared pools, owner compensated, ADR-0011/0022)
+and rent boosts (`rules.rent_boost`, +50%/step, cap 3, reset on transfer,
+ADR-0012) - both on in the base fast mod. Public market forecast
+(ADR-0021, `data/events.toml`): a seeded rolling queue of the next 3
+scheduled events plus whichever is active - `rent_multiplier`,
+`acquisition_multiplier`, one-shot `wealth_tax` - `gap_turns` apart,
+public in every view (draws already made, never the generator).
 
 Deliberate simplifications (documented, do not "fix" without discussion):
 no immediate interest when mortgaged tiles change hands; jail cards are a
@@ -258,27 +306,27 @@ lobby-editable (ADR-0015).
 
 ## Roadmap (agreed next steps, roughly in order of value)
 
-1. **V2 ruleset** (ADRs 0017-0024, accepted 2026-07): six-step build
-   order in `docs/business-tour-direction.md`, "V2 ruleset" section.
-   Every step is a protocol break - update web + CLI + Flutter + bot
-   together. `mods/classic` is removed at step 6.
-2. Flutter client polish (`clients/flutter` exists: full protocol, board,
+V2 ruleset DONE (ADRs 0017-0024, accepted and built 2026-07): the
+six-step build order in `docs/business-tour-direction.md`, "V2 ruleset"
+section, is complete - `mods/classic` was removed at step 6.
+
+1. Flutter client polish (`clients/flutter` exists: full protocol, board,
    trades, tests; still needs real multiplayer playtesting, FX + audio -
    owner priority 2026-07 - and Android/mobile targets, postponed by
    owner). The visual identity is specified in `docs/visual-identity.md`
    (Art Deco geometry, validated palette, FR+EN via gen-l10n, ranked
    menu greyed until a matchmaking service exists).
-3. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
+2. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
    the Flutter client (`oidc.dart`: PKCE + system browser + loopback; web
    and CLI paste the token manually). Remaining: run the deploy on the
    personal server (`compose-deploy.yml` + `docs/deployment.md`; Rauthy
    client id `parcello`, EdDSA id tokens, loopback-wildcard redirect).
    HS256 removal is DEFERRED until LAN/WAN playtests have happened (owner
    decision, 2026-07) - do not delete it before then.
-4. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
+3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod
    layer; the trait is already the seam). Unblocked since the MSRV moved
    to 1.96; pick a current Wasmtime.
-5. Richer history queries (SQLx behind `GameHistory` if dashboards ever
+4. Richer history queries (SQLx behind `GameHistory` if dashboards ever
    need it - see ADR-0005 first).
 
 When picking up any item: state assumptions briefly, write the ADR if it

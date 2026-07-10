@@ -56,21 +56,19 @@ pub struct PropertyDef {
     pub house_cost: i64,
     /// Meaning depends on `rent_model`:
     /// - Houses: rent by house count, `rents[0]` unimproved .. `rents[5]` hotel;
-    /// - GroupScaled: `rents[n-1]` where n = tiles of the group owned;
-    /// - DiceScaled: dice total times `rents[n-1]`.
+    /// - GroupScaled: `rents[n-1]` where n = tiles of the group owned.
     pub rents: [i64; 6],
     #[serde(default)]
     pub rent_model: RentModel,
 }
 
-/// How rent is computed (stations and utilities use the scaled models).
+/// How rent is computed (stations use the scaled model).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RentModel {
     #[default]
     Houses,
     GroupScaled,
-    DiceScaled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -147,7 +145,6 @@ pub enum MarketEffect {
 pub struct RuleParams {
     pub starting_balance: i64,
     pub go_salary: i64,
-    pub jail_fine: i64,
     /// Build limit per property; house level 5 renders as a hotel.
     pub max_houses_per_property: u8,
     /// Cash floor after liquidation below which a player goes bankrupt.
@@ -180,6 +177,24 @@ pub struct RuleParams {
     /// for the top build level; 0 disables pooling.
     #[serde(default)]
     pub conglomerate_pool_factor: i64,
+    /// Velocity deck (ADR-0017): the movement hand is every integer in
+    /// `velocity_min..=velocity_max`, dealt full at game start and
+    /// refilled the instant it empties. Unlike every other scalar here,
+    /// `0` is not a valid "off" sentinel - an empty/degenerate hand would
+    /// break movement outright, so these get non-zero serde defaults and
+    /// `GameContent::validate` rejects an invalid range.
+    #[serde(default = "default_velocity_min")]
+    pub velocity_min: u8,
+    #[serde(default = "default_velocity_max")]
+    pub velocity_max: u8,
+}
+
+fn default_velocity_min() -> u8 {
+    1
+}
+
+fn default_velocity_max() -> u8 {
+    5
 }
 
 impl Default for RuleParams {
@@ -187,7 +202,6 @@ impl Default for RuleParams {
         Self {
             starting_balance: 1500,
             go_salary: 200,
-            jail_fine: 50,
             max_houses_per_property: 5,
             bankruptcy_threshold: 0,
             expropriation: 0,
@@ -196,6 +210,8 @@ impl Default for RuleParams {
             win_victory_points: 0,
             subsidiary_pool_factor: 0,
             conglomerate_pool_factor: 0,
+            velocity_min: default_velocity_min(),
+            velocity_max: default_velocity_max(),
         }
     }
 }
@@ -209,6 +225,9 @@ impl GameContent {
         }
         if !matches!(self.board[0].kind, TileKind::Go) {
             return Err(ContentError::FirstTileNotGo);
+        }
+        if self.rules.velocity_min < 1 || self.rules.velocity_max <= self.rules.velocity_min {
+            return Err(ContentError::InvalidVelocityRange);
         }
         let jail_count = self
             .board

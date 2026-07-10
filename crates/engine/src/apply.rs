@@ -45,11 +45,14 @@ pub(crate) fn apply(
             | CommandKind::DeclineTrade { .. }
             | CommandKind::CancelTrade { .. }
     );
-    // A sealed-bid window (ADR-0018) has no single actor: any living seat
-    // may submit while it's open, regardless of whose turn it nominally is.
+    // A sealed-bid window (ADR-0018) or a bribe vote (ADR-0024) has no
+    // single actor: any living seat may act while one is open, regardless
+    // of whose turn it nominally is.
     let in_open_bid = matches!(cmd.kind, CommandKind::SubmitBlindBid { .. })
         && matches!(state.turn, TurnPhase::BlindAuction { .. });
-    if !any_turn && !in_open_bid && player != state.current {
+    let in_open_vote = matches!(cmd.kind, CommandKind::VoteOnBribe { .. })
+        && matches!(state.turn, TurnPhase::BribeVote { .. });
+    if !any_turn && !in_open_bid && !in_open_vote && player != state.current {
         return Err(CommandError::NotYourTurn);
     }
 
@@ -61,7 +64,7 @@ pub(crate) fn apply(
     };
 
     match &cmd.kind {
-        CommandKind::Roll => exec.roll(player)?,
+        CommandKind::PlayMovementCard { value } => exec.play_movement_card(player, *value)?,
         CommandKind::SubmitBlindBid { amount } => exec.submit_blind_bid(player, *amount)?,
         CommandKind::ProposeTrade {
             to,
@@ -86,9 +89,13 @@ pub(crate) fn apply(
         CommandKind::BoostRent { tile } => exec.boost_rent(player, tile)?,
         CommandKind::Mortgage { tile } => exec.mortgage(player, tile)?,
         CommandKind::Unmortgage { tile } => exec.unmortgage(player, tile)?,
-        CommandKind::PayJailFine => exec.pay_jail_fine(player)?,
+        CommandKind::ChooseLegalRoute { order } => {
+            exec.choose_legal_route(player, order.clone())?
+        }
+        CommandKind::OfferBribe { amount } => exec.offer_bribe(player, *amount)?,
+        CommandKind::VoteOnBribe { accept } => exec.vote_on_bribe(player, *accept)?,
         CommandKind::UseJailCard => exec.use_jail_card(player)?,
-        CommandKind::EndTurn => exec.end_turn(player)?,
+        CommandKind::EndTurn => exec.end_turn()?,
         CommandKind::Resign => exec.resign(player)?,
     }
 
@@ -100,7 +107,10 @@ pub(crate) fn apply(
     // next command once resolution moves `turn` off `BlindAuction`.
     if matches!(exec.st.phase, GamePhase::Active)
         && exec.st.players[exec.st.current].bankrupt
-        && !matches!(exec.st.turn, TurnPhase::BlindAuction { .. })
+        && !matches!(
+            exec.st.turn,
+            TurnPhase::BlindAuction { .. } | TurnPhase::BribeVote { .. }
+        )
     {
         exec.advance_turn();
     }
@@ -127,71 +137,191 @@ struct Exec<'e> {
 impl<'e> Exec<'e> {
     // -- Commands -------------------------------------------------------------
 
-    fn roll(&mut self, p: usize) -> Result<(), CommandError> {
-        if self.st.turn != TurnPhase::AwaitRoll {
+    // -- Movement (ADR-0017) -----------------------------------------------------
+
+    fn play_movement_card(&mut self, p: usize, value: u8) -> Result<(), CommandError> {
+        if self.st.turn != TurnPhase::AwaitMove {
             return Err(CommandError::WrongPhase);
         }
-        let (d1, d2) = self.strat.dice.roll(&mut self.st.rng);
-        self.ev.push(Event::DiceRolled { player: p, d1, d2 });
-        let total = (d1 + d2) as usize;
-
-        if self.st.players[p].jail_turns.is_some() {
-            self.roll_from_jail(p, d1, d2, total);
+        if self.st.players[p].jailed {
+            // Jailed players choose an exit (ChooseLegalRoute / OfferBribe
+            // / UseJailCard) instead of playing a card directly.
+            return Err(CommandError::CardNotPlayable);
+        }
+        if self.st.players[p].jail_route.is_some() {
+            let route = self.st.players[p]
+                .jail_route
+                .as_ref()
+                .expect("checked Some");
+            if route.first() != Some(&value) {
+                return Err(CommandError::CardNotPlayable);
+            }
+            self.play_route_front(p);
             return Ok(());
         }
-
-        if d1 == d2 {
-            self.st.players[p].doubles_streak += 1;
-            if self.st.players[p].doubles_streak == 3 {
-                self.go_to_jail(p);
-                self.st.turn = TurnPhase::AwaitEnd;
-                return Ok(());
-            }
-        } else {
-            self.st.players[p].doubles_streak = 0;
-        }
-
-        self.move_forward(p, total);
-        self.resolve_landing(p, total as u8, 0);
+        let Some(idx) = self.st.players[p].hand.iter().position(|&v| v == value) else {
+            return Err(CommandError::CardNotPlayable);
+        };
+        self.st.players[p].hand.remove(idx);
+        self.ev.push(Event::MovementCardPlayed { player: p, value });
+        self.maybe_refill_hand(p);
+        self.move_forward(p, value as usize);
+        self.resolve_landing(p, 0);
         Ok(())
     }
 
-    fn roll_from_jail(&mut self, p: usize, d1: u8, d2: u8, total: usize) {
-        if d1 == d2 {
-            self.st.players[p].jail_turns = None;
-            self.st.players[p].doubles_streak = 0; // no bonus roll after a jail escape
-            self.ev.push(Event::LeftJail { player: p });
-            self.move_forward(p, total);
-            self.resolve_landing(p, total as u8, 0);
+    /// Plays the front card of an active Legal Route (ADR-0024): shared by
+    /// `play_movement_card`'s route branch and `choose_legal_route`'s
+    /// same-command first move. Identical tail to normal play, just a
+    /// different card source.
+    fn play_route_front(&mut self, p: usize) {
+        let route = self.st.players[p]
+            .jail_route
+            .as_mut()
+            .expect("play_route_front requires an active route");
+        let value = route.remove(0);
+        let route_done = route.is_empty();
+        if route_done {
+            self.st.players[p].jail_route = None;
+        }
+        self.ev.push(Event::MovementCardPlayed { player: p, value });
+        // The hand stays empty (cleared by `choose_legal_route`) for the
+        // whole route - refilling here only when it finishes is what makes
+        // the refill (and its `hands_cycled` tick) happen exactly once per
+        // route, not once per route step.
+        if route_done {
+            self.maybe_refill_hand(p);
+        }
+        self.move_forward(p, value as usize);
+        self.resolve_landing(p, 0);
+    }
+
+    /// Refills `p`'s hand the instant it empties (ADR-0017) and ticks
+    /// `hands_cycled` - the ADR-0020 round metronome, checked here (not
+    /// `advance_turn`) since a hand can span several turns.
+    fn maybe_refill_hand(&mut self, p: usize) {
+        if !self.st.players[p].hand.is_empty() {
             return;
         }
-        let turns = self.st.players[p].jail_turns.map(|t| t + 1).unwrap_or(1);
-        self.st.players[p].jail_turns = Some(turns);
-        if turns < 3 {
-            self.st.turn = TurnPhase::AwaitEnd;
-            return;
+        let round_before = self.round_number();
+        self.st.players[p].hand =
+            (self.content.rules.velocity_min..=self.content.rules.velocity_max).collect();
+        self.st.players[p].hands_cycled += 1;
+        if self.content.rules.win_victory_points > 0 && self.round_number() > round_before {
+            self.award_round_bonus();
         }
-        // Third failed escape: a held card is spent instead of the fine
-        // (strictly better for the player: cards have no other use), else
-        // the fine is due. Either way the player then moves.
-        if self.st.players[p].jail_cards > 0 {
-            self.st.players[p].jail_cards -= 1;
-            self.ev.push(Event::JailCardUsed { player: p });
-        } else {
-            let fine = self.content.rules.jail_fine;
-            self.ev.push(Event::JailFinePaid {
-                player: p,
-                amount: fine,
-            });
-            self.charge(p, None, fine);
-            if self.st.players[p].bankrupt {
-                return;
-            }
+    }
+
+    // -- Jail (ADR-0024) ---------------------------------------------------------
+
+    fn choose_legal_route(&mut self, p: usize, order: Vec<u8>) -> Result<(), CommandError> {
+        if self.st.turn != TurnPhase::AwaitMove {
+            return Err(CommandError::WrongPhase);
         }
-        self.st.players[p].jail_turns = None;
+        if !self.st.players[p].jailed {
+            return Err(CommandError::NotInJail);
+        }
+        let mut expected: Vec<u8> =
+            (self.content.rules.velocity_min..=self.content.rules.velocity_max).collect();
+        let mut got = order.clone();
+        expected.sort_unstable();
+        got.sort_unstable();
+        if expected != got {
+            return Err(CommandError::InvalidRoute);
+        }
+        self.st.players[p].hand.clear();
+        self.st.players[p].jailed = false;
         self.ev.push(Event::LeftJail { player: p });
-        self.move_forward(p, total);
-        self.resolve_landing(p, total as u8, 0);
+        self.ev.push(Event::LegalRouteChosen {
+            player: p,
+            order: order.clone(),
+        });
+        self.st.players[p].jail_route = Some(order);
+        self.play_route_front(p);
+        Ok(())
+    }
+
+    fn offer_bribe(&mut self, p: usize, amount: i64) -> Result<(), CommandError> {
+        if self.st.turn != TurnPhase::AwaitMove {
+            return Err(CommandError::WrongPhase);
+        }
+        if !self.st.players[p].jailed {
+            return Err(CommandError::NotInJail);
+        }
+        if !(1..=self.st.players[p].cash).contains(&amount) {
+            return Err(CommandError::InsufficientFunds);
+        }
+        self.st.turn = TurnPhase::BribeVote {
+            briber: p,
+            amount,
+            votes: vec![None; self.st.players.len()],
+        };
+        self.ev.push(Event::BribeOffered { player: p, amount });
+        Ok(())
+    }
+
+    fn vote_on_bribe(&mut self, p: usize, accept: bool) -> Result<(), CommandError> {
+        let TurnPhase::BribeVote {
+            briber, ref votes, ..
+        } = self.st.turn
+        else {
+            return Err(CommandError::WrongPhase);
+        };
+        if p == briber {
+            return Err(CommandError::NotYourTurn);
+        }
+        if votes[p].is_some() {
+            return Err(CommandError::AlreadyVoted);
+        }
+        let TurnPhase::BribeVote { votes, .. } = &mut self.st.turn else {
+            unreachable!()
+        };
+        votes[p] = Some(accept);
+        self.ev.push(Event::BribeVoteCast { player: p });
+        self.maybe_resolve_bribe_vote();
+        Ok(())
+    }
+
+    /// Resolves the open bribe vote once every living non-briber has voted.
+    /// A no-op otherwise. Strictly more than half must accept (a 2-player
+    /// game needs the lone opponent's yes).
+    fn maybe_resolve_bribe_vote(&mut self) {
+        let TurnPhase::BribeVote {
+            briber,
+            amount,
+            ref votes,
+        } = self.st.turn
+        else {
+            return;
+        };
+        let opponents: Vec<usize> = self.st.alive_players().filter(|&s| s != briber).collect();
+        if !opponents.iter().all(|&s| votes[s].is_some()) {
+            return;
+        }
+        let accepts = opponents
+            .iter()
+            .filter(|&&s| votes[s] == Some(true))
+            .count();
+        let succeeded = accepts * 2 > opponents.len();
+        if succeeded {
+            let n = opponents.len() as i64;
+            let share = if n > 0 { amount / n } else { 0 };
+            self.st.players[briber].cash -= share * n;
+            for &o in &opponents {
+                self.st.players[o].cash += share;
+            }
+            self.st.players[briber].jailed = false;
+            self.st.turn = TurnPhase::AwaitMove;
+        } else {
+            self.st.turn = TurnPhase::AwaitEnd;
+        }
+        self.ev.push(Event::BribeResolved {
+            briber,
+            amount,
+            succeeded,
+            accepts,
+            total: opponents.len(),
+        });
     }
 
     // -- Trading ----------------------------------------------------------------
@@ -339,7 +469,9 @@ impl<'e> Exec<'e> {
 
     fn reject_during_auction(&self) -> Result<(), CommandError> {
         match self.st.turn {
-            TurnPhase::BlindAuction { .. } => Err(CommandError::WrongPhase),
+            TurnPhase::BlindAuction { .. } | TurnPhase::BribeVote { .. } => {
+                Err(CommandError::WrongPhase)
+            }
             _ => Ok(()),
         }
     }
@@ -499,7 +631,7 @@ impl<'e> Exec<'e> {
     }
 
     fn build(&mut self, p: usize, tile_id: &str) -> Result<(), CommandError> {
-        if !matches!(self.st.turn, TurnPhase::AwaitRoll | TurnPhase::AwaitEnd) {
+        if !matches!(self.st.turn, TurnPhase::AwaitMove | TurnPhase::AwaitEnd) {
             return Err(CommandError::WrongPhase);
         }
         let tile = self
@@ -769,7 +901,7 @@ impl<'e> Exec<'e> {
         p: usize,
         tile_id: &str,
     ) -> Result<(usize, &'e PropertyDef), CommandError> {
-        if !matches!(self.st.turn, TurnPhase::AwaitRoll | TurnPhase::AwaitEnd) {
+        if !matches!(self.st.turn, TurnPhase::AwaitMove | TurnPhase::AwaitEnd) {
             return Err(CommandError::WrongPhase);
         }
         let content: &'e GameContent = self.content;
@@ -785,56 +917,28 @@ impl<'e> Exec<'e> {
         Ok((tile, prop))
     }
 
-    fn pay_jail_fine(&mut self, p: usize) -> Result<(), CommandError> {
-        if self.st.turn != TurnPhase::AwaitRoll {
-            return Err(CommandError::WrongPhase);
-        }
-        if self.st.players[p].jail_turns.is_none() {
-            return Err(CommandError::NotInJail);
-        }
-        let fine = self.content.rules.jail_fine;
-        // Voluntary payment never forces liquidation: reject if unaffordable.
-        if self.st.players[p].cash < fine {
-            return Err(CommandError::InsufficientFunds);
-        }
-        self.st.players[p].cash -= fine;
-        self.st.players[p].jail_turns = None;
-        self.ev.push(Event::JailFinePaid {
-            player: p,
-            amount: fine,
-        });
-        self.ev.push(Event::LeftJail { player: p });
-        Ok(())
-    }
-
     fn use_jail_card(&mut self, p: usize) -> Result<(), CommandError> {
-        if self.st.turn != TurnPhase::AwaitRoll {
+        if self.st.turn != TurnPhase::AwaitMove {
             return Err(CommandError::WrongPhase);
         }
-        if self.st.players[p].jail_turns.is_none() {
+        if !self.st.players[p].jailed {
             return Err(CommandError::NotInJail);
         }
         if self.st.players[p].jail_cards == 0 {
             return Err(CommandError::NoJailCard);
         }
         self.st.players[p].jail_cards -= 1;
-        self.st.players[p].jail_turns = None;
+        self.st.players[p].jailed = false;
         self.ev.push(Event::JailCardUsed { player: p });
         self.ev.push(Event::LeftJail { player: p });
         Ok(())
     }
 
-    fn end_turn(&mut self, p: usize) -> Result<(), CommandError> {
+    fn end_turn(&mut self) -> Result<(), CommandError> {
         if self.st.turn != TurnPhase::AwaitEnd {
             return Err(CommandError::WrongPhase);
         }
-        let extra_roll =
-            self.st.players[p].doubles_streak > 0 && self.st.players[p].jail_turns.is_none();
-        if extra_roll {
-            self.st.turn = TurnPhase::AwaitRoll;
-        } else {
-            self.advance_turn();
-        }
+        self.advance_turn();
         Ok(())
     }
 
@@ -898,8 +1002,14 @@ impl<'e> Exec<'e> {
 
     fn go_to_jail(&mut self, p: usize) {
         self.st.players[p].position = self.content.jail_position();
-        self.st.players[p].jail_turns = Some(0);
-        self.st.players[p].doubles_streak = 0;
+        self.st.players[p].jailed = true;
+        // A route landing its holder back on Go To Jail mid-course (ADR-0024
+        // doesn't special-case this) has its parole revoked: the freeze
+        // must not outlive the route, and a normal hand must be waiting for
+        // whichever jail exit comes next.
+        if self.st.players[p].jail_route.take().is_some() {
+            self.maybe_refill_hand(p);
+        }
         self.ev.push(Event::WentToJail { player: p });
     }
 
@@ -924,7 +1034,7 @@ impl<'e> Exec<'e> {
 
     // -- Landing resolution -----------------------------------------------------
 
-    fn resolve_landing(&mut self, p: usize, dice_total: u8, depth: u8) {
+    fn resolve_landing(&mut self, p: usize, depth: u8) {
         if depth > MAX_CARD_CHAIN_DEPTH {
             self.st.turn = TurnPhase::AwaitEnd;
             return;
@@ -966,11 +1076,13 @@ impl<'e> Exec<'e> {
                 Some(_) if self.st.tiles[tile].mortgaged => {
                     self.st.turn = TurnPhase::AwaitEnd;
                 }
+                // Legal Route rent freeze (ADR-0024): visitors play free
+                // on this owner's tiles for as long as their route lasts.
+                Some(owner) if self.st.players[owner].jail_route.is_some() => {
+                    self.st.turn = TurnPhase::AwaitEnd;
+                }
                 Some(owner) => {
-                    let base = self
-                        .strat
-                        .rent
-                        .rent(self.content, &self.st, tile, dice_total);
+                    let base = self.strat.rent.rent(self.content, &self.st, tile);
                     let rent = Self::boosted_rent(base, self.st.tiles[tile].boosts);
                     let rent = self.apply_market_multiplier(MarketEffect::RentMultiplier, rent);
                     self.ev.push(Event::RentPaid {
@@ -983,12 +1095,12 @@ impl<'e> Exec<'e> {
                     self.st.turn = TurnPhase::AwaitEnd;
                 }
             },
-            TileKind::Chance => self.draw_card(p, DeckKind::Chance, dice_total, depth),
-            TileKind::Community => self.draw_card(p, DeckKind::Community, dice_total, depth),
+            TileKind::Chance => self.draw_card(p, DeckKind::Chance, depth),
+            TileKind::Community => self.draw_card(p, DeckKind::Community, depth),
         }
     }
 
-    fn draw_card(&mut self, p: usize, deck: DeckKind, dice_total: u8, depth: u8) {
+    fn draw_card(&mut self, p: usize, deck: DeckKind, depth: u8) {
         let idx = match deck {
             DeckKind::Chance => self.st.chance_deck.draw(),
             DeckKind::Community => self.st.community_deck.draw(),
@@ -1008,17 +1120,10 @@ impl<'e> Exec<'e> {
             card: card.id.clone(),
             text: card.text.clone(),
         });
-        self.apply_card_effect(p, &card.id, &card.effect, dice_total, depth);
+        self.apply_card_effect(p, &card.id, &card.effect, depth);
     }
 
-    fn apply_card_effect(
-        &mut self,
-        p: usize,
-        card_id: &str,
-        effect: &CardEffect,
-        dice_total: u8,
-        depth: u8,
-    ) {
+    fn apply_card_effect(&mut self, p: usize, card_id: &str, effect: &CardEffect, depth: u8) {
         match effect {
             CardEffect::Money { amount } => {
                 if *amount >= 0 {
@@ -1044,7 +1149,7 @@ impl<'e> Exec<'e> {
                     .tile_index(tile)
                     .expect("validated content: card targets exist");
                 self.teleport(p, to, *collect_go);
-                self.resolve_landing(p, dice_total, depth + 1);
+                self.resolve_landing(p, depth + 1);
             }
             CardEffect::MoveBy { steps } => {
                 if *steps >= 0 {
@@ -1055,7 +1160,7 @@ impl<'e> Exec<'e> {
                     let to = (from + *steps as i64).rem_euclid(len) as usize;
                     self.teleport(p, to, false);
                 }
-                self.resolve_landing(p, dice_total, depth + 1);
+                self.resolve_landing(p, depth + 1);
             }
             CardEffect::GoToJail => {
                 self.go_to_jail(p);
@@ -1162,8 +1267,8 @@ impl<'e> Exec<'e> {
         }
         let player = &mut self.st.players[p];
         player.bankrupt = true;
-        player.jail_turns = None;
-        player.doubles_streak = 0;
+        player.jailed = false;
+        player.jail_route = None;
         player.jail_cards = 0;
         self.ev.push(Event::PlayerBankrupt {
             player: p,
@@ -1178,9 +1283,6 @@ impl<'e> Exec<'e> {
         if !matches!(self.st.phase, GamePhase::Active) {
             return;
         }
-        let round_before = self.round_number();
-        self.st.players[self.st.current].doubles_streak = 0;
-        self.st.players[self.st.current].hands_cycled += 1;
         let n = self.st.players.len();
         let mut next = self.st.current;
         for _ in 0..n {
@@ -1190,18 +1292,15 @@ impl<'e> Exec<'e> {
             }
         }
         self.st.current = next;
-        self.st.turn = TurnPhase::AwaitRoll;
+        self.st.turn = TurnPhase::AwaitMove;
         self.st.turn_count += 1;
         self.ev.push(Event::TurnStarted { player: next });
         self.tick_forecast();
-        if self.content.rules.win_victory_points > 0 && self.round_number() > round_before {
-            self.award_round_bonus();
-        }
     }
 
-    /// Round number (ADR-0020): the minimum turns-taken across surviving
-    /// players. See `Player::hands_cycled`'s doc comment for why this reads
-    /// that field instead of a dedicated ADR-0017 hand counter.
+    /// Round number (ADR-0020): the minimum hands fully cycled across
+    /// surviving players (`maybe_refill_hand` ticks this once per refill,
+    /// not once per turn - a hand can span several turns).
     fn round_number(&self) -> u32 {
         self.st
             .alive_players()

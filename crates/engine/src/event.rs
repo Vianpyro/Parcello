@@ -18,10 +18,11 @@ pub enum Event {
     TurnStarted {
         player: usize,
     },
-    DiceRolled {
+    /// A movement card was played (ADR-0017), replacing dice: `value`
+    /// tiles forward, then the landing resolves normally.
+    MovementCardPlayed {
         player: usize,
-        d1: u8,
-        d2: u8,
+        value: u8,
     },
     Moved {
         player: usize,
@@ -148,21 +149,47 @@ pub enum Event {
     WentToJail {
         player: usize,
     },
-    JailFinePaid {
-        player: usize,
-        amount: i64,
-    },
     /// A get-out-of-jail-free card entered the player's hand.
     JailCardReceived {
         player: usize,
     },
-    /// A held card was spent to leave jail (voluntarily or on the third
-    /// failed escape roll, where it replaces the forced fine).
+    /// A held card was spent to leave jail (ADR-0024: unconditional,
+    /// immediate).
     JailCardUsed {
         player: usize,
     },
     LeftJail {
         player: usize,
+    },
+    /// Legal Route chosen (ADR-0024): `order` is the full locked,
+    /// public plan (the hand was discarded to build it); its first value
+    /// plays in the same command that emits this event.
+    LegalRouteChosen {
+        player: usize,
+        order: Vec<u8>,
+    },
+    /// Corruption: a jailed player offered `amount` to the table instead
+    /// of moving, opening a 5s vote among living opponents.
+    BribeOffered {
+        player: usize,
+        amount: i64,
+    },
+    /// A vote was cast; the accept/reject choice stays hidden until
+    /// `BribeResolved` (ADR-0024: "individual votes stay secret").
+    BribeVoteCast {
+        player: usize,
+    },
+    /// The bribe vote closed. On success, `amount` split (floor
+    /// division; the remainder stays with the briber) among the `total`
+    /// living opponents and the briber leaves jail with a live hand; on
+    /// failure no cash moves and the briber's turn degrades to
+    /// `AwaitEnd`. `accepts`/`total` are the only tally ever revealed.
+    BribeResolved {
+        briber: usize,
+        amount: i64,
+        succeeded: bool,
+        accepts: usize,
+        total: usize,
     },
     /// `to = None` means the property returned to the bank.
     PropertyTransferred {

@@ -33,17 +33,21 @@ pub fn decide(content: &GameContent, view: &ClientView, me: usize) -> Option<Com
 
     match &view.turn {
         TurnPhase::BlindAuction { tile, bids } => bot.blind_bid_action(*tile, bids),
+        TurnPhase::BribeVote {
+            briber,
+            amount,
+            votes,
+        } => bot.bribe_vote_action(*briber, *amount, votes),
         _ if view.current != me => None,
-        TurnPhase::AwaitRoll => {
-            if view.players[me].in_jail && view.players[me].jail_cards > 0 {
-                Some(CommandKind::UseJailCard)
-            } else if view.players[me].in_jail && bot.cash_after(content.rules.jail_fine) >= RESERVE
+        TurnPhase::AwaitMove => {
+            if view.players[me].in_jail {
+                bot.jail_action()
+            } else if let Some(route) = &view.players[me].jail_route
+                && let Some(&value) = route.first()
             {
-                Some(CommandKind::PayJailFine)
-            } else if !view.players[me].in_jail {
-                bot.asset_action().or(Some(CommandKind::Roll))
+                Some(CommandKind::PlayMovementCard { value })
             } else {
-                Some(CommandKind::Roll)
+                bot.asset_action().or_else(|| bot.choose_movement_card())
             }
         }
         TurnPhase::AwaitEnd => bot.asset_action().or(Some(CommandKind::EndTurn)),
@@ -109,6 +113,87 @@ impl Bot<'_> {
             }
         };
         Some(CommandKind::SubmitBlindBid { amount })
+    }
+
+    /// Picks a movement card by scoring the tile it would land on
+    /// (ADR-0017): an affordable unowned property is worth pursuing, an
+    /// expensive rival-owned tile is worth avoiding, `GoToJail` strongly
+    /// so; everything else is roughly neutral. Ties break to the lowest
+    /// value - simple and deterministic.
+    fn choose_movement_card(&self) -> Option<CommandKind> {
+        let len = self.content.board.len();
+        let from = self.view.players[self.me].position;
+        let value = *self
+            .view
+            .players
+            .get(self.me)?
+            .hand
+            .iter()
+            .max_by_key(|&&v| (self.landing_score(from, v, len), std::cmp::Reverse(v)))?;
+        Some(CommandKind::PlayMovementCard { value })
+    }
+
+    fn landing_score(&self, from: usize, value: u8, len: usize) -> i64 {
+        let to = (from + value as usize) % len;
+        match &self.content.board[to].kind {
+            TileKind::GoToJail => -1000,
+            TileKind::Property(prop) => match self.view.tiles[to].owner {
+                None => {
+                    if self.cash_after(prop.price) >= RESERVE {
+                        20
+                    } else {
+                        0
+                    }
+                }
+                Some(o) if o == self.me => 5,
+                // Cheap rival tiles are a shrug; expensive ones are worth
+                // steering away from when there's a choice.
+                Some(_) => -(prop.price / 20),
+            },
+            _ => 1,
+        }
+    }
+
+    /// Jail triage (ADR-0024): the jail card first if held (simplest, no
+    /// freeze, no vote); a bribe when comfortably richer than twice the
+    /// reserve it risks; otherwise the safe default, Legal Route in
+    /// ascending order.
+    fn jail_action(&self) -> Option<CommandKind> {
+        if self.view.players[self.me].jail_cards > 0 {
+            return Some(CommandKind::UseJailCard);
+        }
+        let bribe = RESERVE * 2;
+        if self.cash_after(bribe) >= RESERVE * 2 {
+            return Some(CommandKind::OfferBribe { amount: bribe });
+        }
+        let order: Vec<u8> =
+            (self.content.rules.velocity_min..=self.content.rules.velocity_max).collect();
+        Some(CommandKind::ChooseLegalRoute { order })
+    }
+
+    /// Accepts a bribe when the per-head payout is material (at least half
+    /// the usual reserve); never votes on its own bribe or twice.
+    fn bribe_vote_action(
+        &self,
+        briber: usize,
+        amount: i64,
+        votes: &[Option<bool>],
+    ) -> Option<CommandKind> {
+        if self.me == briber || votes[self.me].is_some() {
+            return None;
+        }
+        let opponents = self
+            .view
+            .players
+            .iter()
+            .enumerate()
+            .filter(|&(i, p)| i != briber && !p.bankrupt)
+            .count()
+            .max(1);
+        let share = amount / opponents as i64;
+        Some(CommandKind::VoteOnBribe {
+            accept: share >= RESERVE / 2,
+        })
     }
 
     fn asset_action(&self) -> Option<CommandKind> {
@@ -294,7 +379,6 @@ impl Bot<'_> {
                     .count();
                 prop.rents[owned.saturating_sub(1).min(5)]
             }
-            RentModel::DiceScaled => prop.rents[0] * 7,
         }
     }
 
@@ -453,6 +537,8 @@ mod tests {
             jail_cards: 0,
             bankrupt: false,
             victory_points: 0,
+            hand: vec![1, 2, 3, 4, 5],
+            jail_route: None,
         }
     }
 
@@ -547,20 +633,35 @@ mod tests {
     }
 
     #[test]
-    fn pays_jail_fine_when_comfortable() {
+    fn jail_triage_prefers_card_then_bribe_then_route() {
         let c = content();
-        let mut v = view(1000, TurnPhase::AwaitRoll);
+        let mut v = view(1000, TurnPhase::AwaitMove);
         v.players[0].in_jail = true;
-        assert!(matches!(decide(&c, &v, 0), Some(CommandKind::PayJailFine)));
 
-        v.players[0].cash = 100;
-        assert!(matches!(decide(&c, &v, 0), Some(CommandKind::Roll)));
+        // Rich and no card: bribe.
+        assert!(matches!(
+            decide(&c, &v, 0),
+            Some(CommandKind::OfferBribe { amount: 200 })
+        ));
+
+        // Holding a card takes priority over everything else.
+        v.players[0].jail_cards = 1;
+        assert!(matches!(decide(&c, &v, 0), Some(CommandKind::UseJailCard)));
+
+        // Too poor to comfortably bribe and no card: the safe default, an
+        // ascending Legal Route.
+        v.players[0].jail_cards = 0;
+        v.players[0].cash = 150;
+        assert!(matches!(
+            decide(&c, &v, 0),
+            Some(CommandKind::ChooseLegalRoute { order }) if order == vec![1, 2, 3, 4, 5]
+        ));
     }
 
     #[test]
     fn accepts_only_profitable_incoming_trades() {
         let c = advanced_content();
-        let mut v = advanced_view(1000, TurnPhase::AwaitRoll);
+        let mut v = advanced_view(1000, TurnPhase::AwaitMove);
         v.current = 1;
         v.pending_trades.push(crate::TradeOffer {
             id: 1,
@@ -690,7 +791,7 @@ mod tests {
     #[test]
     fn stays_quiet_when_not_its_move_and_declines_trades() {
         let c = content();
-        let mut v = view(1000, TurnPhase::AwaitRoll);
+        let mut v = view(1000, TurnPhase::AwaitMove);
         v.current = 1;
         assert!(decide(&c, &v, 0).is_none());
         v.pending_trades.push(crate::TradeOffer {

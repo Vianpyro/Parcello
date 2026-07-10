@@ -44,6 +44,11 @@ const BOT_THINK: Duration = Duration::from_millis(800);
 /// `acting_seat()` returns `None` for the whole duration, so neither is
 /// consumed while it's armed.
 const BID_WINDOW: Duration = Duration::from_secs(5);
+/// Corruption bribe vote window (ADR-0024): the same timed-collection-window
+/// pattern as `BID_WINDOW`, kept as its own independently-armed timer rather
+/// than a shared primitive - matching how `game_deadline` and `bid_deadline`
+/// already coexist as two small parallel `Option<Instant>` fields.
+const VOTE_WINDOW: Duration = Duration::from_secs(5);
 
 pub type Rooms = Arc<RwLock<HashMap<String, mpsc::Sender<RoomCmd>>>>;
 pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;
@@ -134,6 +139,7 @@ pub async fn create_room(
         bot_counter: 0,
         banks: Vec::new(),
         bid_deadline: None,
+        vote_deadline: None,
     };
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
@@ -199,7 +205,11 @@ fn clamp_settings(mut s: RoomSettings) -> RoomSettings {
     let r = &mut s.rules;
     r.starting_balance = r.starting_balance.clamp(0, 1_000_000);
     r.go_salary = r.go_salary.clamp(0, 100_000);
-    r.jail_fine = r.jail_fine.clamp(0, 100_000);
+    // Velocity deck (ADR-0017): `GameContent::validate` requires
+    // `velocity_min >= 1` and `velocity_max > velocity_min` - clamp both so
+    // an untrusted host can never violate that regardless of order.
+    r.velocity_min = r.velocity_min.clamp(1, 254);
+    r.velocity_max = r.velocity_max.clamp(r.velocity_min + 1, 255);
     // rents[] has six levels (0..=5, level 5 = hotel); a higher cap would
     // index past the array in the rent calculator.
     r.max_houses_per_property = r.max_houses_per_property.clamp(1, 5);
@@ -207,6 +217,9 @@ fn clamp_settings(mut s: RoomSettings) -> RoomSettings {
     r.expropriation = r.expropriation.clamp(0, 1_000);
     r.rent_boost = r.rent_boost.clamp(0, 1_000);
     r.win_full_groups = r.win_full_groups.clamp(0, 100);
+    // ADR-0020 gap: never clamped before this touch-point, unlike every
+    // other rule scalar here.
+    r.win_victory_points = r.win_victory_points.clamp(0, 500);
     // Small multipliers (base mod uses 6/3), not percents like the rules
     // above - a much smaller ceiling is enough (ADR-0019).
     r.subsidiary_pool_factor = r.subsidiary_pool_factor.clamp(0, 100);
@@ -262,6 +275,10 @@ struct Room {
     /// `last_progress`/`banks`: `acting_seat()` already returns `None` for
     /// the whole phase, so the normal turn machinery stays disarmed.
     bid_deadline: Option<tokio::time::Instant>,
+    /// Deadline for the currently open Corruption bribe vote (ADR-0024), if
+    /// any - armed and cleared exactly like `bid_deadline`, its structural
+    /// twin for the other simultaneous multi-seat phase.
+    vote_deadline: Option<tokio::time::Instant>,
 }
 
 impl Room {
@@ -293,6 +310,10 @@ impl Room {
             // returning None for the whole phase.
             let bid_armed = self.bid_deadline.is_some();
             let bid = tokio::time::sleep_until(self.bid_deadline.unwrap_or(now + IDLE_TIMEOUT));
+            // Corruption bribe vote window (ADR-0024): the same pattern,
+            // its own independent timer.
+            let vote_armed = self.vote_deadline.is_some();
+            let vote = tokio::time::sleep_until(self.vote_deadline.unwrap_or(now + IDLE_TIMEOUT));
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
@@ -386,6 +407,9 @@ impl Room {
                 _ = bid, if bid_armed => {
                     self.inject_silent_bids();
                 }
+                _ = vote, if vote_armed => {
+                    self.inject_silent_votes();
+                }
                 _ = idle => {
                     if self.seats.iter().all(|s| s.tx.is_none()) {
                         info!(room = %self.code, "idle timeout, dissolving");
@@ -400,16 +424,17 @@ impl Room {
     }
 
     /// Seat expected to act right now, or `None` outside an active game -
-    /// also `None` while a sealed-bid window is open (ADR-0018): every
-    /// living seat may act there, not a single actor, so it is governed by
-    /// its own parallel `bid_deadline` timer instead (this is exactly what
-    /// disarms the turn clock/time bank for the whole window's duration).
+    /// also `None` while a sealed-bid window or a Corruption bribe vote is
+    /// open (ADR-0018/ADR-0024): every living seat may act there, not a
+    /// single actor, so each is governed by its own parallel deadline timer
+    /// instead (this is exactly what disarms the turn clock/time bank for
+    /// the whole window's duration).
     fn acting_seat(&self) -> Option<usize> {
         let Phase::Active(st) = &self.phase else {
             return None;
         };
         match st.turn {
-            TurnPhase::BlindAuction { .. } => None,
+            TurnPhase::BlindAuction { .. } | TurnPhase::BribeVote { .. } => None,
             _ => Some(st.current),
         }
     }
@@ -470,18 +495,36 @@ impl Room {
 
     /// The action the game is waiting for, per `TurnPhase` (the same mapping
     /// the deterministic-replay test uses). Never invalid for the returned
-    /// player, so applying it always advances a stalled game.
+    /// player, so applying it always advances a stalled game. A stalled
+    /// jailed seat's canonical action is the Legal Route in ascending order
+    /// (ADR-0024) - deterministic, and nobody rots in jail.
     fn afk_command(&self) -> Option<(PlayerId, CommandKind)> {
         let Phase::Active(st) = &self.phase else {
             return None;
         };
         let seat = self.acting_seat()?;
+        let player = &st.players[seat];
         let kind = match st.turn {
-            TurnPhase::AwaitRoll => CommandKind::Roll,
+            TurnPhase::AwaitMove => {
+                if let Some(route) = &player.jail_route {
+                    CommandKind::PlayMovementCard { value: route[0] }
+                } else if player.jailed {
+                    let rules = &self.engine.content().rules;
+                    let order: Vec<u8> = (rules.velocity_min..=rules.velocity_max).collect();
+                    CommandKind::ChooseLegalRoute { order }
+                } else {
+                    let value = *player
+                        .hand
+                        .iter()
+                        .min()
+                        .expect("hand never empty in AwaitMove");
+                    CommandKind::PlayMovementCard { value }
+                }
+            }
             TurnPhase::AwaitEnd => CommandKind::EndTurn,
-            // acting_seat() already excludes this phase (no single actor);
-            // kept for exhaustiveness.
-            TurnPhase::BlindAuction { .. } => return None,
+            // acting_seat() already excludes these phases (no single
+            // actor); kept for exhaustiveness.
+            TurnPhase::BlindAuction { .. } | TurnPhase::BribeVote { .. } => return None,
         };
         Some((st.players[seat].id.clone(), kind))
     }
@@ -512,6 +555,32 @@ impl Room {
             self.handle_game(&player_id, CommandKind::SubmitBlindBid { amount: 0 });
         }
         self.bid_deadline = None;
+    }
+
+    /// Auto-rejects every living opponent who hasn't voted by the Corruption
+    /// bribe vote's deadline (ADR-0024) - `inject_silent_bids`'s structural
+    /// twin for the other simultaneous multi-seat phase.
+    fn inject_silent_votes(&mut self) {
+        let Phase::Active(state) = &self.phase else {
+            self.vote_deadline = None;
+            return;
+        };
+        let TurnPhase::BribeVote { briber, votes, .. } = &state.turn else {
+            self.vote_deadline = None;
+            return;
+        };
+        let briber = *briber;
+        let silent: Vec<PlayerId> = state
+            .alive_players()
+            .filter(|&p| p != briber && votes[p].is_none())
+            .map(|p| state.players[p].id.clone())
+            .collect();
+        for player_id in silent {
+            info!(room = %self.code, player = %player_id,
+                  "bribe vote window closed, rejecting");
+            self.handle_game(&player_id, CommandKind::VoteOnBribe { accept: false });
+        }
+        self.vote_deadline = None;
     }
 
     /// The first bot seat with something to do right now and the command it
@@ -774,9 +843,11 @@ impl Room {
         // Rebuilt from scratch, not extended: seat renumbering across
         // PlayAgain must never carry a stale bank (ADR-0023).
         self.banks = vec![self.settings.time_bank_seconds.unwrap_or(0); self.seats.len()];
-        // A fresh game always opens on AwaitRoll, but clear defensively so
-        // PlayAgain never carries a stale sealed-bid window (ADR-0018).
+        // A fresh game always opens on AwaitMove, but clear defensively so
+        // PlayAgain never carries a stale sealed-bid window (ADR-0018) or
+        // bribe vote (ADR-0024).
         self.bid_deadline = None;
+        self.vote_deadline = None;
         info!(room = %self.code, players = self.seats.len(), "game started");
 
         let remaining = self.time_remaining_secs();
@@ -859,6 +930,7 @@ impl Room {
         };
 
         let was_blind_auction = matches!(state.turn, TurnPhase::BlindAuction { .. });
+        let was_bribe_vote = matches!(state.turn, TurnPhase::BribeVote { .. });
         let cmd = PlayerCommand {
             player: player_id.to_string(),
             kind,
@@ -879,6 +951,14 @@ impl Room {
                     self.bid_deadline = Some(tokio::time::Instant::now() + BID_WINDOW);
                 } else if !is_blind_auction {
                     self.bid_deadline = None;
+                }
+                // Corruption bribe vote window (ADR-0024): the same
+                // transition-detection pattern, its own independent timer.
+                let is_bribe_vote = matches!(next.turn, TurnPhase::BribeVote { .. });
+                if is_bribe_vote && !was_bribe_vote {
+                    self.vote_deadline = Some(tokio::time::Instant::now() + VOTE_WINDOW);
+                } else if !is_bribe_vote {
+                    self.vote_deadline = None;
                 }
                 let finished_winner = match next.phase {
                     GamePhase::Finished { winner } => Some(winner),
@@ -1201,23 +1281,25 @@ mod tests {
             assert!(restarted, "seat {i} must be pulled into the new game");
         }
 
-        // The new game is live: a roll from the acting player is accepted.
+        // The new game is live: a move from the acting player is accepted.
         room.send(RoomCmd::Game {
             player_id: "guest:alice".into(),
-            cmd: CommandKind::Roll,
+            cmd: CommandKind::PlayMovementCard { value: 1 },
         })
         .await
         .expect("room task alive");
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let mut rolled = false;
+        let mut moved = false;
         while let Ok(msg) = rxs[1].try_recv() {
             if let ServerMessage::Update { events, .. } = msg
-                && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                && events
+                    .iter()
+                    .any(|e| matches!(e, Event::MovementCardPlayed { .. }))
             {
-                rolled = true;
+                moved = true;
             }
         }
-        assert!(rolled, "the replayed game must accept commands");
+        assert!(moved, "the replayed game must accept commands");
     }
 
     /// A guest seat can only be re-taken with the reconnect token issued at
@@ -1422,12 +1504,14 @@ mod tests {
         .await
         .expect("room task alive");
 
-        // With no turn timeout, the grace alone must auto-play alice's roll;
+        // With no turn timeout, the grace alone must auto-play alice's move;
         // bob sees it without sending anything.
-        let auto_rolled = tokio::time::timeout(Duration::from_secs(300), async {
+        let auto_played = tokio::time::timeout(Duration::from_secs(300), async {
             while let Some(msg) = client_rxs[1].recv().await {
                 if let ServerMessage::Update { events, .. } = msg
-                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::MovementCardPlayed { .. }))
                 {
                     return true;
                 }
@@ -1437,7 +1521,7 @@ mod tests {
         .await
         .expect("an update must arrive before the mock-clock timeout");
         assert!(
-            auto_rolled,
+            auto_played,
             "the disconnected player's turn must be auto-played after the grace"
         );
     }
@@ -1524,7 +1608,7 @@ mod tests {
         // The game is now finished: further play is rejected.
         room.send(RoomCmd::Game {
             player_id: "guest:alice".into(),
-            cmd: CommandKind::Roll,
+            cmd: CommandKind::PlayMovementCard { value: 1 },
         })
         .await
         .expect("room task alive");
@@ -1642,6 +1726,7 @@ mod tests {
             bot_counter: 0,
             banks: Vec::new(),
             bid_deadline: None,
+            vote_deadline: None,
         }
     }
 
@@ -1660,7 +1745,8 @@ mod tests {
     }
 
     /// A bot seat produces the engine heuristic's move for its own turn: a
-    /// fresh game opens on seat 0 with a roll (ADR-0014).
+    /// fresh game opens on seat 0 by playing a movement card (ADR-0014,
+    /// ADR-0017).
     #[test]
     fn bot_seat_acts_on_its_turn() {
         let content = base_content();
@@ -1678,7 +1764,7 @@ mod tests {
         room.phase = Phase::Active(state);
         assert!(matches!(
             room.next_bot_action(),
-            Some((id, CommandKind::Roll)) if id == "bot:1"
+            Some((id, CommandKind::PlayMovementCard { .. })) if id == "bot:1"
         ));
     }
 
@@ -1755,12 +1841,24 @@ mod tests {
         let mut s = room.settings.clone();
         s.rules.starting_balance = i64::MAX;
         s.rules.max_houses_per_property = 200;
+        s.rules.velocity_min = 0; // below the floor (GameContent::validate needs >= 1)
+        s.rules.velocity_max = 0; // must end up strictly above velocity_min
+        s.rules.win_victory_points = 999_999;
         s.game_seconds = Some(1); // below the 60s floor
         s.turn_seconds = Some(25);
         s.time_bank_seconds = Some(10_000); // above the 600s ceiling
         room.handle_configure("guest:host", s);
         assert_eq!(room.settings.rules.starting_balance, 1_000_000, "clamped");
         assert_eq!(room.settings.rules.max_houses_per_property, 5, "house cap");
+        assert_eq!(room.settings.rules.velocity_min, 1, "velocity floor");
+        assert!(
+            room.settings.rules.velocity_max > room.settings.rules.velocity_min,
+            "velocity_max must stay strictly above velocity_min"
+        );
+        assert_eq!(
+            room.settings.rules.win_victory_points, 500,
+            "victory point ceiling"
+        );
         assert_eq!(room.settings.game_seconds, Some(60), "game floor");
         assert_eq!(room.settings.turn_seconds, Some(25));
         assert_eq!(room.settings.time_bank_seconds, Some(600), "bank ceiling");
@@ -1834,10 +1932,12 @@ mod tests {
         .await
         .expect("room task alive");
 
-        let auto_rolled = tokio::time::timeout(Duration::from_secs(300), async {
+        let auto_played = tokio::time::timeout(Duration::from_secs(300), async {
             while let Some(msg) = client_rxs[1].recv().await {
                 if let ServerMessage::Update { events, .. } = msg
-                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::MovementCardPlayed { .. }))
                 {
                     return true;
                 }
@@ -1846,7 +1946,7 @@ mod tests {
         })
         .await
         .expect("an update must arrive before the mock-clock timeout");
-        assert!(auto_rolled, "AFK timer should roll for the idle player");
+        assert!(auto_played, "AFK timer should move for the idle player");
     }
 
     /// Setup shared by the time-bank tests below: a two-player room with the
@@ -1910,20 +2010,22 @@ mod tests {
                 .await;
 
         // Alice stalls 7s (5s over the turn limit, well inside the 20s
-        // bank) then rolls herself - the bank absorbs the 2s overage.
+        // bank) then moves herself - the bank absorbs the 2s overage.
         tokio::time::sleep(Duration::from_secs(7)).await;
         room.send(RoomCmd::Game {
             player_id: "guest:alice".into(),
-            cmd: CommandKind::Roll,
+            cmd: CommandKind::PlayMovementCard { value: 1 },
         })
         .await
         .expect("room task alive");
 
-        let (rolled_herself, banks) = tokio::time::timeout(Duration::from_secs(60), async {
+        let (played_herself, banks) = tokio::time::timeout(Duration::from_secs(60), async {
             while let Some(msg) = client_rxs[1].recv().await {
                 if let ServerMessage::Update { events, banks, .. } = msg {
-                    let rolled = events.iter().any(|e| matches!(e, Event::DiceRolled { .. }));
-                    if rolled {
+                    let played = events
+                        .iter()
+                        .any(|e| matches!(e, Event::MovementCardPlayed { .. }));
+                    if played {
                         return (true, banks);
                     }
                 }
@@ -1932,7 +2034,7 @@ mod tests {
         })
         .await
         .expect("an update must arrive");
-        assert!(rolled_herself, "alice's own roll must be accepted");
+        assert!(played_herself, "alice's own move must be accepted");
         assert_eq!(
             banks,
             Some(vec![18, 20]),
@@ -1948,10 +2050,12 @@ mod tests {
             started_room_with_bank(Some(Duration::from_secs(5)), Some(Duration::from_secs(3)))
                 .await;
 
-        let (auto_rolled, banks) = tokio::time::timeout(Duration::from_secs(300), async {
+        let (auto_played, banks) = tokio::time::timeout(Duration::from_secs(300), async {
             while let Some(msg) = client_rxs[1].recv().await {
                 if let ServerMessage::Update { events, banks, .. } = msg
-                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::MovementCardPlayed { .. }))
                 {
                     return (true, banks);
                 }
@@ -1960,7 +2064,7 @@ mod tests {
         })
         .await
         .expect("an update must arrive before the mock-clock timeout");
-        assert!(auto_rolled, "AFK timer should roll once the bank is dry");
+        assert!(auto_played, "AFK timer should move once the bank is dry");
         assert_eq!(banks, Some(vec![0, 3]), "alice's bank is fully spent");
     }
 
@@ -1980,10 +2084,12 @@ mod tests {
         .await
         .expect("room task alive");
 
-        let auto_rolled = tokio::time::timeout(Duration::from_secs(120), async {
+        let auto_played = tokio::time::timeout(Duration::from_secs(120), async {
             while let Some(msg) = client_rxs[1].recv().await {
                 if let ServerMessage::Update { events, .. } = msg
-                    && events.iter().any(|e| matches!(e, Event::DiceRolled { .. }))
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::MovementCardPlayed { .. }))
                 {
                     return true;
                 }
@@ -1991,8 +2097,8 @@ mod tests {
             false
         })
         .await
-        .expect("must roll within DISCONNECTED_GRACE, far short of the 1000s bank");
-        assert!(auto_rolled, "a disconnected seat must not draw on its bank");
+        .expect("must move within DISCONNECTED_GRACE, far short of the 1000s bank");
+        assert!(auto_played, "a disconnected seat must not draw on its bank");
     }
 
     /// Waits for the next `Update` and returns its view, skipping any other
@@ -2006,11 +2112,13 @@ mod tests {
         }
     }
 
-    /// Rolls/ends turns with real (non-fixed) dice until someone lands on
-    /// an unowned property and a sealed-bid window opens (ADR-0018); the
-    /// base mod board is almost entirely properties, so this converges in
-    /// very few attempts. Returns the seat whose turn it now is (the
-    /// discoverer).
+    /// Plays movement cards/ends turns until someone lands on an unowned
+    /// property and a sealed-bid window opens (ADR-0018); the base mod
+    /// board is almost entirely properties, so this converges in very few
+    /// attempts. Also steers around jail (ADR-0024: ascending Legal Route,
+    /// then the route's locked front card) since it is otherwise reachable
+    /// while crawling low card values. Returns the seat whose turn it now
+    /// is (the discoverer).
     async fn roll_until_blind_auction_opens(
         room: &mpsc::Sender<RoomCmd>,
         rx: &mut mpsc::UnboundedReceiver<ServerMessage>,
@@ -2018,10 +2126,24 @@ mod tests {
         mut current: usize,
     ) -> usize {
         tokio::time::timeout(Duration::from_secs(300), async {
+            // A fresh game deals every seat the full hand; card 1 is always
+            // available for the very first move.
+            let mut jailed = false;
+            let mut jail_route: Option<Vec<u8>> = None;
+            let mut value = 1u8;
             loop {
+                let cmd = if jailed {
+                    CommandKind::ChooseLegalRoute {
+                        order: vec![1, 2, 3, 4, 5],
+                    }
+                } else if let Some(route) = &jail_route {
+                    CommandKind::PlayMovementCard { value: route[0] }
+                } else {
+                    CommandKind::PlayMovementCard { value }
+                };
                 room.send(RoomCmd::Game {
                     player_id: ids[current].into(),
-                    cmd: CommandKind::Roll,
+                    cmd,
                 })
                 .await
                 .expect("room task alive");
@@ -2036,7 +2158,11 @@ mod tests {
                 })
                 .await
                 .expect("room task alive");
-                current = next_view(rx).await.current;
+                let view = next_view(rx).await;
+                current = view.current;
+                jailed = view.players[current].in_jail;
+                jail_route = view.players[current].jail_route.clone();
+                value = *view.players[current].hand.first().unwrap_or(&1);
             }
         })
         .await
@@ -2117,6 +2243,130 @@ mod tests {
                     && events
                         .iter()
                         .any(|e| matches!(e, Event::BlindAuctionResolved { .. }))
+                {
+                    return true;
+                }
+            }
+        })
+        .await
+        .expect("must resolve immediately, not after the fallback timer");
+        assert!(resolved);
+    }
+
+    /// Spawns a room with alice already jailed and ready to offer a bribe.
+    /// Legal Route/Corruption are deterministic player choices, not RNG
+    /// outcomes worth re-deriving through a gameplay crawl (unlike
+    /// `roll_until_blind_auction_opens`), so the state is seeded directly.
+    async fn jailed_room() -> (
+        mpsc::Sender<RoomCmd>,
+        Vec<mpsc::UnboundedReceiver<ServerMessage>>,
+    ) {
+        let content = base_content();
+        let engine = Engine::new(Arc::new(content.content.clone())).expect("engine builds");
+        let mut state = engine.new_game(
+            vec![
+                ("guest:alice".into(), "Alice".into()),
+                ("guest:bob".into(), "Bob".into()),
+            ],
+            7,
+        );
+        state.players[0].jailed = true;
+        state.turn = TurnPhase::AwaitMove;
+
+        let settings = RoomSettings {
+            game_seconds: None,
+            turn_seconds: None,
+            time_bank_seconds: None,
+            rules: content.content.rules.clone(),
+        };
+        let mut room = Room {
+            code: "TESTS".into(),
+            content,
+            engine,
+            seats: vec![human_seat("guest:alice"), human_seat("guest:bob")],
+            phase: Phase::Active(state),
+            history: Arc::new(MemoryHistory::new()),
+            settings,
+            game_deadline: None,
+            bot_counter: 0,
+            banks: vec![0, 0],
+            bid_deadline: None,
+            vote_deadline: None,
+        };
+        let mut client_rxs = Vec::new();
+        for seat in &mut room.seats {
+            let (tx, rx) = mpsc::unbounded_channel();
+            seat.tx = Some(tx);
+            client_rxs.push(rx);
+        }
+        let (tx, rx) = mpsc::channel(64);
+        tokio::spawn(room.run(rx, Rooms::default()));
+        (tx, client_rxs)
+    }
+
+    /// A silent opponent is auto-rejected once the bribe vote's own 5s
+    /// deadline fires (ADR-0024) - the `BribeVote` equivalent of the
+    /// sealed-bid window tests above.
+    #[tokio::test(start_paused = true)]
+    async fn bribe_vote_window_auto_rejects_a_silent_seat() {
+        let (room, mut client_rxs) = jailed_room().await;
+
+        room.send(RoomCmd::Game {
+            player_id: "guest:alice".into(),
+            cmd: CommandKind::OfferBribe { amount: 100 },
+        })
+        .await
+        .expect("room task alive");
+
+        let resolved = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::BribeResolved { .. }))
+                {
+                    return true;
+                }
+            }
+        })
+        .await
+        .expect("must resolve within the mock-clock timeout");
+        assert!(
+            resolved,
+            "the silent opponent must be auto-rejected at the deadline"
+        );
+    }
+
+    /// When the lone opponent votes before the window's own deadline, it
+    /// resolves immediately as a direct result of that vote - the 5s timer
+    /// is a fallback, not a wait (mirrors the sealed-bid equivalent).
+    #[tokio::test(start_paused = true)]
+    async fn bribe_vote_window_resolves_early_once_everyone_has_voted() {
+        let (room, mut client_rxs) = jailed_room().await;
+
+        room.send(RoomCmd::Game {
+            player_id: "guest:alice".into(),
+            cmd: CommandKind::OfferBribe { amount: 100 },
+        })
+        .await
+        .expect("room task alive");
+        let _ = next_view(&mut client_rxs[1]).await;
+
+        room.send(RoomCmd::Game {
+            player_id: "guest:bob".into(),
+            cmd: CommandKind::VoteOnBribe { accept: true },
+        })
+        .await
+        .expect("room task alive");
+
+        let resolved = tokio::time::timeout(Duration::from_millis(50), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::BribeResolved { .. }))
                 {
                     return true;
                 }
