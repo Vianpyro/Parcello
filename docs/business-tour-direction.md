@@ -15,8 +15,11 @@ differences that move the game toward fast/dynamic, and how each maps onto
 Parcello's architecture.
 
 **Done (2026-07):** the default `mods/base` is a 32-tile fast board (9x9
-ring, no Community Chest, two resorts instead of four stations, slightly
-less starting cash); the clients render any `4*(d-1)` square ring. All
+ring, no Community Chest, four resorts evenly spaced every 8 tiles
+instead of four stations, one chance tile, one tax tile, slightly less
+starting cash); the clients render any `4*(d-1)` square ring. The old
+no-op Free Parking corner is now the Exposition, a property-spotlight
+event (ADR-0026, added after the build order below completed). All
 six V2 build-order steps landed: the blitz clock (12 s turns, 45 s
 personal time bank, ADR-0023), landing-only takeover legality and
 improved-tile liquidation (ADR-0022), shared building pools (ADR-0019),
@@ -173,7 +176,7 @@ Effort key: **mod** = achievable today with a data-only mod (no code);
 | Board length | 40 tiles | ~32 tiles (shorter laps) | DONE - `base` is 32 tiles; clients render any `4*(d-1)` ring |
 | Starting cash / salary | 1500 / 200 | tuned for pace | DONE (base 1200/200) + `mods/highroller` for richer |
 | Community Chest | second card deck | removed | DONE - dropped from `base` |
-| Stations (gares) | 4 group-scaled tiles | removed, or repurposed as "resorts" | DONE - two resorts on `base` |
+| Stations (gares) | 4 group-scaled tiles | removed, or repurposed as "resorts" | DONE - four resorts on `base`, evenly spaced every 8 tiles |
 | Mortgages | full mortgage/redeem flow | removed (slows games) | **rules-flag** (`rules.mortgage`; today the 4 commands are always available - add a disable branch) |
 | Jail | jail tile, fine, doubles, cards | "blocked several turns" island | DONE - superseded by the ADR-0024 rework (step 6): Legal Route / Corruption / jail card, no dice |
 | Win condition | last player standing + richest at time limit + control N full groups | victory-point race to a target, reversible with the board | DONE - superseded by the ADR-0020 victory-point race (step 5); last-standing and time-limit wealth (ADR-0010) survive as backstops, domination (ADR-0013) is off by default so it doesn't short-circuit the race |

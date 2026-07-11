@@ -7,7 +7,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::content::GameContent;
-use crate::state::{GamePhase, GameState, MarketForecast, TileState, TradeOffer, TurnPhase};
+use crate::state::{
+    GamePhase, GameState, MarketForecast, Spotlight, TileState, TradeOffer, TurnPhase,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClientView {
@@ -29,6 +31,11 @@ pub struct ClientView {
     /// made, never the generator (seed/deck order stay hidden).
     #[serde(default)]
     pub forecast: MarketForecast,
+    /// The property currently in the Exposition corner's spotlight
+    /// (ADR-0026), if any - fully public, no per-seat masking (the whole
+    /// point is that the table sees the hot tile).
+    #[serde(default)]
+    pub spotlight: Option<Spotlight>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -115,6 +122,7 @@ impl ClientView {
             subsidiaries_available: state.subsidiaries_available,
             conglomerates_available: state.conglomerates_available,
             forecast: state.forecast.clone(),
+            spotlight: state.spotlight,
         }
     }
 }

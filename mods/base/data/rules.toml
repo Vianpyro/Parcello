@@ -11,8 +11,10 @@ go_salary = 200
 # Velocity deck (ADR-0017): movement is playing a card from a public hand
 # of every integer in this range, not rolling dice. Also sizes a Legal
 # Route (ADR-0024) - it must play the full range as a fixed permutation.
-velocity_min = 1
-velocity_max = 5
+# 2..6 (not 1..5): drops the "1" outcome, the most boring draw since it
+# barely moves the player; raises the average step 3 -> 4, faster laps.
+velocity_min = 2
+velocity_max = 6
 max_houses_per_property = 5
 bankruptcy_threshold = 0
 # Aggressive mechanics for swingy games (ADR-0011/0012):
@@ -32,3 +34,7 @@ win_victory_points = 20
 # round(factor * sqrt(players)) at game start.
 subsidiary_pool_factor = 6
 conglomerate_pool_factor = 3
+# The Exposition corner (ADR-0026): landing there puts a random property
+# in the spotlight - rent doubles there for the next 8 turns.
+spotlight_rent_pct = 100
+spotlight_duration_turns = 8

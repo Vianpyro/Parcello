@@ -27,7 +27,7 @@ pub use error::{CommandError, ContentError};
 pub use event::{DeckKind, Event};
 pub use state::{
     ActiveMarketEvent, GamePhase, GameState, MarketForecast, Player, PlayerId, ScheduledEvent,
-    TileState, TradeOffer, TurnPhase,
+    Spotlight, TileState, TradeOffer, TurnPhase,
 };
 pub use strategy::{BankruptcyResolver, RentCalculator};
 pub use view::{ClientView, PlayerView};

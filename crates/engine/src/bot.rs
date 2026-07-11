@@ -554,6 +554,7 @@ mod tests {
             subsidiaries_available: None,
             conglomerates_available: None,
             forecast: Default::default(),
+            spotlight: None,
         }
     }
 

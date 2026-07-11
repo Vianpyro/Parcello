@@ -1,0 +1,143 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    // -- Rust -----------------------------------------------------------
+    {
+      "label": "Rust: build (workspace)",
+      "type": "shell",
+      "command": "cargo build --workspace --locked",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$rustc"
+    },
+    {
+      "label": "Rust: test (workspace)",
+      "type": "shell",
+      "command": "cargo test --workspace --locked",
+      "group": "test",
+      "problemMatcher": "$rustc"
+    },
+    {
+      "label": "Rust: clippy",
+      "type": "shell",
+      "command": "cargo clippy --all-targets --locked -- -D warnings",
+      "group": "build",
+      "problemMatcher": "$rustc"
+    },
+    {
+      "label": "Rust: fmt check",
+      "type": "shell",
+      "command": "cargo fmt --check",
+      "group": "build",
+      "problemMatcher": []
+    },
+
+    // -- Flutter ----------------------------------------------------------
+    {
+      "label": "Flutter: analyze",
+      "type": "shell",
+      "command": "flutter analyze",
+      "options": { "cwd": "${workspaceFolder}/clients/flutter" },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Flutter: test",
+      "type": "shell",
+      "command": "flutter test",
+      "options": { "cwd": "${workspaceFolder}/clients/flutter" },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Flutter: build web",
+      "detail": "Needed once for the real browser client; Run: Server falls back to a stub page otherwise.",
+      "type": "shell",
+      "command": "flutter build web --release",
+      "options": { "cwd": "${workspaceFolder}/clients/flutter" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Flutter: run (desktop)",
+      "detail": "Runs the native desktop target for whichever OS this task actually executes on. Inside the devcontainer that's always Linux (needs a display - see WSLg caveats); for a real window, reopen the folder locally first (Ctrl+Shift+P > 'Dev Containers: Reopen Folder Locally') and rerun this same task - it picks Windows/macOS automatically.",
+      "type": "shell",
+      "command": "flutter run -d linux",
+      "windows": { "command": "flutter run -d windows" },
+      "osx": { "command": "flutter run -d macos" },
+      "options": { "cwd": "${workspaceFolder}/clients/flutter" },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+
+    // -- Combined test entry point ----------------------------------------
+    {
+      "label": "Test: All (Rust + Flutter)",
+      "dependsOn": ["Rust: test (workspace)", "Flutter: analyze", "Flutter: test"],
+      "dependsOrder": "sequence",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+
+    // -- Live/manual testing (server + CLI clients) ------------------------
+    {
+      "label": "Server: ensure placeholder web dir",
+      "detail": "Creates a stub clients/flutter/build/web/index.html if no real Flutter web build exists yet, so the server can boot for CLI-only testing (it refuses to start with no web dir at all, ADR-0025).",
+      "type": "shell",
+      "command": "mkdir -p clients/flutter/build/web && [ -f clients/flutter/build/web/index.html ] || echo '<!doctype html><title>Parcello dev stub</title><p>Run the \"Flutter: build web\" task for the real client.</p>' > clients/flutter/build/web/index.html",
+      "windows": {
+        "command": "New-Item -ItemType Directory -Force -Path clients/flutter/build/web | Out-Null; if (-not (Test-Path clients/flutter/build/web/index.html)) { Set-Content -Path clients/flutter/build/web/index.html -Value '<!doctype html><title>Parcello dev stub</title><p>Run the Flutter: build web task for the real client.</p>' }"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: Server (insecure-guest)",
+      "detail": "LAN/testing only - guest identities are spoofable. Ports 7878 forwarded by the devcontainer.",
+      "type": "shell",
+      "command": "cargo run -p parcello-server -- --insecure-guest --web-dir clients/flutter/build/web",
+      "dependsOn": ["Server: ensure placeholder web dir"],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^(.*)$",
+          "file": 1,
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "listening"
+        }
+      }
+    },
+    {
+      "label": "Run: CLI host (create room, bots welcome)",
+      "detail": "Prints the room code; then type 'addbot' a few times and 'start' in the terminal.",
+      "type": "shell",
+      "command": "cargo run -p parcello-cli -- --name host --create",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: CLI join room",
+      "type": "shell",
+      "command": "cargo run -p parcello-cli -- --name ${input:cliName} --join ${input:roomCode}",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "roomCode",
+      "type": "promptString",
+      "description": "Room code (5 letters, e.g. ABCDE)"
+    },
+    {
+      "id": "cliName",
+      "type": "promptString",
+      "description": "Your player name",
+      "default": "guest"
+    }
+  ]
+}

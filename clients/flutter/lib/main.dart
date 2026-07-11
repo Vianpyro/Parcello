@@ -517,6 +517,11 @@ class _CenterPanel extends StatelessWidget {
           Text(_forecastLine()!,
               style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
         ],
+        if (_spotlightLine() != null) ...[
+          const SizedBox(height: 2),
+          Text(_spotlightLine()!,
+              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
+        ],
         const SizedBox(height: 6),
         _Actions(s: s),
         const SizedBox(height: 6),
@@ -558,6 +563,19 @@ class _CenterPanel extends StatelessWidget {
       parts.add('upcoming: $upcoming');
     }
     return parts.join(' | ');
+  }
+
+  /// The Exposition corner's spotlight (ADR-0026): fully public, no per-seat
+  /// masking. Null when nothing is currently spotlit.
+  String? _spotlightLine() {
+    final v = s.view;
+    final c = s.content;
+    final sp = v?.spotlight;
+    if (v == null || c == null || sp == null) return null;
+    // Prefer the live room rules (host may have tweaked them, ADR-0015);
+    // fall back to the content snapshot from join.
+    final pct = s.settings?.rules.spotlightRentPct ?? c.spotlightRentPct;
+    return '${c.board[sp.tile].name} spotlighted (+$pct%, ends turn ${sp.expiresAtTurn})';
   }
 
   String _status() {
@@ -1241,6 +1259,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
     ('win_points', 'Victory points target (0=off)'),
     ('subsidiary_pool', 'Subsidiary pool factor (0=off)'),
     ('conglomerate_pool', 'Conglomerate pool factor (0=off)'),
+    ('spotlight_rent_pct', 'Spotlight rent % (0=off)'),
+    ('spotlight_duration', 'Spotlight duration (turns)'),
   ];
   late final Map<String, TextEditingController> _c;
 
@@ -1269,6 +1289,10 @@ class _SettingsPanelState extends State<_SettingsPanel> {
           TextEditingController(text: '${r.subsidiaryPoolFactor}'),
       'conglomerate_pool':
           TextEditingController(text: '${r.conglomeratePoolFactor}'),
+      'spotlight_rent_pct':
+          TextEditingController(text: '${r.spotlightRentPct}'),
+      'spotlight_duration':
+          TextEditingController(text: '${r.spotlightDurationTurns}'),
     };
   }
 
@@ -1301,6 +1325,8 @@ class _SettingsPanelState extends State<_SettingsPanel> {
         'win_victory_points': _n('win_points'),
         'subsidiary_pool_factor': _n('subsidiary_pool'),
         'conglomerate_pool_factor': _n('conglomerate_pool'),
+        'spotlight_rent_pct': _n('spotlight_rent_pct'),
+        'spotlight_duration_turns': _n('spotlight_duration'),
       },
     });
   }
@@ -1376,6 +1402,12 @@ class _SettingsPanelState extends State<_SettingsPanel> {
       (
         'Conglomerate pool',
         r.conglomeratePoolFactor == 0 ? 'off' : 'x${r.conglomeratePoolFactor}'
+      ),
+      (
+        'Spotlight',
+        r.spotlightRentPct == 0
+            ? 'off'
+            : '+${r.spotlightRentPct}% / ${r.spotlightDurationTurns} turns'
       ),
     ];
     return [

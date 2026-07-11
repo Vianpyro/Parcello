@@ -9,7 +9,7 @@ use parcello_engine::strategy::StandardRent;
 use parcello_engine::{
     ActiveMarketEvent, CardDef, CardEffect, ClientView, CommandError, CommandKind, Engine, Event,
     GameContent, GamePhase, GameState, MarketEffect, MarketEventDef, PlayerCommand, PropertyDef,
-    RentCalculator, RentModel, RuleParams, TileDef, TileKind, TurnPhase,
+    RentCalculator, RentModel, RuleParams, Spotlight, TileDef, TileKind, TurnPhase,
 };
 
 fn tile(id: &str, name: &str, kind: TileKind) -> TileDef {
@@ -3040,4 +3040,255 @@ fn wealth_tax_can_end_the_game() {
             .any(|e| matches!(e, Event::GameEnded { winner: 0 }))
     );
     assert_eq!(st.phase, GamePhase::Finished { winner: 0 });
+}
+
+/// 0 go, 1-2 two owned-property candidates (brown pair), 3 the Exposition
+/// corner, 4 jail. A 5-tile ring so a single movement card (1..=5, the
+/// default velocity range) can land directly on any tile without wrapping.
+fn spotlight_board() -> GameContent {
+    GameContent {
+        board: vec![
+            tile("go", "Go", TileKind::Go),
+            tile(
+                "ave_a",
+                "Ave A",
+                prop("brown", 60, 50, [2, 10, 30, 90, 160, 250]),
+            ),
+            tile(
+                "ave_b",
+                "Ave B",
+                prop("brown", 60, 50, [4, 20, 60, 180, 320, 450]),
+            ),
+            tile("exposition", "The Exposition", TileKind::Spotlight),
+            tile("jail", "Jail", TileKind::Jail),
+        ],
+        chance: vec![],
+        community: vec![],
+        rules: RuleParams::default(),
+        market_events: vec![],
+        forecast_gap_turns: 0,
+    }
+}
+
+fn spotlight_engine(set: impl FnOnce(&mut RuleParams)) -> Engine {
+    let mut content = spotlight_board();
+    set(&mut content.rules);
+    Engine::new(Arc::new(content)).expect("valid content")
+}
+
+#[test]
+fn spotlight_activates_on_landing_and_boosts_rent() {
+    let engine = spotlight_engine(|r| {
+        r.spotlight_rent_pct = 100;
+        r.spotlight_duration_turns = 8;
+    });
+    let st = two_players(&engine);
+
+    let (st, ev) = play(&engine, &st, "p0", 3); // 0 -> 3, the Exposition
+    let spotlit = st.spotlight.expect("a spotlight starts on landing");
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::SpotlightStarted { tile, rent_pct: 100, duration_turns: 8 }
+            if *tile == spotlit.tile
+    )));
+    assert_eq!(spotlit.expires_at_turn, st.turn_count + 8);
+
+    // Own only the spotlit tile - not its groupmate too, or the unrelated
+    // full-group monopoly double would also kick in and muddy the
+    // assertion - then have p1 land on it and pay boosted rent.
+    let mut st = st;
+    st.tiles[spotlit.tile].owner = Some(0);
+    st.current = 1;
+    st.players[1].position = 0;
+    st.turn = TurnPhase::AwaitMove;
+    let base = if spotlit.tile == 1 { 2 } else { 4 }; // ave_a/ave_b rents[0]
+    let (_, ev) = play(&engine, &st, "p1", spotlit.tile as u8);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentPaid { amount, .. } if *amount == base * 2)),
+        "+100% spotlight doubles the base rent"
+    );
+}
+
+#[test]
+fn spotlight_only_boosts_the_spotlighted_tile() {
+    let engine = spotlight_engine(|r| {
+        r.spotlight_rent_pct = 100;
+        r.spotlight_duration_turns = 8;
+    });
+    let st = two_players(&engine);
+
+    let (st, _) = play(&engine, &st, "p0", 3);
+    let spotlit_tile = st.spotlight.expect("spotlight active").tile;
+    let other_tile = if spotlit_tile == 1 { 2 } else { 1 };
+    let other_base = if other_tile == 1 { 2 } else { 4 };
+
+    // Own only the non-spotlit tile (see the note above on why not both).
+    let mut st = st;
+    st.tiles[other_tile].owner = Some(0);
+    st.current = 1;
+    st.players[1].position = 0;
+    st.turn = TurnPhase::AwaitMove;
+    let (_, ev) = play(&engine, &st, "p1", other_tile as u8);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentPaid { amount, .. } if *amount == other_base)),
+        "the non-spotlit tile's rent is unaffected"
+    );
+}
+
+#[test]
+fn spotlight_composes_with_boost_and_forecast_multiplicatively() {
+    let engine = spotlight_engine(|r| r.spotlight_rent_pct = 100);
+    let mut st = two_players(&engine);
+    st.tiles[1].owner = Some(0); // p0 owns ave_a (rents[0] = 2)
+    st.tiles[1].boosts = 1; // ADR-0012: base 2 -> boosted 3
+    st.forecast.active = Some(ActiveMarketEvent {
+        event_id: "crash".into(),
+        effect: MarketEffect::RentMultiplier,
+        magnitude_pct: -50,
+        ends_at_turn: 10,
+    });
+    st.spotlight = Some(Spotlight {
+        tile: 1,
+        expires_at_turn: 10,
+    });
+    st.current = 1;
+    st.players[1].position = 0;
+    st.turn = TurnPhase::AwaitMove;
+
+    let (_, ev) = play(&engine, &st, "p1", 1); // 0 -> 1 (ave_a)
+    // boosted 2 -> 3; -50% forecast -> 1 (floored); +100% spotlight -> 2.
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentPaid { amount: 2, .. })),
+        "boost, forecast, and spotlight compose in order"
+    );
+}
+
+#[test]
+fn spotlight_expires_exactly_at_its_scheduled_turn() {
+    let engine = engine_with(spotlight_board());
+    let mut st = two_players(&engine);
+    st.spotlight = Some(Spotlight {
+        tile: 1,
+        expires_at_turn: 1,
+    });
+    st.turn = TurnPhase::AwaitEnd;
+
+    let (st, ev) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
+    assert_eq!(st.turn_count, 1);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::SpotlightEnded { tile: 1 }))
+    );
+    assert!(st.spotlight.is_none());
+}
+
+#[test]
+fn landing_again_rerolls_and_replaces_the_active_spotlight() {
+    let engine = spotlight_engine(|r| {
+        r.spotlight_rent_pct = 100;
+        r.spotlight_duration_turns = 8;
+    });
+    let mut st = two_players(&engine);
+    st.spotlight = Some(Spotlight {
+        tile: 1,
+        expires_at_turn: 99,
+    });
+
+    let (st, ev) = play(&engine, &st, "p0", 3); // lands on the Exposition again
+    let ended_idx = ev
+        .iter()
+        .position(|e| matches!(e, Event::SpotlightEnded { tile: 1 }));
+    let started_idx = ev
+        .iter()
+        .position(|e| matches!(e, Event::SpotlightStarted { .. }));
+    assert!(
+        ended_idx.is_some() && started_idx.is_some(),
+        "the bumped spotlight ends and a new one starts"
+    );
+    assert!(
+        ended_idx.unwrap() < started_idx.unwrap(),
+        "the end event fires before the new start"
+    );
+    assert!(st.spotlight.is_some());
+}
+
+#[test]
+fn spotlight_persists_when_the_tile_changes_hands() {
+    let engine = engine_with(spotlight_board());
+    let mut st = two_players(&engine);
+    st.tiles[1].owner = Some(0); // p0 owns ave_a
+    st.spotlight = Some(Spotlight {
+        tile: 1,
+        expires_at_turn: 12,
+    });
+
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p1", offer("p0", 100, &[], 0, &["ave_a"])),
+    );
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::AcceptTrade { trade: 0 }),
+    );
+
+    assert_eq!(st.tiles[1].owner, Some(1), "the tile changed hands");
+    assert_eq!(
+        st.spotlight,
+        Some(Spotlight {
+            tile: 1,
+            expires_at_turn: 12
+        }),
+        "the spotlight is a location fact, not an owner-purchased upgrade - \
+         it survives the trade untouched (expropriation/bankruptcy are \
+         equivalently safe: neither path touches GameState.spotlight)"
+    );
+}
+
+#[test]
+fn spotlight_is_a_noop_without_any_property_tiles() {
+    let content = GameContent {
+        board: vec![
+            tile("go", "Go", TileKind::Go),
+            tile("exposition", "The Exposition", TileKind::Spotlight),
+            tile("jail", "Jail", TileKind::Jail),
+        ],
+        chance: vec![],
+        community: vec![],
+        rules: RuleParams {
+            spotlight_rent_pct: 100,
+            spotlight_duration_turns: 8,
+            ..RuleParams::default()
+        },
+        market_events: vec![],
+        forecast_gap_turns: 0,
+    };
+    let engine = engine_with(content);
+    let st = two_players(&engine);
+
+    let (st, ev) = play(&engine, &st, "p0", 1); // 0 -> 1, the Exposition
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, Event::SpotlightStarted { .. }))
+    );
+    assert!(st.spotlight.is_none());
+}
+
+#[test]
+fn same_seed_schedules_the_same_spotlight_draw() {
+    let engine = spotlight_engine(|r| {
+        r.spotlight_rent_pct = 100;
+        r.spotlight_duration_turns = 8;
+    });
+    let st1 = two_players(&engine);
+    let st2 = two_players(&engine);
+
+    let (st1, _) = play(&engine, &st1, "p0", 3);
+    let (st2, _) = play(&engine, &st2, "p0", 3);
+
+    assert_eq!(st1.spotlight, st2.spotlight);
 }

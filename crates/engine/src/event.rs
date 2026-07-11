@@ -239,4 +239,16 @@ pub enum Event {
     MarketEventExpired {
         event_id: String,
     },
+    /// The Exposition corner (ADR-0026) put a property in the spotlight.
+    /// Landing again while one is active first emits `SpotlightEnded` for
+    /// the bumped tile (even if the redraw lands on the same one), then
+    /// this.
+    SpotlightStarted {
+        tile: usize,
+        rent_pct: i64,
+        duration_turns: i64,
+    },
+    SpotlightEnded {
+        tile: usize,
+    },
 }

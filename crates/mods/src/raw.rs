@@ -46,6 +46,7 @@ impl TileRaw {
             "jail" => TileKind::Jail,
             "go_to_jail" => TileKind::GoToJail,
             "free_parking" => TileKind::FreeParking,
+            "spotlight" => TileKind::Spotlight,
             "tax" => TileKind::Tax {
                 amount: self
                     .amount

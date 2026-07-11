@@ -51,6 +51,13 @@ pub struct GameState {
     /// content's `market_events` pool is empty.
     #[serde(default)]
     pub forecast: MarketForecast,
+    /// The property currently in the Exposition corner's spotlight
+    /// (ADR-0026), if any. Deliberately a `GameState` field rather than a
+    /// `TileState` one (unlike the ADR-0012 boost): a fact about the
+    /// location/a table-wide event, not an owner-purchased upgrade, so it
+    /// survives trades/expropriation/bankruptcy untouched.
+    #[serde(default)]
+    pub spotlight: Option<Spotlight>,
 }
 
 /// A standing offer: `from` gives `give_*` and receives `receive_*`.
@@ -211,6 +218,15 @@ pub struct MarketForecast {
     pub active: Option<ActiveMarketEvent>,
 }
 
+/// The property currently in the Exposition corner's spotlight (ADR-0026):
+/// its rent is boosted until `expires_at_turn`. Public in `ClientView`
+/// unconditionally - the whole point is that the table sees the hot tile.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Spotlight {
+    pub tile: usize,
+    pub expires_at_turn: u32,
+}
+
 impl MarketForecast {
     /// Draws one event from `content.market_events` and schedules it after
     /// whatever is already queued (or after `now` if the queue is empty),
@@ -287,7 +303,21 @@ impl GameState {
             subsidiaries_available: pool_size(rules.subsidiary_pool_factor),
             conglomerates_available: pool_size(rules.conglomerate_pool_factor),
             forecast,
+            spotlight: None,
         }
+    }
+
+    /// Draws a uniformly random property tile via the seeded RNG
+    /// (ADR-0026), for the Exposition corner's landing draw. `None` when
+    /// the board has no property tiles (mod-broken content degrades to a
+    /// no-op, matching `DeckState::draw`'s empty-deck handling).
+    pub(crate) fn draw_spotlight_tile(&mut self, content: &GameContent) -> Option<usize> {
+        let candidates = content.property_tiles();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = rng::below(&mut self.rng, candidates.len() as u64) as usize;
+        Some(candidates[idx])
     }
 
     pub fn alive_players(&self) -> impl Iterator<Item = usize> + '_ {

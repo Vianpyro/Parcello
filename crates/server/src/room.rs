@@ -224,6 +224,11 @@ fn clamp_settings(mut s: RoomSettings) -> RoomSettings {
     // above - a much smaller ceiling is enough (ADR-0019).
     r.subsidiary_pool_factor = r.subsidiary_pool_factor.clamp(0, 100);
     r.conglomerate_pool_factor = r.conglomerate_pool_factor.clamp(0, 100);
+    // A multiplier like the forecast's magnitude_pct, not a pure cost like
+    // expropriation/rent_boost - a -100 floor keeps the spotlight rent
+    // calculator's `.max(0)` meaningful rather than degenerate (ADR-0026).
+    r.spotlight_rent_pct = r.spotlight_rent_pct.clamp(-100, 1_000);
+    r.spotlight_duration_turns = r.spotlight_duration_turns.clamp(0, 500);
     s
 }
 
@@ -1284,7 +1289,7 @@ mod tests {
         // The new game is live: a move from the acting player is accepted.
         room.send(RoomCmd::Game {
             player_id: "guest:alice".into(),
-            cmd: CommandKind::PlayMovementCard { value: 1 },
+            cmd: CommandKind::PlayMovementCard { value: 2 },
         })
         .await
         .expect("room task alive");
@@ -2014,7 +2019,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(7)).await;
         room.send(RoomCmd::Game {
             player_id: "guest:alice".into(),
-            cmd: CommandKind::PlayMovementCard { value: 1 },
+            cmd: CommandKind::PlayMovementCard { value: 2 },
         })
         .await
         .expect("room task alive");
@@ -2126,15 +2131,17 @@ mod tests {
         mut current: usize,
     ) -> usize {
         tokio::time::timeout(Duration::from_secs(300), async {
-            // A fresh game deals every seat the full hand; card 1 is always
-            // available for the very first move.
+            // A fresh game deals every seat the full hand; the base mod's
+            // velocity_min (currently 2, mods/base/data/rules.toml) is
+            // always available for the very first move - keep these two
+            // literals in step with that file if it ever changes.
             let mut jailed = false;
             let mut jail_route: Option<Vec<u8>> = None;
-            let mut value = 1u8;
+            let mut value = 2u8;
             loop {
                 let cmd = if jailed {
                     CommandKind::ChooseLegalRoute {
-                        order: vec![1, 2, 3, 4, 5],
+                        order: vec![2, 3, 4, 5, 6],
                     }
                 } else if let Some(route) = &jail_route {
                     CommandKind::PlayMovementCard { value: route[0] }
@@ -2162,7 +2169,7 @@ mod tests {
                 current = view.current;
                 jailed = view.players[current].in_jail;
                 jail_route = view.players[current].jail_route.clone();
-                value = *view.players[current].hand.first().unwrap_or(&1);
+                value = *view.players[current].hand.first().unwrap_or(&2);
             }
         })
         .await

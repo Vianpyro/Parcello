@@ -857,6 +857,17 @@ impl Ctx {
             Event::MarketEventExpired { event_id } => {
                 format!("market event ended: {}", self.market_event_name(event_id))
             }
+            Event::SpotlightStarted {
+                tile,
+                rent_pct,
+                duration_turns,
+            } => format!(
+                "The Exposition spotlights {} (+{rent_pct}% rent for {duration_turns} turns)",
+                self.tile_name(*tile)
+            ),
+            Event::SpotlightEnded { tile } => {
+                format!("the spotlight on {} fades", self.tile_name(*tile))
+            }
         }
     }
 

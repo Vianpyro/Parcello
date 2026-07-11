@@ -69,10 +69,11 @@ muted tones rather than classic Monopoly brights:
 | green | `#3F6B52` |
 | navy | `#2E3A5C` |
 
-The base mod also has a ninth group, `resort` (the two `group_scaled`
-tiles). Resorts are not one of the eight: render them as parchment
-cards with a full `pc-gold` edge band - proposal, to confirm on the
-first board render.
+The base mod also has a ninth group, `resort` (the four `group_scaled`
+tiles, evenly spaced every 8 tiles - ADR-0026's board relayout).
+Resorts are not one of the eight: render them as parchment cards with a
+full `pc-gold` edge band - proposal, to confirm on the first board
+render.
 
 ### Pawn colours (up to 6 players)
 
@@ -105,9 +106,11 @@ Decided 2026-07: French AND English from the start via Flutter
 gen-l10n (l10n.yaml + two ARB files), no hardcoded UI strings; the
 scaffolding lands with the first restyled screen. Repo, code and docs
 stay English. Property names come from mod data (plain ASCII, a data
-concern); corner tiles are localized by KIND in the client (Go / Free
-Parking / Jail / Go To Jail and their French equivalents) - Parcello's
-own vocabulary, never the reference games' trade-dress names.
+concern); corner tiles are localized by KIND in the client (Go / The
+Exposition / Jail / Go To Jail and their French equivalents) -
+Parcello's own vocabulary, never the reference games' trade-dress
+names. The Exposition (ADR-0026) replaced the old no-op Free Parking
+corner with the property-spotlight mechanic.
 
 ## Screen: loading
 

@@ -148,6 +148,9 @@ class BoardWidget extends StatelessWidget {
   Widget _tile(int i, {required double cellW, bool staticPawns = false}) {
     final def = content.board[i];
     final ts = view?.tiles.elementAtOrNull(i);
+    // The Exposition corner's spotlight (ADR-0026): fully public, so this
+    // check needs no seat-masking, unlike ts?.owner.
+    final spotlit = view?.spotlight?.tile == i;
     // Text scales with the cell so it stays legible on any window size.
     final nameSize = (cellW * 0.115).clamp(11.0, 17.0);
     final metaSize = (cellW * 0.095).clamp(9.0, 13.0);
@@ -163,9 +166,11 @@ class BoardWidget extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFFF4F7EF),
           borderRadius: BorderRadius.circular(2),
-          border: ts?.owner != null && ts!.owner == mySeat
-              ? Border.all(color: const Color(0xFF2F6F3E), width: 2)
-              : null,
+          border: spotlit
+              ? Border.all(color: const Color(0xFFD8B45A), width: 3)
+              : ts?.owner != null && ts!.owner == mySeat
+                  ? Border.all(color: const Color(0xFF2F6F3E), width: 2)
+                  : null,
         ),
         child: Stack(children: [
           Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -189,17 +194,25 @@ class BoardWidget extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 3),
               child: Text(
-                _meta(def, ts),
+                _meta(def, ts, spotlit: spotlit),
                 style: TextStyle(
                   fontSize: metaSize,
                   fontWeight: FontWeight.w700,
                   color: ts?.mortgaged == true
                       ? const Color(0xFFC0564F)
-                      : const Color(0xFF555555),
+                      : spotlit
+                          ? const Color(0xFFA9812F)
+                          : const Color(0xFF555555),
                 ),
               ),
             ),
           ]),
+          if (spotlit)
+            Positioned(
+              top: 2,
+              left: 2,
+              child: Text('✨', style: TextStyle(fontSize: ownerSz)),
+            ),
           if (ts?.owner != null)
             Positioned(
               top: 2,
@@ -246,7 +259,7 @@ class BoardWidget extends StatelessWidget {
     );
   }
 
-  String _meta(TileDef def, TileState? ts) {
+  String _meta(TileDef def, TileState? ts, {bool spotlit = false}) {
     final parts = <String>[];
     if (def.isProperty) parts.add('\$${def.price}');
     if (def.amount != null) parts.add('pay \$${def.amount}');
@@ -255,6 +268,7 @@ class BoardWidget extends StatelessWidget {
     }
     if (ts != null && ts.boosts > 0) parts.add('⚡${ts.boosts}');
     if (ts?.mortgaged == true) parts.add('MORT.');
+    if (spotlit) parts.add('✨ SPOTLIGHT');
     return parts.join(' ');
   }
 }

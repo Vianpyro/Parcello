@@ -207,6 +207,40 @@ rents = [25, 50, 100, 200, 0, 0]
 }
 
 #[test]
+fn spotlight_tile_type_parses() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_mod(
+        tmp.path(),
+        "expo",
+        &[(
+            "properties.toml",
+            r#"
+[[tile]]
+id = "go"
+name = "Go"
+type = "go"
+
+[[tile]]
+id = "jail"
+name = "Jail"
+type = "jail"
+
+[[tile]]
+id = "exposition"
+name = "The Exposition"
+type = "spotlight"
+"#,
+        )],
+    );
+
+    let resolved = resolve(tmp.path(), &["expo".into()]).unwrap();
+    assert!(matches!(
+        &resolved.content.board[2].kind,
+        TileKind::Spotlight
+    ));
+}
+
+#[test]
 fn missing_mod_directory_is_an_error() {
     let tmp = tempfile::tempdir().unwrap();
     let err = resolve(tmp.path(), &["ghost".into()]).unwrap_err();

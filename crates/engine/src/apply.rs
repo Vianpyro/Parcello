@@ -9,7 +9,7 @@ use crate::command::{CommandKind, PlayerCommand};
 use crate::content::{CardEffect, GameContent, MarketEffect, PropertyDef, RentModel, TileKind};
 use crate::error::CommandError;
 use crate::event::{DeckKind, Event};
-use crate::state::{ActiveMarketEvent, GamePhase, GameState, TradeOffer, TurnPhase};
+use crate::state::{ActiveMarketEvent, GamePhase, GameState, Spotlight, TradeOffer, TurnPhase};
 use crate::{Engine, Strategies};
 
 /// Card chains ("advance to X" landing on another card tile) are bounded to
@@ -1032,6 +1032,57 @@ impl<'e> Exec<'e> {
         }
     }
 
+    // -- Property spotlight (ADR-0026) ---------------------------------------
+
+    /// Applies the active spotlight's bonus to `base` if it targets `tile`
+    /// (ADR-0026); a no-op otherwise, including while nothing is spotlit.
+    /// Composes with `boosted_rent` and `apply_market_multiplier` as the
+    /// third multiplicative step.
+    fn apply_spotlight_multiplier(&self, tile: usize, base: i64) -> i64 {
+        match &self.st.spotlight {
+            Some(sp) if sp.tile == tile => {
+                (base * (100 + self.content.rules.spotlight_rent_pct) / 100).max(0)
+            }
+            _ => base,
+        }
+    }
+
+    /// Landing on the Exposition corner (ADR-0026): draws a random property
+    /// via the seeded RNG and puts it in the spotlight, bumping whatever was
+    /// previously spotlit. A no-op (no event, no state change) when the
+    /// board has no property tiles at all.
+    fn enter_spotlight(&mut self) {
+        let Some(tile) = self.st.draw_spotlight_tile(self.content) else {
+            return;
+        };
+        if let Some(old) = self.st.spotlight.take() {
+            self.ev.push(Event::SpotlightEnded { tile: old.tile });
+        }
+        let duration = self.content.rules.spotlight_duration_turns;
+        self.st.spotlight = Some(Spotlight {
+            tile,
+            expires_at_turn: self.st.turn_count + duration.max(0) as u32,
+        });
+        self.ev.push(Event::SpotlightStarted {
+            tile,
+            rent_pct: self.content.rules.spotlight_rent_pct,
+            duration_turns: duration,
+        });
+    }
+
+    /// Turn-transition tick: expires the spotlight once its window closes.
+    /// Unlike `tick_forecast` there is no queue to refill - a new spotlight
+    /// only ever starts from a fresh landing on the corner.
+    fn tick_spotlight(&mut self) {
+        if let Some(sp) = &self.st.spotlight
+            && self.st.turn_count >= sp.expires_at_turn
+        {
+            let tile = sp.tile;
+            self.st.spotlight = None;
+            self.ev.push(Event::SpotlightEnded { tile });
+        }
+    }
+
     // -- Landing resolution -----------------------------------------------------
 
     fn resolve_landing(&mut self, p: usize, depth: u8) {
@@ -1042,6 +1093,10 @@ impl<'e> Exec<'e> {
         let tile = self.st.players[p].position;
         match &self.content.board[tile].kind {
             TileKind::Go | TileKind::Jail | TileKind::FreeParking => {
+                self.st.turn = TurnPhase::AwaitEnd;
+            }
+            TileKind::Spotlight => {
+                self.enter_spotlight();
                 self.st.turn = TurnPhase::AwaitEnd;
             }
             TileKind::GoToJail => {
@@ -1085,6 +1140,7 @@ impl<'e> Exec<'e> {
                     let base = self.strat.rent.rent(self.content, &self.st, tile);
                     let rent = Self::boosted_rent(base, self.st.tiles[tile].boosts);
                     let rent = self.apply_market_multiplier(MarketEffect::RentMultiplier, rent);
+                    let rent = self.apply_spotlight_multiplier(tile, rent);
                     self.ev.push(Event::RentPaid {
                         from: p,
                         to: owner,
@@ -1296,6 +1352,7 @@ impl<'e> Exec<'e> {
         self.st.turn_count += 1;
         self.ev.push(Event::TurnStarted { player: next });
         self.tick_forecast();
+        self.tick_spotlight();
     }
 
     /// Round number (ADR-0020): the minimum hands fully cycled across

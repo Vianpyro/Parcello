@@ -127,7 +127,7 @@ ADR-0025); only the CLI accepts a pasted token instead.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 124 tests, formatting, and lints (all must pass before a PR)
+# Rust: 133 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -235,8 +235,9 @@ mods/<id>/
 ```
 
 The default `mods/base` is the **32-tile fast board** (a 9x9 ring, no
-Community Chest, two "resorts" instead of four stations; the design goal is
-fast, dynamic games). Base is loaded first; merge is last-loaded-wins per
+Community Chest, four "resorts" evenly spaced every 8 tiles instead of four
+stations, one chance tile, one tax tile; the design goal is fast, dynamic
+games). Base is loaded first; merge is last-loaded-wins per
 key: tiles and cards replace in place by id, rule scalars override by
 name; every conflict is logged at WARN. Unknown rule keys are ignored
 with a warning. The resolved bundle is pushed to clients on join, so
@@ -251,13 +252,16 @@ are allowlist-validated server-side. Example: `mods/highroller`
 V1 hook points: `rules.{starting_balance, go_salary, velocity_min,
 velocity_max, max_houses_per_property, bankruptcy_threshold,
 expropriation, rent_boost, win_full_groups, win_victory_points,
-subsidiary_pool_factor, conglomerate_pool_factor}` (booleans as 0/1;
+subsidiary_pool_factor, conglomerate_pool_factor, spotlight_rent_pct,
+spotlight_duration_turns}` (booleans as 0/1;
 `velocity_min`/`velocity_max` size the movement card hand (ADR-0017;
 also the fixed permutation length for a Legal Route, ADR-0024),
 `expropriation`/`rent_boost` are cost percents, `win_full_groups` a group
-count, `win_victory_points` a point target (ADR-0020), and the two pool
-factors a multiplier scaling `round(factor * sqrt(players))`, 0 = off),
-`cards.chance[*]`,
+count, `win_victory_points` a point target (ADR-0020), the two pool
+factors a multiplier scaling `round(factor * sqrt(players))`, 0 = off,
+and `spotlight_rent_pct`/`spotlight_duration_turns` the Exposition
+corner's rent bonus percent and window length in turns (ADR-0026, 0 =
+off, see below), `cards.chance[*]`,
 `cards.community[*]`, `properties[*]` (including per-tile `rent_model`:
 `houses` (default) or `group_scaled` for stations; the scaled model needs
 no `house_cost` and cannot be built on),
@@ -369,7 +373,15 @@ view - the draws already made, never the generator (seed/deck order stay
 hidden) - so players can plan around it; `gap_turns` apart, chained,
 deterministic from the game seed. The base mod ships a starter pool (market
 bubble / crash / tax audit) with deliberately rough numbers - calibration is
-a playtest task, never an engine change.
+a playtest task, never an engine change. The Exposition corner (ADR-0026,
+replaces the old no-op Free Parking): landing there draws one random
+property tile via the seeded RNG and puts it in the spotlight for
+`spotlight_duration_turns` turns, boosting its rent by `spotlight_rent_pct`
+- composes multiplicatively with the rent boost and market forecast steps
+above. Unlike the rent boost, the spotlight is a fact about the tile, not
+the owner: it survives a trade, expropriation, or bankruptcy transfer of
+the spotlit property untouched. Landing on the corner again re-rolls and
+replaces whichever tile was previously spotlit.
 
 Deliberate V1 simplifications: no immediate interest charge when mortgaged
 tiles change hands (trades and bankruptcy transfer them as-is);

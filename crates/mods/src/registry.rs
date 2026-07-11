@@ -107,6 +107,8 @@ impl RegistryBuilder {
                 "win_victory_points" => rules.win_victory_points = *value,
                 "subsidiary_pool_factor" => rules.subsidiary_pool_factor = *value,
                 "conglomerate_pool_factor" => rules.conglomerate_pool_factor = *value,
+                "spotlight_rent_pct" => rules.spotlight_rent_pct = *value,
+                "spotlight_duration_turns" => rules.spotlight_duration_turns = *value,
                 _ => warn!(key, value, "unknown rule key ignored"),
             }
         }

@@ -72,6 +72,9 @@ class GameContent {
   final int rentBoost;
   /// Victory-point race target (ADR-0020); 0 = off.
   final int winVictoryPoints;
+  /// The Exposition corner's spotlight rent bonus percent (ADR-0026); 0 =
+  /// off.
+  final int spotlightRentPct;
 
   GameContent.fromJson(Map<String, dynamic> resolved)
       : board = (resolved['content']['board'] as List)
@@ -85,6 +88,8 @@ class GameContent {
         rentBoost = resolved['content']['rules']['rent_boost'] as int? ?? 0,
         winVictoryPoints =
             resolved['content']['rules']['win_victory_points'] as int? ?? 0,
+        spotlightRentPct =
+            resolved['content']['rules']['spotlight_rent_pct'] as int? ?? 0,
         modIds = (resolved['mods'] as List)
             .map((m) => m['id'] as String)
             .toList();
@@ -118,6 +123,11 @@ class RuleParams {
   /// Shared building pool sizing factors (ADR-0019); 0 disables pooling.
   final int subsidiaryPoolFactor;
   final int conglomeratePoolFactor;
+  /// The Exposition corner's spotlight (ADR-0026): rent bonus percent and
+  /// duration in turns; 0/0 disables (no `Spotlight` tile ever triggers it
+  /// regardless).
+  final int spotlightRentPct;
+  final int spotlightDurationTurns;
 
   RuleParams.fromJson(Map<String, dynamic> j)
       : startingBalance = j['starting_balance'] as int,
@@ -131,7 +141,9 @@ class RuleParams {
         winFullGroups = j['win_full_groups'] as int? ?? 0,
         winVictoryPoints = j['win_victory_points'] as int? ?? 0,
         subsidiaryPoolFactor = j['subsidiary_pool_factor'] as int? ?? 0,
-        conglomeratePoolFactor = j['conglomerate_pool_factor'] as int? ?? 0;
+        conglomeratePoolFactor = j['conglomerate_pool_factor'] as int? ?? 0,
+        spotlightRentPct = j['spotlight_rent_pct'] as int? ?? 0,
+        spotlightDurationTurns = j['spotlight_duration_turns'] as int? ?? 0;
 }
 
 /// Per-room settings the host edits in the lobby (ADR-0015).
@@ -282,6 +294,17 @@ class MarketForecast {
             : null;
 }
 
+/// The property currently in the Exposition corner's spotlight (ADR-0026),
+/// if any - fully public, never masked per-seat.
+class Spotlight {
+  final int tile;
+  final int expiresAtTurn;
+
+  Spotlight.fromJson(Map<String, dynamic> j)
+      : tile = j['tile'] as int,
+        expiresAtTurn = j['expires_at_turn'] as int;
+}
+
 class ClientView {
   final bool finished;
   final int? winner;
@@ -294,6 +317,8 @@ class ClientView {
   final int? subsidiariesAvailable;
   final int? conglomeratesAvailable;
   final MarketForecast forecast;
+  /// The Exposition corner's current spotlight (ADR-0026), if any.
+  final Spotlight? spotlight;
 
   ClientView.fromJson(Map<String, dynamic> j)
       : finished = j['phase']['type'] == 'finished',
@@ -311,7 +336,10 @@ class ClientView {
             .toList(),
         subsidiariesAvailable = j['subsidiaries_available'] as int?,
         conglomeratesAvailable = j['conglomerates_available'] as int?,
-        forecast = MarketForecast.fromJson(j['forecast'] as Map<String, dynamic>?);
+        forecast = MarketForecast.fromJson(j['forecast'] as Map<String, dynamic>?),
+        spotlight = j['spotlight'] != null
+            ? Spotlight.fromJson(j['spotlight'] as Map<String, dynamic>)
+            : null;
 }
 
 String _identityEventName(String id) => id;
@@ -428,6 +456,13 @@ String describeEvent(
           : "Market event: ${m(e['event_id'] as String)} ($sign$pct% for $duration turns)";
     case 'market_event_expired':
       return "Market event ended: ${m(e['event_id'] as String)}";
+    case 'spotlight_started':
+      final pct = e['rent_pct'] as int;
+      final duration = e['duration_turns'] as int;
+      return "The Exposition spotlights ${t(e['tile'])} "
+          "(+$pct% rent for $duration turns)";
+    case 'spotlight_ended':
+      return "The spotlight on ${t(e['tile'])} fades";
     default:
       return e.toString();
   }

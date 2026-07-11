@@ -40,10 +40,15 @@ pub enum TileKind {
     Property(PropertyDef),
     Chance,
     Community,
-    Tax { amount: i64 },
+    Tax {
+        amount: i64,
+    },
     Jail,
     GoToJail,
     FreeParking,
+    /// The Exposition corner (ADR-0026): landing here puts a random
+    /// property tile in the spotlight (boosted rent for a while).
+    Spotlight,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -177,6 +182,15 @@ pub struct RuleParams {
     /// for the top build level; 0 disables pooling.
     #[serde(default)]
     pub conglomerate_pool_factor: i64,
+    /// Rent bonus percent while a property is in the Exposition corner's
+    /// spotlight (ADR-0026); 0 disables (a mod with no `Spotlight` tile on
+    /// its board never triggers this regardless).
+    #[serde(default)]
+    pub spotlight_rent_pct: i64,
+    /// How many turns a spotlight stays active once drawn (ADR-0026); 0
+    /// disables (see `spotlight_rent_pct`).
+    #[serde(default)]
+    pub spotlight_duration_turns: i64,
     /// Velocity deck (ADR-0017): the movement hand is every integer in
     /// `velocity_min..=velocity_max`, dealt full at game start and
     /// refilled the instant it empties. Unlike every other scalar here,
@@ -210,6 +224,8 @@ impl Default for RuleParams {
             win_victory_points: 0,
             subsidiary_pool_factor: 0,
             conglomerate_pool_factor: 0,
+            spotlight_rent_pct: 0,
+            spotlight_duration_turns: 0,
             velocity_min: default_velocity_min(),
             velocity_max: default_velocity_max(),
         }
@@ -324,5 +340,15 @@ impl GameContent {
     /// Looks up a market event definition by id (ADR-0021).
     pub fn market_event(&self, id: &str) -> Option<&MarketEventDef> {
         self.market_events.iter().find(|e| e.id == id)
+    }
+
+    /// Indices of every property tile, any group - the Exposition corner's
+    /// random draw (ADR-0026).
+    pub fn property_tiles(&self) -> Vec<usize> {
+        self.board
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| matches!(t.kind, TileKind::Property(_)).then_some(i))
+            .collect()
     }
 }

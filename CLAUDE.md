@@ -59,7 +59,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 124 tests, all must pass
+cargo test  --workspace --locked          # 133 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -200,7 +200,8 @@ Mods: the server resolves a default set at boot (`--mod`), and each room
 may override it at creation via the optional `mods` field on Create
 (ADR-0006; ids are allowlist-validated in `ws.rs` because they become
 filesystem paths). Default `mods/base` is the 32-tile fast board (9x9
-ring, no Community Chest, two resorts, `docs/business-tour-direction.md`);
+ring, no Community Chest, four resorts evenly spaced every 8 tiles, one
+chance tile, one tax tile, `docs/business-tour-direction.md`);
 `mods/highroller` is a rules-only example. Clients render any `4*(d-1)`
 square ring (32, 40, ...); other tile counts fall back to a wrap layout.
 
@@ -273,7 +274,16 @@ ADR-0012) - both on in the base fast mod. Public market forecast
 (ADR-0021, `data/events.toml`): a seeded rolling queue of the next 3
 scheduled events plus whichever is active - `rent_multiplier`,
 `acquisition_multiplier`, one-shot `wealth_tax` - `gap_turns` apart,
-public in every view (draws already made, never the generator).
+public in every view (draws already made, never the generator). The
+Exposition corner (`TileKind::Spotlight`, ADR-0026, replaces the old
+no-op `free_parking` in `mods/base`): landing there draws one random
+property tile via the seeded RNG and puts it in the spotlight -
+`rules.spotlight_rent_pct`/`spotlight_duration_turns` (100%/8 turns in
+the base mod, 0 = off) - composing multiplicatively with the boost and
+forecast above; state lives on `GameState`, not `TileState`, so it
+survives a trade/expropriation/bankruptcy of the spotlit tile untouched
+(unlike the ADR-0012 boost, which resets on transfer); re-landing
+re-rolls and replaces whichever tile was spotlit.
 
 Deliberate simplifications (documented, do not "fix" without discussion):
 no immediate interest when mortgaged tiles change hands; jail cards are a
