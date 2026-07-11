@@ -5,12 +5,12 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'protocol.dart';
+import 'session_storage.dart';
 import 'sfx.dart';
 
 class GameSession extends ChangeNotifier {
@@ -18,28 +18,18 @@ class GameSession extends ChangeNotifier {
   StreamSubscription? _sub;
 
   /// Reconnect tokens by room code (ADR-0008), persisted so a restarted
-  /// client can still prove seat ownership. Best-effort: IO errors only
-  /// cost the persistence, never the session.
+  /// client can still prove seat ownership (file on native, localStorage on
+  /// web - see session_storage.dart). Best-effort: storage errors only cost
+  /// the persistence, never the session.
   final Map<String, String> _reconnectTokens = {};
-  late final File _tokenFile = () {
-    final base =
-        Platform.environment['APPDATA'] ?? Platform.environment['HOME'] ?? '.';
-    return File('$base/parcello/reconnect.json');
-  }();
 
   GameSession() {
-    try {
-      final saved = jsonDecode(_tokenFile.readAsStringSync()) as Map;
-      _reconnectTokens.addAll(saved.cast<String, String>());
-    } catch (_) {}
+    _reconnectTokens.addAll(loadReconnectTokens());
   }
 
   void _saveToken(String code, String token) {
     _reconnectTokens[code] = token;
-    try {
-      _tokenFile.parent.createSync(recursive: true);
-      _tokenFile.writeAsStringSync(jsonEncode(_reconnectTokens));
-    } catch (_) {}
+    saveReconnectTokens(_reconnectTokens);
   }
 
   // ponytail: the issuer URL rides in the reconnect-token file under a

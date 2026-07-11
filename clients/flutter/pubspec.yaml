@@ -11,9 +11,14 @@ dependencies:
   crypto: ^3.0.7
   flutter:
     sdk: flutter
+  http: ^1.2.0
+  web: ^1.1.0
   web_socket_channel: ^3.0.3
   # audioplayers: sound-effect playback (assets/sfx/). Present but not wired
   # yet - the SFX hookup is the next step now that Developer Mode is on.
+  # http: portable HTTP client (OIDC discovery/token exchange, web+native).
+  # web: browser bindings (OIDC popup flow, local storage) - web target only,
+  # unused on native builds but harmless to depend on everywhere.
 
 dev_dependencies:
   flutter_test:

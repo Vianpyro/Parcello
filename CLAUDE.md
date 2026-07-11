@@ -6,8 +6,10 @@ ruleset that closes the gap is DONE - ADRs 0017-0024, summary and build
 order (complete) in `docs/business-tour-direction.md` (read both before
 touching rules). Authoritative Rust server, thin clients, community-hosted
 servers (Minecraft model), data-driven TOML mods. This repo is the
-complete, playable backend V1: pure engine, mod layer, WebSocket server
-with an embedded browser client, terminal test client, SQLite history.
+complete, playable backend V1: pure engine, mod layer, WebSocket server,
+terminal test client, SQLite history. The one client (`clients/flutter`)
+covers desktop and web from a single Dart codebase (ADR-0025) - the server
+serves the Flutter Web build itself, from a runtime `--web-dir`.
 
 Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
@@ -168,8 +170,11 @@ architecture doc section 5; dependencies point downward only):
   multicast to `239.255.0.1:55888` with optional broadcast fallback so LAN
   clients find the server without a URL; best-effort, detached, no admin
   control plane - local process management is the client's job, ADR-0016),
-  `web/index.html` (embedded via `include_str!` - the server
-  binary is the whole deployment).
+  the Flutter Web client (served from disk at runtime via `tower-http`'s
+  `ServeDir`, `--web-dir`/`PARCELLO_WEB_DIR`, default `web` - mirrors
+  `--mods-dir`'s pattern, not compiled into the binary; fails loudly at
+  boot if the directory has no `index.html`, same idiom as
+  `parcello_mods::resolve`'s `?` propagation - ADR-0025).
 - `crates/cli` - terminal test harness; keep it in sync with new commands
   (it is the cheapest end-to-end protocol check; `addbot`/`rmbot` and
   `set <field> <value>` stdin commands too, ADR-0015; the `discover` bin
@@ -178,11 +183,18 @@ architecture doc section 5; dependencies point downward only):
   Route, declines trades) so games can be playtested without volunteers;
   soak it with 3 bots when touching turn flow. Server-side bots
   (ADR-0014) reuse the same heuristic.
-- `clients/flutter` - Flutter client (Windows desktop first; Dart, not part
-  of the cargo workspace). Mirrors the web client feature-for-feature; see
-  its README. Requires the Flutter SDK (`flutter analyze && flutter test`).
-  When adding an Event or CommandKind, update it too (protocol.dart +
-  main.dart), same drill as `web/index.html` and the CLI.
+- `clients/flutter` - Flutter client, one codebase for desktop (Windows,
+  Linux, macOS) and web (ADR-0025; Dart, not part of the cargo workspace).
+  See its README. Requires the Flutter SDK (`flutter analyze && flutter
+  test`, `flutter build web --release` for the web target). Four files
+  differ per platform via conditional export (`dart.library.js_interop`),
+  since `dart:io` doesn't exist on web: `oidc.dart` (system browser +
+  loopback redirect on desktop vs. popup + `postMessage` on web),
+  `lan_discovery.dart` and `server_manager.dart` (native-only, no browser
+  equivalent - stubbed out on web, hidden behind `kIsWeb` in the menu),
+  `session_storage.dart` (a file on desktop, `localStorage` on web). When
+  adding an Event or CommandKind, update it too (protocol.dart +
+  main.dart), same drill as the CLI.
 
 Mods: the server resolves a default set at boot (`--mod`), and each room
 may override it at creation via the optional `mods` field on Create
@@ -296,13 +308,19 @@ lobby-editable (ADR-0015).
 - `clippy --all-targets -- -D warnings` and `cargo fmt` now pass locally
   (first run reformatted the tree and fixed one `unit_arg` lint). Keep them
   green; fix warnings rather than silencing them.
-- `Dockerfile` builds and the image serves `/healthz` (verified locally,
-  Docker 28). Multi-stage rust:1.96-slim -> bookworm-slim.
-- `crates/server/web/index.html` has never rendered in a real browser.
-  Protocol coverage was verified mechanically (all 32 Event variants and
-  all 17 CommandKind tags match the enums), so remaining risk is
-  layout/UX. When adding an Event or CommandKind, update this file AND the
-  CLI, and re-check field names against the enums.
+- `Dockerfile` builds and the image serves `/healthz`, `/`, and static
+  assets correctly (verified locally end-to-end, including the `webbuild`
+  stage and the `--web-dir`/fail-loud boot check - Docker 28). Multi-stage:
+  a self-contained Flutter Web build stage (manual checksummed SDK
+  install, not a third-party image) feeds the final debian:bookworm-slim
+  stage alongside rust:1.96-slim -> bookworm-slim for the server.
+- The web OIDC flow (`oidc_login_web.dart`, popup + `postMessage`) has
+  never been exercised against a real browser + real identity provider -
+  only `flutter build web` compilation was verified. Popup-blocker
+  behavior varies by browser (Safari is the strictest); treat this as a
+  required manual QA step before relying on it, not CI-covered. The
+  native flow (`oidc_login_io.dart`) is unchanged and still covered by
+  `test/oidc_test.dart`.
 
 ## Roadmap (agreed next steps, roughly in order of value)
 

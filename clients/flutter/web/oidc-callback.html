@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Parcello web OIDC redirect target. Registered as an additional
+     redirect_uri on the identity provider (docs/deployment.md), alongside
+     the native client's http://127.0.0.1:* loopback one. Forwards the
+     authorization response back to the opener window via postMessage and
+     closes itself; see lib/oidc_login_web.dart. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Parcello sign-in</title>
+</head>
+<body>
+<p>Signed in. You can close this window.</p>
+<script>
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    var payload = JSON.stringify({
+      source: 'parcello-oidc-callback',
+      code: params.get('code'),
+      state: params.get('state'),
+      error: params.get('error'),
+    });
+    if (window.opener) {
+      window.opener.postMessage(payload, window.location.origin);
+    }
+    window.close();
+  })();
+</script>
+</body>
+</html>

@@ -16,7 +16,7 @@ Nginx Proxy Manager + Cloudflare); the compose file only publishes two
 plain-HTTP ports.
 
 ```
-players ── Cloudflare ── Nginx Proxy Manager ──┬── :7878  parcello (WebSocket + embedded web client)
+players ── Cloudflare ── Nginx Proxy Manager ──┬── :7878  parcello (WebSocket + Flutter Web client)
            (DNS+proxy)   (TLS, Let's Encrypt)  └── :8080  rauthy   (OIDC issuer, admin UI)
                                                      volumes: parcello-data, rauthy-data
 ```
@@ -77,12 +77,19 @@ unset). Then create the client the game clients will log in through:
 1. Clients -> New client, id `parcello` (must equal
    `PARCELLO_IDENTITY_AUDIENCE`).
 2. Public client (no secret), flow `authorization_code`, **PKCE S256
-   required** - the Flutter client is a native public client.
-3. Redirect URI: `http://127.0.0.1:*` - the Flutter login
-   (`clients/flutter/lib/oidc.dart`) opens the system browser and
-   listens on an ephemeral loopback port (RFC 8252), so the port must
-   stay a wildcard. If your Rauthy version refuses the wildcard, pin a
-   fixed port in `oidc.dart` and register it exactly.
+   required** - the Flutter client (desktop and web) is a public client.
+3. Redirect URIs - register both, the desktop and web builds use
+   different flows from the same client id:
+   - `http://127.0.0.1:*` - desktop (`oidc_login_io.dart`) opens the
+     system browser and listens on an ephemeral loopback port
+     (RFC 8252), so the port must stay a wildcard. If your Rauthy
+     version refuses the wildcard, pin a fixed port and register it
+     exactly.
+   - `https://game.example.com/oidc-callback.html` (your own origin) -
+     web (`oidc_login_web.dart`) opens a popup to this static page,
+     which forwards the authorization response back via `postMessage`
+     and closes itself; a browser page can't bind a loopback port, so
+     it can't reuse the desktop flow.
 4. Token signing: set the ID token algorithm to **EdDSA** (Ed25519) -
    the server only verifies EdDSA (ADR-0009).
 5. Scopes: the client requests `openid profile`; the defaults cover it.
@@ -90,9 +97,9 @@ unset). Then create the client the game clients will log in through:
    to `sub`.
 
 Then have players Register (or create their accounts in the admin UI,
-if you keep registration closed). Test: Flutter client -> server URL
-`wss://game.example.com` -> Login; web client and CLI accept a pasted
-token instead.
+if you keep registration closed). Test: Flutter client (desktop or
+`wss://game.example.com` in a browser) -> Login; only the CLI accepts a
+pasted token instead.
 
 ### Day 2
 
@@ -105,10 +112,13 @@ token instead.
 - **Never** set `PARCELLO_INSECURE_GUEST` on a WAN-facing server:
   guest identities are spoofable by design (ADR-0003). The deprecated
   HS256 path (`PARCELLO_JWT_SECRET`) also stays out of deployments.
-- The server binary is the whole deployment (embedded web client at
-  `/`, health probe at `/healthz`); there is no admin control plane by
-  design - moderation happens in Rauthy (accounts), not in the game
-  server.
+- No admin control plane by design - moderation happens in Rauthy
+  (accounts), not in the game server. The server needs no infrastructure
+  beyond its own binary plus two runtime-resolved sibling directories,
+  same idea as `mods/`: `web/` (the Flutter Web build, served at `/`;
+  `--web-dir`/`PARCELLO_WEB_DIR`, ADR-0025 - already bundled by the
+  published Docker image and release tarballs) and `mods/`. Health probe
+  at `/healthz`.
 
 ## 2. Parallel community server (shared accounts)
 

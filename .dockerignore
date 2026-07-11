@@ -1,2 +1,4 @@
 target
 .git
+clients/flutter/build
+clients/flutter/.dart_tool

@@ -14,10 +14,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::response::Html;
 use axum::routing::get;
 use clap::Parser;
 use parcello_mods::ResolvedContent;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -35,6 +35,11 @@ struct Args {
     /// Directory containing mod bundles (one subdirectory per mod id).
     #[arg(long, env = "PARCELLO_MODS_DIR", default_value = "mods")]
     mods_dir: PathBuf,
+
+    /// Directory containing the built Flutter Web client
+    /// (`flutter build web --release` in clients/flutter).
+    #[arg(long, env = "PARCELLO_WEB_DIR", default_value = "web")]
+    web_dir: PathBuf,
 
     /// Ordered mod list; later mods override earlier ones per key.
     #[arg(
@@ -143,6 +148,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "content resolved"
     );
 
+    let web_index = args.web_dir.join("index.html");
+    if !web_index.is_file() {
+        return Err(format!(
+            "web dir {} has no index.html (run `flutter build web --release` \
+             in clients/flutter and point --web-dir/PARCELLO_WEB_DIR at the output)",
+            args.web_dir.display()
+        )
+        .into());
+    }
+    info!(dir = %args.web_dir.display(), "serving flutter web build");
+
     let jwt_secret = std::env::var("PARCELLO_JWT_SECRET").ok();
     let eddsa = if args.identity_urls.is_empty() {
         None
@@ -218,14 +234,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // Flutter Web build, served from disk (mirrors --mods-dir, ADR-0025):
+    // resolved once at boot, not compiled in, so an operator can update the
+    // web client without rebuilding the server binary.
+    let serve_web = ServeDir::new(&args.web_dir).not_found_service(ServeFile::new(web_index));
+
     let app = Router::new()
-        // Embedded web client: the server is the whole deployment.
-        .route(
-            "/",
-            get(|| async { Html(include_str!("../web/index.html")) }),
-        )
         .route("/healthz", get(|| async { "ok" }))
         .route("/ws", get(ws::ws_handler))
+        .fallback_service(serve_web)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;

@@ -1,14 +1,21 @@
-# Four languages are actually present in this repo:
+# Three languages are actually scanned in this repo:
 #   - rust: the engine/server/mods/protocol/cli crates - the code that
 #     matters most here. build-mode: none - CodeQL's Rust extractor parses
 #     source directly, no cargo build required.
 #   - actions: the workflows in this directory themselves (injection via
 #     untrusted `${{ }}` expansion, secrets misuse, etc).
-#   - c-cpp / swift: the Flutter desktop runner shells
-#     (clients/flutter/linux, clients/flutter/macos) are generated
-#     boilerplate with no hand-written logic, but they need a real
-#     `flutter build` first so CMake/xcodebuild have something to trace -
-#     same step release.yml already runs for packaging.
+#   - c-cpp: the Flutter Linux runner shell (clients/flutter/linux) is
+#     generated boilerplate with no hand-written logic, but it needs a
+#     real `flutter build` first so CMake has something to trace - same
+#     step release.yml already runs for packaging.
+# Swift (clients/flutter/macos) is deliberately NOT scanned: CodeQL's
+# Swift extractor can't trace a `flutter build macos` compile on the
+# hosted macOS runners (Xcode 26's build system - "CodeQL detected code
+# written in Swift but this run didn't build any of it", survives even
+# after killing XCBBuildService before the build). Since that Swift is
+# 100% Flutter-generated boilerplate with no hand-written logic anyway,
+# it isn't worth chasing an Apple/GitHub build-system compatibility issue
+# neither side controls. Revisit if github/codeql-action ships a fix.
 name: CodeQL
 
 on:
@@ -69,29 +76,5 @@ jobs:
           build-mode: manual
           queries: security-extended,security-and-quality
       - run: flutter build linux --release
-        working-directory: clients/flutter
-      - uses: github/codeql-action/analyze@v4
-
-  analyze-swift:
-    name: CodeQL / swift (flutter macos runner)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - uses: github/codeql-action/init@v4
-        with:
-          languages: swift
-          build-mode: manual
-          queries: security-extended,security-and-quality
-      # Xcode's build service (XCBBuildService) is long-lived; if one was
-      # already running before `init` set up CodeQL's tracer, the actual
-      # compile jobs get dispatched to that untraced instance and CodeQL
-      # sees no source at all. Kill it so the build below spawns a fresh,
-      # traced one.
-      - run: killall XCBBuildService || true
-      - run: flutter build macos --release
         working-directory: clients/flutter
       - uses: github/codeql-action/analyze@v4

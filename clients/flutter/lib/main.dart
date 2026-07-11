@@ -1,9 +1,10 @@
-/// Parcello Flutter client (Windows desktop first). Mirrors the embedded web
-/// client feature-for-feature; the server stays the only authority.
+/// Parcello Flutter client: desktop (Windows/Linux/macOS) and web from one
+/// codebase. The server stays the only authority.
 library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -270,40 +271,46 @@ class _MenuScreenState extends State<MenuScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text('PUBLIC GAMES',
-                            style: TextStyle(
-                                fontSize: 12,
-                                letterSpacing: 1,
-                                color: Color(0xFF9AA3B2))),
-                        const SizedBox(height: 10),
-                        wideButton('Browse public games', () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => LanBrowser(session: s)));
-                        }),
-                        const SizedBox(height: 6),
-                        wideButton('Server Manager', () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ServerManager()));
-                        }, primary: false),
-                        const SizedBox(height: 6),
-                        const Text('Coming soon.',
-                            style: TextStyle(
-                                fontSize: 12, color: Color(0xFF9AA3B2))),
-                      ],
+                // LAN discovery and local server management have no
+                // browser equivalent (no raw sockets, no process spawn in
+                // a sandbox) - hide the whole card on the web build rather
+                // than shipping dead-end buttons.
+                if (!kIsWeb) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('PUBLIC GAMES',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  letterSpacing: 1,
+                                  color: Color(0xFF9AA3B2))),
+                          const SizedBox(height: 10),
+                          wideButton('Browse public games', () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => LanBrowser(session: s)));
+                          }),
+                          const SizedBox(height: 6),
+                          wideButton('Server Manager', () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ServerManager()));
+                          }, primary: false),
+                          const SizedBox(height: 6),
+                          const Text('Coming soon.',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF9AA3B2))),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 10),
                 Text(s.loginMessage,
                     textAlign: TextAlign.center,

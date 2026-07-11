@@ -7,9 +7,10 @@ data-driven mods. The current rules are still Monopoly-close; the target
 design and the gap are tracked in `docs/business-tour-direction.md`.
 
 This repository holds the complete, playable game: pure game engine, TOML
-mod layer, WebSocket server with an embedded browser client, a terminal
-test client (with a `--bot` autopilot for solo playtesting), and a
-cross-platform Flutter desktop client (`clients/flutter`). Player accounts
+mod layer, WebSocket server, a terminal test client (with a `--bot`
+autopilot for solo playtesting), and one Flutter client
+(`clients/flutter`) covering both the desktop apps (Windows, Linux,
+macOS) and the browser. Player accounts
 are optional and verified against an external OIDC identity provider
 (self-hosted, e.g. Rauthy - ADR-0009); guests can always play.
 
@@ -20,12 +21,13 @@ are optional and verified against an external OIDC identity provider
 | `parcello-engine`    | Game Engine (section 4)   | Pure, synchronous rules. No I/O, no async, no rand.  |
 | `parcello-mods`      | Mod Layer (section 7)     | TOML bundles, Registry merge, `ModPlugin` trait.     |
 | `parcello-protocol`  | Transport contract        | JSON message envelopes shared by server and clients. |
-| `parcello-server`    | Transport + Session (5)   | Axum WS server, rooms, auth, history, web client.    |
+| `parcello-server`    | Transport + Session (5)   | Axum WS server, rooms, auth, history.                |
 | `parcello-cli`       | Test harness              | Terminal client; `--bot` autopilot fills seats solo. |
 
-Not a cargo crate: `clients/flutter` is the Dart/Flutter desktop client
-(Windows, Linux, macOS), mirroring the web client feature-for-feature with
-an added OIDC login flow. See `clients/flutter/README.md`.
+Not a cargo crate: `clients/flutter` is the Dart/Flutter client - desktop
+(Windows, Linux, macOS) and web from one codebase, with an OIDC login flow
+on both (native loopback redirect on desktop, popup + postMessage on web,
+ADR-0025). See `clients/flutter/README.md`.
 
 Patterns from the doc and where they live:
 
@@ -54,15 +56,13 @@ cargo test  --workspace
 cargo run -p parcello-server -- --insecure-guest
 ```
 
-**Play in a browser:** open `http://localhost:7878/`, enter a name, leave
-the code empty to create a room (or paste a code to join), then click the
-room code to copy it and share. Room codes are pronounceable (CVCVC, e.g.
-`GOLUR`) so they are easy to read out over voice chat.
-The client is a single embedded HTML file speaking the same protocol as the
-CLI; the server stays the only authority. It has not been exercised in a
-real browser inside the development sandbox (protocol coverage is verified
-mechanically against the engine's command and event enums), so expect
-cosmetic rough edges.
+**Play in a browser:** `cd clients/flutter && flutter build web --release`,
+point the server at the output (`--web-dir build/web`, see below), then
+open `http://localhost:7878/`, enter a name, leave the code empty to
+create a room (or paste a code to join), then click the room code to copy
+it and share. Room codes are pronounceable (CVCVC, e.g. `GOLUR`) so they
+are easy to read out over voice chat. This is the same Flutter codebase as
+the desktop client (ADR-0025) - the server stays the only authority.
 
 **Or with the terminal client:**
 
@@ -89,6 +89,8 @@ cargo run -p parcello-cli -- --name bot1 --join ABCDE --bot
 
 Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 (repeatable, ordered; later mods override earlier ones per key),
+`--web-dir web` (the built Flutter Web client, served at `/`; refuses to
+start if it has no `index.html`, ADR-0025),
 `--insecure-guest`, `--history <file.db>` (SQLite game logs; omit for
 in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
 canonical action - lowest hand card / ascending Legal Route / decline /
@@ -116,9 +118,9 @@ ready-to-run local deployment with persistent history and editable server
 settings, use `docker compose -f compose-example.yml up --build`.
 
 Accounts are optional and only exist for continuity/stats: guests can
-always play. The Flutter client has a "Sign in with account" button
-(OIDC + PKCE against your identity provider); the web client and CLI
-accept a pasted token.
+always play. The Flutter client has a "Sign in with account" button on
+both desktop and web (OIDC + PKCE against your identity provider,
+ADR-0025); only the CLI accepts a pasted token instead.
 
 ## Development & testing
 
@@ -165,8 +167,8 @@ flutter run -d windows
 ```
 
 Keep the default URL `ws://127.0.0.1:7878/ws`, enter a name, and leave the
-room code empty to create a room (or paste one to join). The embedded
-browser client at `http://localhost:7878/` and the terminal client
+room code empty to create a room (or paste one to join). The same client
+built for web at `http://localhost:7878/` and the terminal client
 (`parcello-cli --name you --create`) are lighter ways to take a seat.
 
 **End-to-end with bots:** take one seat from a human client (above), then
@@ -186,17 +188,18 @@ table, so you can verify the whole feedback path end-to-end.
 ## Releases
 
 Bumping the workspace `version` in `Cargo.toml` on `main` triggers
-`.github/workflows/release.yml`: it tags `vX.Y.Z`, builds the server + CLI
-for Linux (x64 + arm64), Windows, and macOS (arm64) with the `mods/`
-directory bundled, builds the Flutter client for Windows, Linux, and
-macOS, assembles Steam-depot-shaped all-in-one archives (client + server
-together) for Windows and Linux (the Linux one fits the Steam Deck),
-attaches everything to an auto-generated GitHub release, and pushes the
-server image to GHCR (`vX.Y.Z` + `latest`, linux/amd64). Keep
-`clients/flutter/pubspec.yaml`'s version in step - it stamps the client
-executable. Re-pushing without a bump is a no-op. All dependency licenses
-are permissive (checked with cargo-license), so commercial distribution
-is unencumbered.
+`.github/workflows/release.yml`: it tags `vX.Y.Z`, builds the Flutter Web
+client once and bundles it (with `mods/`) into the server + CLI tarballs
+for Linux (x64 + arm64), Windows, and macOS (arm64), builds the Flutter
+desktop client for Windows, Linux, and macOS, assembles Steam-depot-shaped
+all-in-one archives (client + server together) for Windows and Linux (the
+Linux one fits the Steam Deck), attaches everything to an auto-generated
+GitHub release, and pushes the server image to GHCR (`vX.Y.Z` + `latest`,
+linux/amd64 - it builds its own Flutter Web client in a self-contained
+Docker stage, ADR-0025). Keep `clients/flutter/pubspec.yaml`'s version in
+step - it stamps the client executable. Re-pushing without a bump is a
+no-op. All dependency licenses are permissive (checked with cargo-license),
+so commercial distribution is unencumbered.
 
 ## Protocol (v0, JSON over WebSocket at `/ws`)
 
