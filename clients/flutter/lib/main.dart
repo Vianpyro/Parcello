@@ -350,10 +350,25 @@ class GameScreen extends StatelessWidget {
                 mySeat: s.seat,
                 onTileTap: (i) => _tileMenu(context, i),
                 canAct: _hasTileActions,
+                pawnPositions: s.displayPositions,
+                floaters: s.floaters,
                 center: _CenterPanel(s: s),
               ),
               // Played movement card, floating over the middle of the board.
               _CardFlash(seq: s.cardSeq, value: s.cardValue),
+              // Drawn chance/community card, revealed for a beat before its
+              // effect plays out (ADR-0028).
+              _BannerFlash(seq: s.chanceCardSeq, text: s.chanceCardText),
+              // Spotlight announcement (ADR-0026), offset below the card
+              // banner so back-to-back beats never overlap.
+              Transform.translate(
+                offset: const Offset(0, 90),
+                child: _BannerFlash(
+                  seq: s.spotlightFlashSeq,
+                  text: '✨ ${s.spotlightFlashText}',
+                  hold: const Duration(milliseconds: 1000),
+                ),
+              ),
             ]),
           ),
           const SizedBox(width: 12),
@@ -801,6 +816,77 @@ class _CardFlashState extends State<_CardFlash> {
             '${widget.value}',
             style: const TextStyle(
                 fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF221D0E)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A one-shot text banner over the board (drawn card text, spotlight
+/// announcement), retriggered by `seq` exactly like `_CardFlash`
+/// (ADR-0028). Parchment-styled so a card read feels like a card.
+class _BannerFlash extends StatefulWidget {
+  final int seq;
+  final String text;
+  final Duration hold;
+  const _BannerFlash({
+    required this.seq,
+    required this.text,
+    this.hold = const Duration(milliseconds: 1500),
+  });
+
+  @override
+  State<_BannerFlash> createState() => _BannerFlashState();
+}
+
+class _BannerFlashState extends State<_BannerFlash> {
+  bool _visible = false;
+  Timer? _timer;
+
+  @override
+  void didUpdateWidget(_BannerFlash old) {
+    super.didUpdateWidget(old);
+    if (widget.seq != old.seq && widget.seq > 0) {
+      setState(() => _visible = true);
+      _timer?.cancel();
+      _timer = Timer(widget.hold, () {
+        if (mounted) setState(() => _visible = false);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: _visible ? 1 : 0,
+        duration: const Duration(milliseconds: 250),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 320),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFECE0C2),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFFA9812F)),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+            ],
+          ),
+          child: Text(
+            widget.text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF2A2420),
+            ),
           ),
         ),
       ),

@@ -1,11 +1,11 @@
 # Design direction: animation-aware timing (backend/frontend sync)
 
-Status: direction note, not decided. No ADR yet - this document maps the
-problem space and the option space so a future ADR (or small ADR set) can
-pick a mechanism without re-deriving the constraints. Nothing here is
-implemented; `docs/architecture.typ`'s current frontend doctrine ("Command
-submission may be optimistic for animation purposes, but the server result
-is always authoritative") still holds until an ADR changes it.
+Status: DECIDED and implemented - see ADR-0028 (animation-ack watermark).
+Option D below was adopted; the open questions were settled with the
+owner during the first playtests (2026-07): table-wide pause for the
+collection windows, the turn clock also gated (on the acting seat's own
+ack), hard cap 6s, `WentToJail` enriched with `from`, the absolute game
+clock untouched. This document stays as the design record.
 
 ## Problem
 

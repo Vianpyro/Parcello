@@ -119,7 +119,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 | ServerMessage::Update { .. }
                                 | ServerMessage::Joined { view: Some(_), .. }
                         );
+                        // Terminal output is instant: ack every Update
+                        // immediately (ADR-0028) so this client never gates
+                        // anyone's timers - the built-in exerciser of the
+                        // "I don't animate" path.
+                        let ack_seq = match &msg {
+                            ServerMessage::Update { seq, .. } => Some(*seq),
+                            _ => None,
+                        };
                         ctx.render(msg);
+                        if let Some(seq) = ack_seq {
+                            let ack = ClientMessage::AnimationDone { through_seq: seq };
+                            sink.send(Message::Text(serde_json::to_string(&ack)?.into()))
+                                .await?;
+                        }
                         if args.bot && fresh_view
                             && let (Some(content), Some(view), Some(me)) =
                                 (&ctx.content, &ctx.view, ctx.my_seat)
@@ -387,6 +400,7 @@ impl Ctx {
                 events,
                 view,
                 banks,
+                ..
             } => {
                 for event in &events {
                     println!("  {}", self.describe(event));
@@ -766,7 +780,9 @@ impl Ctx {
                 self.player(*player),
                 self.tile_name(*tile)
             ),
-            Event::WentToJail { player } => format!("{} went to jail", self.player(*player)),
+            Event::WentToJail { player, .. } => {
+                format!("{} went to jail", self.player(*player))
+            }
             Event::LegalRouteChosen { player, order } => format!(
                 "{} chose a Legal Route {order:?} (rent-free on their tiles until it's done)",
                 self.player(*player)

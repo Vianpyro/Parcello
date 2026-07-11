@@ -98,6 +98,15 @@ pub enum ClientMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         comment: Option<String>,
     },
+    /// This client has finished rendering every `Update` up to and
+    /// including `through_seq` (ADR-0028). The server's animation-sensitive
+    /// timers (sealed-bid window, turn clock, bot pacing) wait for these
+    /// acks - bounded by a hard cap, so a silent client can never stall
+    /// the table. Clients with no animations (the CLI) send it immediately
+    /// on every Update.
+    AnimationDone {
+        through_seq: u64,
+    },
     Ping,
 }
 
@@ -174,6 +183,11 @@ pub enum ServerMessage {
     /// Broadcast after every accepted command: what happened, then the new
     /// authoritative projection.
     Update {
+        /// Monotonic per-room sequence number (ADR-0028): clients ack
+        /// "rendered through N" with `ClientMessage::AnimationDone` so the
+        /// server's animation-sensitive timers can wait for the table.
+        #[serde(default)]
+        seq: u64,
         events: Vec<Event>,
         view: Box<ClientView>,
         /// Live per-seat remaining time bank (ADR-0023), `None` when the
@@ -277,6 +291,14 @@ mod tests {
         assert!(matches!(
             fb,
             ClientMessage::Feedback { rating: 4, comment: Some(c) } if c == "gg"
+        ));
+
+        // Animation ack (ADR-0028): rendered through Update seq N.
+        let ack: ClientMessage =
+            serde_json::from_str(r#"{"type":"animation_done","through_seq":7}"#).unwrap();
+        assert!(matches!(
+            ack,
+            ClientMessage::AnimationDone { through_seq: 7 }
         ));
 
         // Pre-ADR-0006 clients omit `mods`; the field must stay optional.

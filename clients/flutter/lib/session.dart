@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'board.dart' show CashFloater;
 import 'protocol.dart';
 import 'session_storage.dart';
 import 'sfx.dart';
@@ -102,6 +103,36 @@ class GameSession extends ChangeNotifier {
   /// repeated value.
   int cardSeq = 0;
   int cardValue = 0;
+
+  /// Latest drawn chance/community card text, revealed over the board for a
+  /// beat (ADR-0028) - without it, card effects were invisible and
+  /// card-driven relocations looked like unexplained teleports.
+  int chanceCardSeq = 0;
+  String chanceCardText = '';
+
+  /// Latest spotlighted tile name, for a brief banner (ADR-0026/0028).
+  int spotlightFlashSeq = 0;
+  String spotlightFlashText = '';
+
+  /// Director-driven pawn positions (ADR-0028): the board renders these,
+  /// advanced beat by beat through each Update's events so multi-hop
+  /// chains (chance -> reveal -> teleport) read as separate moments; they
+  /// converge on the authoritative view positions once the Update applies.
+  final Map<int, int> displayPositions = {};
+
+  /// Transient cash-delta floaters over board tiles (ADR-0028 extras).
+  final List<CashFloater> floaters = [];
+  int _floaterId = 0;
+
+  /// Updates not yet rendered (ADR-0028): played strictly in order, one at
+  /// a time; each is acked to the server once its beats finish.
+  final List<Map<String, dynamic>> _pendingUpdates = [];
+  bool _animating = false;
+
+  /// Bumped whenever the room context resets (leave, disconnect, new game)
+  /// so a mid-flight beat sequence aborts instead of applying stale state.
+  int _updateEpoch = 0;
+  bool _disposed = false;
 
   /// Net worth of a seat, mirroring `GameState::net_worth` on the server so
   /// the shown ranking predicts the timed-game winner: cash + property
@@ -208,6 +239,7 @@ class GameSession extends ChangeNotifier {
     _ws?.sink.add(jsonEncode({'type': 'leave'}));
     joined = false;
     view = null;
+    _resetDirector();
     code = null;
     gameEndsAt = null;
     turnEndsAt = null;
@@ -235,6 +267,7 @@ class GameSession extends ChangeNotifier {
     connected = false;
     joined = false;
     view = null;
+    _resetDirector();
     if (loginMessage.isEmpty || loginMessage == 'Connecting...') {
       loginMessage = 'Disconnected from server.';
     }
@@ -300,6 +333,7 @@ class GameSession extends ChangeNotifier {
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
+        _resetDirector();
         _trackTimedWindows();
         joined = true;
         loginMessage = '';
@@ -311,6 +345,7 @@ class GameSession extends ChangeNotifier {
         settings = RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
       case 'game_started':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
+        _resetDirector();
         feedbackDone = false;
         gameEndsAt = _deadlineFrom(msg['time_remaining']);
         turnSeconds = msg['turn_seconds'] as int?;
@@ -321,25 +356,12 @@ class GameSession extends ChangeNotifier {
         sfx.gameStart();
         _log('Game started.');
       case 'update':
-        view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
-        turnEndsAt = _deadlineFrom(turnSeconds);
-        banks = (msg['banks'] as List?)?.cast<int>();
-        _trackTimedWindows();
-        // The bank only starts draining once the plain turn window is
-        // spent; until then it shows the flat reserve (ADR-0023).
-        bankEndsAt = (turnEndsAt != null && banks != null && seat != null)
-            ? turnEndsAt!.add(Duration(seconds: banks![seat!]))
-            : null;
-        for (final e in msg['events'] as List) {
-          final ev = e as Map<String, dynamic>;
-          if (ev['type'] == 'movement_card_played') {
-            cardValue = ev['value'] as int;
-            cardSeq++;
-            sfx.diceRoll();
-          }
-          _log(describeEvent(
-              ev, playerName, tileName, content?.marketEventName ?? (id) => id));
-        }
+        // Queued rather than applied (ADR-0028): the animation director
+        // below plays each Update as paced beats, applies the
+        // authoritative view at the end, then acks so the server's gated
+        // timers (bid window, turn clock, bot pacing) can start.
+        _pendingUpdates.add(msg);
+        _drainUpdates();
       case 'rejected':
         sfx.error();
         _log('Rejected: ${msg['error']['code']}');
@@ -349,6 +371,155 @@ class GameSession extends ChangeNotifier {
         _log('Error: ${msg['message']}');
     }
     notifyListeners();
+  }
+
+  // -- Animation director (ADR-0028) -----------------------------------
+
+  void _drainUpdates() {
+    if (_disposed || _animating || _pendingUpdates.isEmpty) return;
+    _animating = true;
+    final msg = _pendingUpdates.removeAt(0);
+    _playUpdate(msg).whenComplete(() {
+      _animating = false;
+      _drainUpdates();
+    });
+  }
+
+  /// Plays one Update as a sequence of paced beats - pawn slides, card
+  /// reveals, cash floaters - so a multi-event burst (move -> chance card
+  /// -> teleport -> auction) reads as separate moments instead of one
+  /// instant snap. The authoritative view applies only once the beats
+  /// finish, which is also what holds the sealed-bid overlay and the local
+  /// turn countdown back until this client has visually arrived; the final
+  /// ack then releases the server's own gated timers.
+  Future<void> _playUpdate(Map<String, dynamic> msg) async {
+    final epoch = _updateEpoch;
+    final events = (msg['events'] as List).cast<Map<String, dynamic>>();
+    final animate = view != null && joined;
+    for (final e in events) {
+      _log(describeEvent(
+          e, playerName, tileName, content?.marketEventName ?? (id) => id));
+      if (animate) {
+        await _playBeat(e);
+        if (_disposed || epoch != _updateEpoch) return; // context changed
+      } else if (e['type'] == 'movement_card_played') {
+        // Fresh join, no prior view: show the flash, skip the pacing.
+        cardValue = e['value'] as int;
+        cardSeq++;
+      }
+    }
+    view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
+    _syncDisplayPositions();
+    turnEndsAt = _deadlineFrom(turnSeconds);
+    banks = (msg['banks'] as List?)?.cast<int>();
+    _trackTimedWindows();
+    // The bank only starts draining once the plain turn window is
+    // spent; until then it shows the flat reserve (ADR-0023).
+    bankEndsAt = (turnEndsAt != null && banks != null && seat != null)
+        ? turnEndsAt!.add(Duration(seconds: banks![seat!]))
+        : null;
+    final seq = msg['seq'] as int? ?? 0;
+    if (seq > 0) {
+      _ws?.sink.add(jsonEncode({'type': 'animation_done', 'through_seq': seq}));
+    }
+    notifyListeners();
+  }
+
+  /// One event's visual beat: mutate the display state, notify, then wait
+  /// for however long that visual runs. Events with no visual fall through
+  /// instantly.
+  Future<void> _playBeat(Map<String, dynamic> e) async {
+    switch (e['type']) {
+      case 'movement_card_played':
+        cardValue = e['value'] as int;
+        cardSeq++;
+        sfx.diceRoll();
+        notifyListeners();
+      // The pawn slide itself follows in this Update's `moved` beat.
+      case 'moved':
+        final p = e['player'] as int;
+        final from = e['from'] as int? ?? displayPositions[p] ?? 0;
+        final to = e['to'] as int;
+        displayPositions[p] = to;
+        notifyListeners();
+        await Future.delayed(_moveDuration(from, to));
+      case 'went_to_jail':
+        final p = e['player'] as int;
+        final jail = content?.board.indexWhere((t) => t.kind == 'jail') ?? -1;
+        if (jail >= 0) displayPositions[p] = jail;
+        notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 1100));
+      case 'card_drawn':
+        chanceCardText = e['text'] as String? ?? '';
+        chanceCardSeq++;
+        notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 1700));
+      case 'spotlight_started':
+        spotlightFlashText = tileName(e['tile'] as int);
+        spotlightFlashSeq++;
+        notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 1100));
+      case 'salary_paid':
+        _floatCash(e['player'] as int, e['amount'] as int);
+        await Future.delayed(const Duration(milliseconds: 500));
+      case 'rent_paid':
+        _floatCash(e['from'] as int, -(e['amount'] as int));
+        await Future.delayed(const Duration(milliseconds: 500));
+      case 'tax_paid':
+        _floatCash(e['player'] as int, -(e['amount'] as int));
+        await Future.delayed(const Duration(milliseconds: 500));
+      case 'cash_adjusted':
+        _floatCash(e['player'] as int, e['delta'] as int);
+        await Future.delayed(const Duration(milliseconds: 500));
+    }
+  }
+
+  /// Mirrors `_PawnLayer`'s hop timing (260ms per tile, plus its 260ms
+  /// wind-up) so a beat waits for the glide it just triggered.
+  Duration _moveDuration(int from, int to) {
+    final n = content?.board.length ?? 0;
+    if (n == 0) return const Duration(milliseconds: 700);
+    final forward = (to - from) % n;
+    final glide = (forward >= 1 && forward <= 12)
+        ? (forward * 260).clamp(400, 3200)
+        : 700;
+    return Duration(milliseconds: 260 + glide + 150);
+  }
+
+  /// Spawns a rising "+$X"/"-$X" over the player's current tile (ADR-0028
+  /// extras); removes it once its own animation has run out.
+  void _floatCash(int player, int amount) {
+    if (amount == 0) return;
+    final tile = displayPositions[player] ??
+        view?.players.elementAtOrNull(player)?.position ??
+        0;
+    final f = CashFloater(id: _floaterId++, tile: tile, amount: amount);
+    floaters.add(f);
+    notifyListeners();
+    Timer(const Duration(milliseconds: 1200), () {
+      if (_disposed) return;
+      floaters.remove(f);
+      notifyListeners();
+    });
+  }
+
+  void _syncDisplayPositions() {
+    final v = view;
+    if (v == null) return;
+    for (var i = 0; i < v.players.length; i++) {
+      displayPositions[i] = v.players[i].position;
+    }
+  }
+
+  /// Aborts any in-flight beat sequence and clears the director's
+  /// transient state - called whenever the room context changes.
+  void _resetDirector() {
+    _updateEpoch++;
+    _pendingUpdates.clear();
+    _animating = false;
+    floaters.clear();
+    displayPositions.clear();
+    _syncDisplayPositions();
   }
 
   DateTime? _deadlineFrom(dynamic secs) =>
@@ -375,6 +546,7 @@ class GameSession extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     disconnect();
     super.dispose();
   }

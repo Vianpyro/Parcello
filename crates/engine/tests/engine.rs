@@ -626,7 +626,7 @@ fn a_route_landing_on_go_to_jail_revokes_parole_and_refills_the_hand() {
     );
     assert!(
         ev.iter()
-            .any(|e| matches!(e, Event::WentToJail { player: 0 }))
+            .any(|e| matches!(e, Event::WentToJail { player: 0, .. }))
     );
     assert!(
         st.players[0].jailed,

@@ -146,8 +146,14 @@ pub enum Event {
         tile: usize,
         cost: i64,
     },
+    /// `from` is the tile the player stood on when sent (the Go To Jail
+    /// corner or the tile where the card was drawn) - clients animate the
+    /// jail hop from it instead of remembering last known positions
+    /// themselves (ADR-0028).
     WentToJail {
         player: usize,
+        #[serde(default)]
+        from: usize,
     },
     /// A get-out-of-jail-free card entered the player's hand.
     JailCardReceived {

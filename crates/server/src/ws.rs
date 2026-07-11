@@ -218,6 +218,19 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 }
             }
 
+            (ClientMessage::AnimationDone { through_seq }, Some(s)) => {
+                let cmd = RoomCmd::AnimationDone {
+                    player_id: s.player_id.clone(),
+                    through_seq,
+                };
+                if s.room.send(cmd).await.is_err() {
+                    break;
+                }
+            }
+            // A stray ack with no room is harmless - drop it silently
+            // rather than erroring (it releases timers, never gates them).
+            (ClientMessage::AnimationDone { .. }, None) => {}
+
             (
                 ClientMessage::Start
                 | ClientMessage::PlayAgain

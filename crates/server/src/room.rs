@@ -49,6 +49,14 @@ const BID_WINDOW: Duration = Duration::from_secs(5);
 /// than a shared primitive - matching how `game_deadline` and `bid_deadline`
 /// already coexist as two small parallel `Option<Instant>` fields.
 const VOTE_WINDOW: Duration = Duration::from_secs(5);
+/// Hard cap on waiting for animation acks (ADR-0028): a client that never
+/// acks (bug, malice, a throttled background tab) can delay an
+/// animation-gated timer by at most this much, ever - the same
+/// wait-but-never-indefinitely doctrine as `DISCONNECTED_GRACE` and the
+/// window auto-abstains. Sized for the longest realistic client chain (a
+/// 12-hop move + a card reveal + a relocation is about 5s). The absolute
+/// `game_deadline` (ADR-0010) is deliberately NOT gated at all.
+const ANIM_ACK_CAP: Duration = Duration::from_secs(6);
 
 pub type Rooms = Arc<RwLock<HashMap<String, mpsc::Sender<RoomCmd>>>>;
 pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;
@@ -93,6 +101,12 @@ pub enum RoomCmd {
         player_id: PlayerId,
         rating: u8,
         comment: Option<String>,
+    },
+    /// This client finished rendering every Update through `through_seq`
+    /// (ADR-0028); releases the animation gates on the room's timers.
+    AnimationDone {
+        player_id: PlayerId,
+        through_seq: u64,
     },
 }
 
@@ -140,6 +154,13 @@ pub async fn create_room(
         banks: Vec::new(),
         bid_deadline: None,
         vote_deadline: None,
+        seq: 0,
+        acked: Vec::new(),
+        anim_broadcast_at: tokio::time::Instant::now(),
+        table_settled_at: None,
+        acting_settled_at: None,
+        bid_gate: false,
+        vote_gate: false,
     };
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
@@ -284,6 +305,29 @@ struct Room {
     /// any - armed and cleared exactly like `bid_deadline`, its structural
     /// twin for the other simultaneous multi-seat phase.
     vote_deadline: Option<tokio::time::Instant>,
+    /// Monotonic Update counter (ADR-0028); every broadcast Update carries
+    /// it so clients can ack "rendered through N".
+    seq: u64,
+    /// Highest Update seq each seat has acked, parallel to `seats`. Bot and
+    /// disconnected seats are treated as instantly settled instead
+    /// (`seat_settled`), so their entries just lag harmlessly.
+    acked: Vec<u64>,
+    /// Instant of the latest Update broadcast: the anchor for
+    /// `ANIM_ACK_CAP`, past which every gate opens regardless of acks.
+    anim_broadcast_at: tokio::time::Instant,
+    /// When every relevant seat had rendered the latest Update (`None` =
+    /// still waiting). Gates the sealed-bid/vote windows and bot pacing.
+    /// Stamped by `refresh_gates`, reset on every broadcast.
+    table_settled_at: Option<tokio::time::Instant>,
+    /// Same, for the acting seat alone: gates the turn clock/time bank so
+    /// animations never eat thinking time (ADR-0028).
+    acting_settled_at: Option<tokio::time::Instant>,
+    /// A sealed-bid window opened but its 5s deadline is not armed yet -
+    /// waiting for `table_settled_at` (or the cap) so nobody's window
+    /// starts before they have seen the landing (ADR-0028).
+    bid_gate: bool,
+    /// Same, for a Corruption bribe vote window.
+    vote_gate: bool,
 }
 
 impl Room {
@@ -292,33 +336,51 @@ impl Room {
         let mut last_activity = tokio::time::Instant::now();
         let mut last_progress = tokio::time::Instant::now();
         loop {
+            // Animation gates first (ADR-0028): stamp the settle instants
+            // and arm any pending bid/vote deadline before computing the
+            // sleeps below from them.
+            self.refresh_gates();
             let idle = tokio::time::sleep_until(last_activity + IDLE_TIMEOUT);
             // Smart per-turn deadline, recomputed each loop so a mid-turn
             // disconnect shortens it: disconnected acting seats are skipped
             // after a short grace (always on); a connected but slow player
             // gets the configured --turn-timeout, or unlimited time when off.
+            // Anchored to the later of the last accepted command and the
+            // acting seat's animation ack (ADR-0028): rendering time never
+            // eats thinking time.
             let deadline = self.afk_deadline();
             let afk_armed = deadline.is_some();
-            let afk = tokio::time::sleep_until(last_progress + deadline.unwrap_or(IDLE_TIMEOUT));
+            let afk_anchor = self.acting_anchor(last_progress);
+            let afk = tokio::time::sleep_until(afk_anchor + deadline.unwrap_or(IDLE_TIMEOUT));
             // Game clock (ADR-0010): fires once at the absolute deadline.
+            // Deliberately NOT animation-gated - a stalling client must
+            // never be able to extend the game (ADR-0028).
             let game_armed = self.game_deadline.is_some() && matches!(self.phase, Phase::Active(_));
             let now = tokio::time::Instant::now();
             let game = tokio::time::sleep_until(self.game_deadline.unwrap_or(now + IDLE_TIMEOUT));
             // Bot seats (ADR-0014): if any bot has a move to make, play it
-            // after a short think delay, anchored to the last progress so
-            // moves stay evenly paced.
+            // after a short think delay, anchored to the last progress AND
+            // the table's animation watermark (ADR-0028) so bots never race
+            // ahead of what the humans can see.
             let bot_action = self.next_bot_action();
             let bot_armed = bot_action.is_some();
-            let bot = tokio::time::sleep_until(last_progress + BOT_THINK);
+            let bot = tokio::time::sleep_until(self.table_anchor(last_progress) + BOT_THINK);
             // Sealed-bid window (ADR-0018): a separate, parallel timer -
             // does not touch last_progress/banks, matching acting_seat()
-            // returning None for the whole phase.
+            // returning None for the whole phase. Armed by refresh_gates
+            // once the table has visually arrived (ADR-0028).
             let bid_armed = self.bid_deadline.is_some();
             let bid = tokio::time::sleep_until(self.bid_deadline.unwrap_or(now + IDLE_TIMEOUT));
             // Corruption bribe vote window (ADR-0024): the same pattern,
             // its own independent timer.
             let vote_armed = self.vote_deadline.is_some();
             let vote = tokio::time::sleep_until(self.vote_deadline.unwrap_or(now + IDLE_TIMEOUT));
+            // Wake at the ack hard cap while a window waits on animations,
+            // so refresh_gates arms its deadline even if nobody ever acks.
+            // The afk/bot anchors need no wake: they fall back to the cap
+            // instant directly in their own sleep targets.
+            let gate_pending = (self.bid_gate || self.vote_gate) && self.table_settled_at.is_none();
+            let gate = tokio::time::sleep_until(self.anim_broadcast_at + ANIM_ACK_CAP);
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
@@ -333,7 +395,10 @@ impl Room {
                     // Rejected, not Update, so the brief mutation is never
                     // observed) - ADR-0023.
                     let drain_seat = self.acting_seat();
-                    let elapsed = now.saturating_duration_since(last_progress);
+                    // Elapsed thinking time is measured from the animation
+                    // anchor, not last_progress (ADR-0028): stalling while
+                    // the table still renders must not drain the bank.
+                    let elapsed = now.saturating_duration_since(afk_anchor);
                     let drained = self.drain_bank(drain_seat, elapsed);
                     let advanced = match cmd {
                         RoomCmd::Join { identity, reconnect, tx, reply } => {
@@ -367,6 +432,10 @@ impl Room {
                         RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
                         RoomCmd::Feedback { player_id, rating, comment } => {
                             self.handle_feedback(&player_id, rating, comment);
+                            false
+                        }
+                        RoomCmd::AnimationDone { player_id, through_seq } => {
+                            self.handle_animation_done(&player_id, through_seq);
                             false
                         }
                     };
@@ -415,6 +484,12 @@ impl Room {
                 _ = vote, if vote_armed => {
                     self.inject_silent_votes();
                 }
+                _ = gate, if gate_pending => {
+                    // Nothing to do here: reaching the cap is the signal;
+                    // the refresh_gates call at the top of the next
+                    // iteration stamps the settle instants and arms the
+                    // pending window deadline (ADR-0028).
+                }
                 _ = idle => {
                     if self.seats.iter().all(|s| s.tx.is_none()) {
                         info!(room = %self.code, "idle timeout, dissolving");
@@ -442,6 +517,100 @@ impl Room {
             TurnPhase::BlindAuction { .. } | TurnPhase::BribeVote { .. } => None,
             _ => Some(st.current),
         }
+    }
+
+    // -- Animation gates (ADR-0028) ---------------------------------------
+
+    /// Whether `seat` has rendered the latest Update. Bot and disconnected
+    /// seats have no visual to wait for and never gate anyone - the same
+    /// "I don't animate" path the CLI takes by acking instantly.
+    fn seat_settled(&self, seat: usize) -> bool {
+        let Some(s) = self.seats.get(seat) else {
+            return true;
+        };
+        s.is_bot || s.tx.is_none() || self.acked.get(seat).copied().unwrap_or(0) >= self.seq
+    }
+
+    /// Stamps the table/acting settle instants once their condition holds -
+    /// every relevant ack arrived, or `ANIM_ACK_CAP` elapsed, whichever
+    /// comes first - then arms any window deadline that was waiting on the
+    /// table. Runs at the top of every loop iteration, so both an incoming
+    /// ack (a RoomCmd) and the cap wake-up are observed promptly.
+    fn refresh_gates(&mut self) {
+        let now = tokio::time::Instant::now();
+        let cap = self.anim_broadcast_at + ANIM_ACK_CAP;
+        let capped = now >= cap;
+        let stamp = if capped { cap } else { now };
+        if self.table_settled_at.is_none()
+            && (capped || (0..self.seats.len()).all(|s| self.seat_settled(s)))
+        {
+            self.table_settled_at = Some(stamp);
+        }
+        if self.acting_settled_at.is_none()
+            && (capped || self.acting_seat().is_none_or(|s| self.seat_settled(s)))
+        {
+            self.acting_settled_at = Some(stamp);
+        }
+        // A collection window's clock starts only once the table has
+        // visually arrived (ADR-0018/0024 windows, gated per ADR-0028).
+        if let Some(t) = self.table_settled_at {
+            if self.bid_gate {
+                self.bid_gate = false;
+                self.bid_deadline = Some(t + BID_WINDOW);
+            }
+            if self.vote_gate {
+                self.vote_gate = false;
+                self.vote_deadline = Some(t + VOTE_WINDOW);
+            }
+        }
+    }
+
+    /// Turn-clock anchor (ADR-0028): the clock starts at the later of the
+    /// last accepted command and the acting seat's own render ack (or the
+    /// cap) - rendering time never eats thinking time.
+    fn acting_anchor(&self, last_progress: tokio::time::Instant) -> tokio::time::Instant {
+        let settled = self
+            .acting_settled_at
+            .unwrap_or(self.anim_broadcast_at + ANIM_ACK_CAP);
+        last_progress.max(settled)
+    }
+
+    /// Bot pacing anchor (ADR-0028): a bot moves only once the whole table
+    /// has rendered the previous move (or the cap) - otherwise bots race
+    /// ahead of what the humans can see.
+    fn table_anchor(&self, last_progress: tokio::time::Instant) -> tokio::time::Instant {
+        let settled = self
+            .table_settled_at
+            .unwrap_or(self.anim_broadcast_at + ANIM_ACK_CAP);
+        last_progress.max(settled)
+    }
+
+    /// Records a client's "rendered through N" ack (ADR-0028). `through_seq`
+    /// is untrusted wire input: clamped to what was actually sent, and only
+    /// ever raises the seat's watermark (acking can only release timers
+    /// earlier, never delay anything).
+    fn handle_animation_done(&mut self, player_id: &str, through_seq: u64) {
+        let Some(seat) = self.seat_of(player_id) else {
+            return;
+        };
+        if self.acked.len() < self.seats.len() {
+            self.acked.resize(self.seats.len(), 0);
+        }
+        let acked = through_seq.min(self.seq);
+        if let Some(a) = self.acked.get_mut(seat) {
+            *a = (*a).max(acked);
+        }
+    }
+
+    /// Bumps the Update counter (every broadcast Update carries it) and
+    /// closes the animation gates: a fresh broadcast means fresh visuals
+    /// the table has not rendered yet (ADR-0028).
+    fn next_update_seq(&mut self) -> u64 {
+        self.seq += 1;
+        self.anim_broadcast_at = tokio::time::Instant::now();
+        self.table_settled_at = None;
+        self.acting_settled_at = None;
+        self.seq
     }
 
     /// How long the acting seat may stall before its canonical action is
@@ -853,6 +1022,11 @@ impl Room {
         // bribe vote (ADR-0024).
         self.bid_deadline = None;
         self.vote_deadline = None;
+        // Animation gates (ADR-0028): everyone is aligned at game start -
+        // GameStarted is not an Update and needs no ack.
+        self.acked = vec![self.seq; self.seats.len()];
+        self.bid_gate = false;
+        self.vote_gate = false;
         info!(room = %self.code, players = self.seats.len(), "game started");
 
         let remaining = self.time_remaining_secs();
@@ -902,8 +1076,10 @@ impl Room {
             return;
         };
         let banks = self.banks_field();
+        let seq = self.next_update_seq();
         let msgs: Vec<ServerMessage> = (0..self.seats.len())
             .map(|seat| ServerMessage::Update {
+                seq,
                 events: events.clone(), // TimeUp is public
                 view: Box::new(ClientView::for_seat(&next, self.engine.content(), seat)),
                 banks: banks.clone(),
@@ -948,21 +1124,28 @@ impl Room {
             Ok((next, events)) => {
                 self.history.record_command(&self.code, &cmd);
                 // Sealed-bid window timer (ADR-0018): a separate, parallel
-                // clock from the turn timer/time bank, armed the instant a
-                // window opens and cleared the instant it's no longer open -
-                // whether it resolved or the game ended.
+                // clock from the turn timer/time bank. Opening no longer
+                // arms it directly - it flags the gate, and refresh_gates
+                // arms the 5s deadline once the table has visually arrived
+                // at the tile (or the ack cap passes, ADR-0028). Cleared
+                // the instant the window is no longer open - whether it
+                // resolved or the game ended.
                 let is_blind_auction = matches!(next.turn, TurnPhase::BlindAuction { .. });
                 if is_blind_auction && !was_blind_auction {
-                    self.bid_deadline = Some(tokio::time::Instant::now() + BID_WINDOW);
+                    self.bid_gate = true;
+                    self.bid_deadline = None;
                 } else if !is_blind_auction {
+                    self.bid_gate = false;
                     self.bid_deadline = None;
                 }
                 // Corruption bribe vote window (ADR-0024): the same
                 // transition-detection pattern, its own independent timer.
                 let is_bribe_vote = matches!(next.turn, TurnPhase::BribeVote { .. });
                 if is_bribe_vote && !was_bribe_vote {
-                    self.vote_deadline = Some(tokio::time::Instant::now() + VOTE_WINDOW);
+                    self.vote_gate = true;
+                    self.vote_deadline = None;
                 } else if !is_bribe_vote {
+                    self.vote_gate = false;
                     self.vote_deadline = None;
                 }
                 let finished_winner = match next.phase {
@@ -972,8 +1155,10 @@ impl Room {
                 // One view + event feed per seat: trade offers and their
                 // lifecycle events reach only the two parties (ADR-0007).
                 let banks = self.banks_field();
+                let seq = self.next_update_seq();
                 let msgs: Vec<ServerMessage> = (0..self.seats.len())
                     .map(|seat| ServerMessage::Update {
+                        seq,
                         events: events
                             .iter()
                             .filter(|e| event_visible_to(e, seat))
@@ -1732,6 +1917,13 @@ mod tests {
             banks: Vec::new(),
             bid_deadline: None,
             vote_deadline: None,
+            seq: 0,
+            acked: Vec::new(),
+            anim_broadcast_at: tokio::time::Instant::now(),
+            table_settled_at: None,
+            acting_settled_at: None,
+            bid_gate: false,
+            vote_gate: false,
         }
     }
 
@@ -2260,6 +2452,139 @@ mod tests {
         assert!(resolved);
     }
 
+    /// Acks "rendered through `through_seq`" for `player` (ADR-0028).
+    /// `u64::MAX` acks everything sent so far - the server clamps.
+    async fn ack(room: &mpsc::Sender<RoomCmd>, player: &str) {
+        room.send(RoomCmd::AnimationDone {
+            player_id: player.into(),
+            through_seq: u64::MAX,
+        })
+        .await
+        .expect("room task alive");
+    }
+
+    /// Nobody acks: the sealed-bid window's 5s clock must not start until
+    /// the animation-ack hard cap passes (ADR-0028) - auto-abstain
+    /// resolution lands at cap + window, not at window.
+    #[tokio::test(start_paused = true)]
+    async fn bid_window_waits_for_animation_acks_before_its_clock_starts() {
+        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let ids = ["guest:alice", "guest:bob"];
+
+        roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        let opened_at = tokio::time::Instant::now();
+
+        let resolved_at = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::BlindAuctionResolved { .. }))
+                {
+                    return tokio::time::Instant::now();
+                }
+            }
+        })
+        .await
+        .expect("must resolve within the mock-clock timeout");
+        let elapsed = resolved_at - opened_at;
+        assert!(
+            elapsed >= ANIM_ACK_CAP + BID_WINDOW - Duration::from_millis(200),
+            "window clock must wait for the ack cap, resolved after {elapsed:?}"
+        );
+    }
+
+    /// Once every connected seat acks the opening Update, the window's 5s
+    /// clock starts immediately - well before the hard cap (ADR-0028).
+    #[tokio::test(start_paused = true)]
+    async fn bid_window_clock_starts_early_once_everyone_acks() {
+        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let ids = ["guest:alice", "guest:bob"];
+
+        roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        let opened_at = tokio::time::Instant::now();
+        ack(&room, "guest:alice").await;
+        ack(&room, "guest:bob").await;
+
+        let resolved_at = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::BlindAuctionResolved { .. }))
+                {
+                    return tokio::time::Instant::now();
+                }
+            }
+        })
+        .await
+        .expect("must resolve within the mock-clock timeout");
+        let elapsed = resolved_at - opened_at;
+        assert!(
+            elapsed < ANIM_ACK_CAP + BID_WINDOW - Duration::from_secs(1),
+            "acks must release the window early, resolved after {elapsed:?}"
+        );
+    }
+
+    /// The turn clock (blitz/AFK) starts from the acting seat's own render
+    /// ack, not from the broadcast (ADR-0028): a silent seat's canonical
+    /// auto-play lands at cap + turn limit.
+    #[tokio::test(start_paused = true)]
+    async fn turn_clock_waits_for_the_acting_seats_ack() {
+        let (room, mut client_rxs) =
+            started_room_with_bank(Some(Duration::from_secs(5)), None).await;
+        let ids = ["guest:alice", "guest:bob"];
+
+        let discoverer = roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        let other = 1 - discoverer;
+        // Resolve the window fast (both bid); the discoverer then sits in
+        // AwaitEnd with the 5s turn clock gated on their (never-sent) ack.
+        for seat in [discoverer, other] {
+            room.send(RoomCmd::Game {
+                player_id: ids[seat].into(),
+                cmd: CommandKind::SubmitBlindBid { amount: 0 },
+            })
+            .await
+            .expect("room task alive");
+        }
+        let resolved_at = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::BlindAuctionResolved { .. }))
+                {
+                    return tokio::time::Instant::now();
+                }
+            }
+        })
+        .await
+        .expect("window resolves once everyone has bid");
+
+        let advanced_at = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::TurnStarted { .. }))
+                {
+                    return tokio::time::Instant::now();
+                }
+            }
+        })
+        .await
+        .expect("the canonical EndTurn must eventually auto-play");
+        let elapsed = advanced_at - resolved_at;
+        assert!(
+            elapsed >= ANIM_ACK_CAP + Duration::from_secs(5) - Duration::from_millis(200),
+            "turn clock must wait for the acting seat's ack cap, fired after {elapsed:?}"
+        );
+    }
+
     /// Spawns a room with alice already jailed and ready to offer a bribe.
     /// Legal Route/Corruption are deterministic player choices, not RNG
     /// outcomes worth re-deriving through a gameplay crawl (unlike
@@ -2299,6 +2624,13 @@ mod tests {
             banks: vec![0, 0],
             bid_deadline: None,
             vote_deadline: None,
+            seq: 0,
+            acked: Vec::new(),
+            anim_broadcast_at: tokio::time::Instant::now(),
+            table_settled_at: None,
+            acting_settled_at: None,
+            bid_gate: false,
+            vote_gate: false,
         };
         let mut client_rxs = Vec::new();
         for seat in &mut room.seats {

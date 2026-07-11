@@ -127,7 +127,7 @@ ADR-0025); only the CLI accepts a pasted token instead.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 133 tests, formatting, and lints (all must pass before a PR)
+# Rust: 136 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -213,11 +213,16 @@ seat, ADR-0014), `configure {settings}` (host, lobby: set the room's timers
 and rules, clamped server-side, ADR-0015), `cmd {cmd}`,
 `feedback {rating, comment?}` (post-game survey: 1-5 plus an optional
 comment, stored in the server history; one per player per game, fully
-optional and never blocking), `ping`. Server -> client: `room_created`, `joined`
+optional and never blocking), `animation_done {through_seq}` (this client
+finished rendering every update through `through_seq`, ADR-0028 - the
+server's animation-sensitive timers wait for these acks, bounded by a 6s
+hard cap; clients with no animations send it immediately), `ping`.
+Server -> client: `room_created`, `joined`
 (includes the resolved mod bundle, a per-seat reconnect token - present it
 in `auth.reconnect` to re-take a guest seat, ADR-0008 - and, mid-game, a
 state snapshot), `lobby`,
-`game_started`, `update {events, view}`, `rejected {error}` (sent only to
+`game_started`, `update {seq, events, view}` (`seq` is the monotonic
+per-room counter the ack above refers to), `rejected {error}` (sent only to
 the offending player), `error`, `pong`. Shapes live in `parcello-protocol`;
 commands and events are the engine's own serialized types, so the wire
 format is the replay format.

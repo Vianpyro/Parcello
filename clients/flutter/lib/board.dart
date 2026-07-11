@@ -49,6 +49,16 @@ int ringSide(int n) => n ~/ 4 + 1; // the `d` above
   return (r: i - 3 * d + 4, c: d); // right column down
 }
 
+/// One transient cash delta ("+$200" / "-$50") rising over a tile
+/// (ADR-0028 extras). Owned by the session's animation director; the board
+/// only renders whatever is currently alive.
+class CashFloater {
+  final int id;
+  final int tile;
+  final int amount;
+  const CashFloater({required this.id, required this.tile, required this.amount});
+}
+
 class BoardWidget extends StatefulWidget {
   final GameContent content;
   final ClientView? view;
@@ -57,6 +67,11 @@ class BoardWidget extends StatefulWidget {
   /// Whether tapping this tile would actually offer an action - gates the
   /// hover outline below (no highlight promising something a tap can't do).
   final bool Function(int tile) canAct;
+  /// Director-driven pawn positions (ADR-0028), advanced beat by beat;
+  /// falls back to the view's authoritative positions when absent.
+  final Map<int, int> pawnPositions;
+  /// Live cash floaters (ADR-0028 extras).
+  final List<CashFloater> floaters;
   final Widget center;
 
   const BoardWidget({
@@ -66,6 +81,8 @@ class BoardWidget extends StatefulWidget {
     required this.mySeat,
     required this.onTileTap,
     required this.canAct,
+    this.pawnPositions = const {},
+    this.floaters = const [],
     required this.center,
   });
 
@@ -88,7 +105,7 @@ class _BoardWidgetState extends State<BoardWidget> {
           PawnData(
             seat: s,
             color: pawnColors[s % pawnColors.length],
-            position: v.players[s].position,
+            position: widget.pawnPositions[s] ?? v.players[s].position,
             label: v.players[s].name.isEmpty
                 ? '${s + 1}'
                 : v.players[s].name.characters.first.toUpperCase(),
@@ -130,8 +147,47 @@ class _BoardWidgetState extends State<BoardWidget> {
           Positioned.fill(
             child: _PawnLayer(side: d, cellW: w, cellH: h, pawns: _pawns()),
           ),
+          // Rising cash deltas over their tiles (ADR-0028 extras).
+          for (final f in widget.floaters) _floater(f, w, h, d),
         ]);
       }),
+    );
+  }
+
+  Widget _floater(CashFloater f, double w, double h, int d) {
+    final c = cellOf(f.tile, d);
+    final gain = f.amount > 0;
+    return Positioned(
+      left: (c.c - 1) * w,
+      top: (c.r - 1) * h,
+      width: w,
+      height: h,
+      child: IgnorePointer(
+        child: TweenAnimationBuilder<double>(
+          key: ValueKey(f.id),
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 1100),
+          builder: (context, t, _) => Opacity(
+            opacity: t < 0.6 ? 1 : (1 - (t - 0.6) / 0.4).clamp(0.0, 1.0),
+            child: Transform.translate(
+              offset: Offset(0, -h * 0.4 * t),
+              child: Center(
+                child: Text(
+                  '${gain ? '+' : '-'}\$${f.amount.abs()}',
+                  style: TextStyle(
+                    fontSize: (w * 0.16).clamp(13.0, 18.0),
+                    fontWeight: FontWeight.w800,
+                    color: gain
+                        ? const Color(0xFF2F6F3E)
+                        : const Color(0xFFC0564F),
+                    shadows: const [Shadow(color: Colors.white, blurRadius: 4)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -272,7 +328,9 @@ class _BoardWidgetState extends State<BoardWidget> {
     if (v == null) return const SizedBox.shrink();
     final here = [
       for (var s = 0; s < v.players.length; s++)
-        if (!v.players[s].bankrupt && v.players[s].position == i) s,
+        if (!v.players[s].bankrupt &&
+            (widget.pawnPositions[s] ?? v.players[s].position) == i)
+          s,
     ];
     return Positioned(
       bottom: 3,

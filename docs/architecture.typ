@@ -301,7 +301,13 @@ appears outside this layer. Migrations are managed with `sqlx-cli`.
 
 The client holds a *projected* copy of `GameState` derived entirely from
 server-sent `StateUpdate` messages. Command submission may be optimistic for
-animation purposes, but the server result is always authoritative.
+animation purposes, but the server result is always authoritative. Rendering
+pace and server timers meet through the animation-ack watermark (ADR-0028):
+every `Update` carries a sequence number, clients ack "rendered through N"
+once their animation beats finish, and the Session Layer's
+animation-sensitive timers (sealed-bid/vote windows, the turn clock, bot
+pacing) wait for that watermark - bounded by a hard cap so no client can
+stall the table, and never gating the absolute game clock.
 
 #table(
   columns: (22%, 1fr),

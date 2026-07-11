@@ -1001,6 +1001,7 @@ impl<'e> Exec<'e> {
     }
 
     fn go_to_jail(&mut self, p: usize) {
+        let from = self.st.players[p].position;
         self.st.players[p].position = self.content.jail_position();
         self.st.players[p].jailed = true;
         // A route landing its holder back on Go To Jail mid-course (ADR-0024
@@ -1010,7 +1011,7 @@ impl<'e> Exec<'e> {
         if self.st.players[p].jail_route.take().is_some() {
             self.maybe_refill_hand(p);
         }
-        self.ev.push(Event::WentToJail { player: p });
+        self.ev.push(Event::WentToJail { player: p, from });
     }
 
     /// Applies a tile's rent-boost level to a base rent (ADR-0012):

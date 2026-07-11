@@ -15,9 +15,10 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0024` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0028` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
-   0017-0024 are the v2 ruleset (implemented).
+   0017-0024 are the v2 ruleset (implemented); 0026 the spotlight; 0028
+   the animation-ack watermark (server timers wait for client rendering).
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -59,7 +60,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 133 tests, all must pass
+cargo test  --workspace --locked          # 136 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -155,7 +156,13 @@ architecture doc section 5; dependencies point downward only):
   `GameState::net_worth` wins, ties to lowest seat, `Event::TimeUp`
   (ADR-0010); `GameStarted`/`Joined` carry `time_remaining` for the game
   countdown (clients mirror the net-worth formula) and `turn_seconds` for a
-  per-turn countdown the clients reset on each Update; post-game
+  per-turn countdown the clients reset once their animations finish;
+  animation-ack watermark (ADR-0028): every `Update` carries a monotonic
+  `seq`, clients ack rendered-through-N via `animation_done`, and the
+  bid/vote windows (table-wide), turn clock/bank drain (acting seat) and
+  `BOT_THINK` (table) wait for the watermark, bounded by
+  `ANIM_ACK_CAP` = 6s - bots/disconnected seats/the CLI settle instantly,
+  the game clock is never gated; post-game
   survey `feedback` message:
   Finished phase only, once per seat, rating 1-5 + comment capped at 500
   chars, stored via `GameHistory::record_feedback` - the client UI must
@@ -194,7 +201,12 @@ architecture doc section 5; dependencies point downward only):
   equivalent - stubbed out on web, hidden behind `kIsWeb` in the menu),
   `session_storage.dart` (a file on desktop, `localStorage` on web). When
   adding an Event or CommandKind, update it too (protocol.dart +
-  main.dart), same drill as the CLI.
+  main.dart), same drill as the CLI. `session.dart` hosts the animation
+  director (ADR-0028): Updates queue and play as paced beats (pawn
+  slides, card reveal banner, jail slide, spotlight flash, cash
+  floaters); the authoritative view applies after the beats and the
+  `animation_done` ack releases the server's gated timers - when adding
+  an Event with a visual, give it a beat in `_playBeat`.
 
 Mods: the server resolves a default set at boot (`--mod`), and each room
 may override it at creation via the optional `mods` field on Create
