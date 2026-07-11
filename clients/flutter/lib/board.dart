@@ -30,7 +30,7 @@ const _groupColors = <String, Color>{
   'yellow': Color(0xFFE0C93C),
   'green': Color(0xFF4D9E5A),
   'navy': Color(0xFF3B5A8A),
-  'resort': Color(0xFF2A9D8F),
+  'utility': Color(0xFF2A9D8F),
   'transit': Color(0xFF444444),
   'works': Color(0xFF999999),
 };
@@ -49,11 +49,14 @@ int ringSide(int n) => n ~/ 4 + 1; // the `d` above
   return (r: i - 3 * d + 4, c: d); // right column down
 }
 
-class BoardWidget extends StatelessWidget {
+class BoardWidget extends StatefulWidget {
   final GameContent content;
   final ClientView? view;
   final int? mySeat;
   final void Function(int tile) onTileTap;
+  /// Whether tapping this tile would actually offer an action - gates the
+  /// hover outline below (no highlight promising something a tap can't do).
+  final bool Function(int tile) canAct;
   final Widget center;
 
   const BoardWidget({
@@ -62,11 +65,22 @@ class BoardWidget extends StatelessWidget {
     required this.view,
     required this.mySeat,
     required this.onTileTap,
+    required this.canAct,
     required this.center,
   });
 
+  @override
+  State<BoardWidget> createState() => _BoardWidgetState();
+}
+
+class _BoardWidgetState extends State<BoardWidget> {
+  /// Tile currently under the pointer, or null. A plain field (not a
+  /// StatefulBuilder-local one) so it survives rebuilds triggered by a new
+  /// server `Update` while the mouse hasn't moved.
+  int? _hoveredTile;
+
   List<PawnData> _pawns() {
-    final v = view;
+    final v = widget.view;
     if (v == null) return const [];
     return [
       for (var s = 0; s < v.players.length; s++)
@@ -84,7 +98,7 @@ class BoardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final n = content.board.length;
+    final n = widget.content.board.length;
     if (!isSquareRing(n)) return _wrapLayout();
     final d = ringSide(n); // grid is d x d
     return AspectRatio(
@@ -101,7 +115,7 @@ class BoardWidget extends StatelessWidget {
               margin: const EdgeInsets.all(2),
               padding: const EdgeInsets.all(8),
               color: const Color(0xFFDFE7D8),
-              child: center,
+              child: widget.center,
             ),
           ),
           for (var i = 0; i < n; i++)
@@ -129,7 +143,7 @@ class BoardWidget extends StatelessWidget {
         spacing: 2,
         runSpacing: 2,
         children: [
-          for (var i = 0; i < content.board.length; i++)
+          for (var i = 0; i < widget.content.board.length; i++)
             SizedBox(
                 width: 110, height: 96, child: _tile(i, cellW: 110, staticPawns: true)),
         ],
@@ -139,18 +153,19 @@ class BoardWidget extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(8),
           color: const Color(0xFFDFE7D8),
-          child: center,
+          child: widget.center,
         ),
       ),
     ]);
   }
 
   Widget _tile(int i, {required double cellW, bool staticPawns = false}) {
-    final def = content.board[i];
-    final ts = view?.tiles.elementAtOrNull(i);
+    final def = widget.content.board[i];
+    final ts = widget.view?.tiles.elementAtOrNull(i);
     // The Exposition corner's spotlight (ADR-0026): fully public, so this
     // check needs no seat-masking, unlike ts?.owner.
-    final spotlit = view?.spotlight?.tile == i;
+    final spotlit = widget.view?.spotlight?.tile == i;
+    final hovering = _hoveredTile == i && widget.canAct(i);
     // Text scales with the cell so it stays legible on any window size.
     final nameSize = (cellW * 0.115).clamp(11.0, 17.0);
     final metaSize = (cellW * 0.095).clamp(9.0, 13.0);
@@ -159,82 +174,101 @@ class BoardWidget extends StatelessWidget {
     final band = def.isProperty
         ? (_groupColors[def.group] ?? const Color(0xFF777777))
         : const Color(0xFFB9C2B0);
-    return GestureDetector(
-      onTap: () => onTileTap(i),
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hoveredTile = i),
+      onExit: (_) {
+        // Guard against an adjacent tile's onEnter firing before this
+        // tile's onExit - only clear if we're still the hovered one.
+        if (_hoveredTile == i) setState(() => _hoveredTile = null);
+      },
       child: Container(
-        margin: const EdgeInsets.all(1),
+        // A separate outer ring from the inner ownership/spotlight border
+        // below, so the hover outline never competes with those for the
+        // same edge - it just frames the whole tile when relevant.
         decoration: BoxDecoration(
-          color: const Color(0xFFF4F7EF),
-          borderRadius: BorderRadius.circular(2),
-          border: spotlit
-              ? Border.all(color: const Color(0xFFD8B45A), width: 3)
-              : ts?.owner != null && ts!.owner == mySeat
-                  ? Border.all(color: const Color(0xFF2F6F3E), width: 2)
-                  : null,
+          border: hovering
+              ? Border.all(color: const Color(0xFF3D7DC0), width: 1.5)
+              : null,
+          borderRadius: BorderRadius.circular(3),
         ),
-        child: Stack(children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Container(height: bandH, color: band),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(4, 3, 4, 0),
-                child: Text(
-                  def.name,
-                  maxLines: 3,
-                  style: TextStyle(
-                    fontSize: nameSize,
-                    height: 1.1,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF1E1E1E),
+        child: GestureDetector(
+          onTap: () => widget.onTileTap(i),
+          child: Container(
+            margin: const EdgeInsets.all(1),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF4F7EF),
+              borderRadius: BorderRadius.circular(2),
+              border: spotlit
+                  ? Border.all(color: const Color(0xFFD8B45A), width: 3)
+                  : ts?.owner != null && ts!.owner == widget.mySeat
+                      ? Border.all(color: const Color(0xFF2F6F3E), width: 2)
+                      : null,
+            ),
+            child: Stack(children: [
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Container(height: bandH, color: band),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 3, 4, 0),
+                    child: Text(
+                      def.name,
+                      maxLines: 3,
+                      style: TextStyle(
+                        fontSize: nameSize,
+                        height: 1.1,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF1E1E1E),
+                      ),
+                      overflow: TextOverflow.fade,
+                    ),
                   ),
-                  overflow: TextOverflow.fade,
                 ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 0, 4, 3),
-              child: Text(
-                _meta(def, ts, spotlit: spotlit),
-                style: TextStyle(
-                  fontSize: metaSize,
-                  fontWeight: FontWeight.w700,
-                  color: ts?.mortgaged == true
-                      ? const Color(0xFFC0564F)
-                      : spotlit
-                          ? const Color(0xFFA9812F)
-                          : const Color(0xFF555555),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 3),
+                  child: Text(
+                    _meta(def, ts, spotlit: spotlit),
+                    style: TextStyle(
+                      fontSize: metaSize,
+                      fontWeight: FontWeight.w700,
+                      color: ts?.mortgaged == true
+                          ? const Color(0xFFC0564F)
+                          : spotlit
+                              ? const Color(0xFFA9812F)
+                              : const Color(0xFF555555),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ]),
-          if (spotlit)
-            Positioned(
-              top: 2,
-              left: 2,
-              child: Text('✨', style: TextStyle(fontSize: ownerSz)),
-            ),
-          if (ts?.owner != null)
-            Positioned(
-              top: 2,
-              right: 2,
-              child: Container(
-                width: ownerSz,
-                height: ownerSz,
-                decoration: BoxDecoration(
-                  color: pawnColors[ts!.owner! % pawnColors.length],
-                  borderRadius: BorderRadius.circular(2),
-                  border: Border.all(color: Colors.black26),
+              ]),
+              if (spotlit)
+                Positioned(
+                  top: 2,
+                  left: 2,
+                  child: Text('✨', style: TextStyle(fontSize: ownerSz)),
                 ),
-              ),
-            ),
-          if (staticPawns) _staticPawns(i),
-        ]),
+              if (ts?.owner != null)
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Container(
+                    width: ownerSz,
+                    height: ownerSz,
+                    decoration: BoxDecoration(
+                      color: pawnColors[ts!.owner! % pawnColors.length],
+                      borderRadius: BorderRadius.circular(2),
+                      border: Border.all(color: Colors.black26),
+                    ),
+                  ),
+                ),
+              if (staticPawns) _staticPawns(i),
+            ]),
+          ),
+        ),
       ),
     );
   }
 
   Widget _staticPawns(int i) {
-    final v = view;
+    final v = widget.view;
     if (v == null) return const SizedBox.shrink();
     final here = [
       for (var s = 0; s < v.players.length; s++)

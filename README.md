@@ -235,9 +235,10 @@ mods/<id>/
 ```
 
 The default `mods/base` is the **32-tile fast board** (a 9x9 ring, no
-Community Chest, four "resorts" evenly spaced every 8 tiles instead of four
-stations, one chance tile, one tax tile; the design goal is fast, dynamic
-games). Base is loaded first; merge is last-loaded-wins per
+Community Chest, two "utility" tiles - Wi-Fi and The Chatbot,
+group-scaled like Monopoly's Water Works/Electric Company - instead of
+four stations, two chance tiles, one tax tile; the design goal is fast,
+dynamic games). Base is loaded first; merge is last-loaded-wins per
 key: tiles and cards replace in place by id, rule scalars override by
 name; every conflict is logged at WARN. Unknown rule keys are ignored
 with a warning. The resolved bundle is pushed to clients on join, so
@@ -353,7 +354,7 @@ N complete colour groups (`rules.win_full_groups`, off by default in the
 base fast board, ADR-0013) - and the primary v2 win condition, a race to
 `rules.win_victory_points` (20 in the base fast board, ADR-0020):
 `PlayerView.victory_points` is `3` per complete colour group, `2` per
-conglomerate-level tile, `1` per group-scaled ("resort") tile owned, plus
+conglomerate-level tile, `1` per group-scaled ("utility") tile owned, plus
 a stored `+2`/round bonus that permanently banks to whoever has the
 strictly highest cash each time every surviving player has completed a
 turn (ties to the lowest seat) - everything but the round bonus is a live

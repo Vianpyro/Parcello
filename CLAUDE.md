@@ -200,8 +200,9 @@ Mods: the server resolves a default set at boot (`--mod`), and each room
 may override it at creation via the optional `mods` field on Create
 (ADR-0006; ids are allowlist-validated in `ws.rs` because they become
 filesystem paths). Default `mods/base` is the 32-tile fast board (9x9
-ring, no Community Chest, four resorts evenly spaced every 8 tiles, one
-chance tile, one tax tile, `docs/business-tour-direction.md`);
+ring, no Community Chest, two "utility" tiles (Wi-Fi, The Chatbot -
+group-scaled, modern reinterpretations of the original resort idea), two
+chance tiles, one tax tile, `docs/business-tour-direction.md`);
 `mods/highroller` is a rules-only example. Clients render any `4*(d-1)`
 square ring (32, 40, ...); other tile counts fall back to a wrap layout.
 
@@ -260,7 +261,7 @@ ADR-0010), domination (`rules.win_full_groups` complete groups, ADR-0013,
 off by default so it doesn't short-circuit the race), and the primary v2
 condition - a race to `rules.win_victory_points` (ADR-0020, 20 in base:
 3/complete colour group, 2/conglomerate-level tile, 1/group-scaled
-"resort" tile owned, plus a stored, non-reversible `+2`/round bonus to
+("utility") tile owned, plus a stored, non-reversible `+2`/round bonus to
 whoever has the strictly highest cash each time every surviving player
 has completed a hand refill, ties to the lowest seat; reaching the target
 ends the game instantly, `Event::WonByPoints`; if a `Build` empties the

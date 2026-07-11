@@ -355,7 +355,7 @@ impl GameState {
 
     /// Race-to-target score (ADR-0020): 3 per complete colour group, 2 per
     /// conglomerate-level tile (`houses == max_houses_per_property`), 1 per
-    /// group-scaled ("resort") tile owned, plus the stored round bonus.
+    /// group-scaled ("utility") tile owned, plus the stored round bonus.
     /// Fully reversible except the round bonus - lose the group/tile, lose
     /// the points.
     pub fn victory_points(&self, content: &GameContent, player: usize) -> i64 {

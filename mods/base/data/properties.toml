@@ -1,11 +1,27 @@
 # Default board: 32 tiles on a 9x9 ring, tuned for fast/dynamic games
 # (Business-Tour direction, see docs/business-tour-direction.md). Shorter
-# laps than a 40-tile Monopoly-style board, no Community Chest, four
-# "resorts" (group-scaled) evenly spaced every 8 tiles instead of four
-# stations, no utilities. One chance tile, one tax tile. The Exposition
-# (pos 16) replaces the old free-parking no-op with the spotlight
-# mechanic (ADR-0026). board[0] must be the Go tile; corners sit at
-# 0, 8, 16, 24.
+# laps than a 40-tile Monopoly-style board, no Community Chest. Two
+# "utility" tiles (group-scaled, like Monopoly's Water Works/Electric
+# Company - ownership-count rent scaling was already exactly the right
+# model, no dice to port since ADR-0017 removed them): Wi-Fi and The
+# Chatbot, modern reinterpretations rather than the original "resorts"
+# idea. Only 2 exist, so rents[2..5] are unreachable padding - rents[0]/
+# rents[1] (owning one vs. both) carry the tile's whole economic weight,
+# especially since group_scaled rejects Build (no house escalation to
+# fall back on), hence the steep 100 -> 400 jump for the full pair.
+# Two chance tiles, one tax tile. Position 20 is deliberately
+# chance: with the 2..6 velocity range every player's first full hand
+# cycle sums to exactly 20 tiles moved, so everyone converges on this
+# tile in turn 1 regardless of play order - a random draw there is more
+# fun than a deterministic rent trap. Position 28 (between Go To Jail and
+# Go) is chance for the same "keep the run-in to Go lively" reason, moved
+# there from position 3 (too close to Go to matter much). Income Tax
+# sits at position 31, the last tile before Go (like Monopoly, no dice
+# needed for this one) - a player low on cash after a bad lap gets one
+# final gut-check (possibly a forced mortgage/sale) right before the
+# relief of another salary. The Exposition (pos 16) replaces the old
+# free-parking no-op with the spotlight mechanic (ADR-0026). board[0]
+# must be the Go tile; corners sit at 0, 8, 16, 24.
 
 [[tile]]
 id = "go"
@@ -31,18 +47,22 @@ house_cost = 50
 rents = [4, 20, 60, 180, 320, 450]
 
 [[tile]]
-id = "chance_1"
-name = "Chance"
-type = "chance"
+id = "pier_street"
+name = "Pier Street"
+type = "property"
+group = "brown"
+price = 80
+house_cost = 50
+rents = [6, 30, 90, 270, 400, 550]
 
 [[tile]]
-id = "west_resort"
-name = "West Resort"
+id = "wifi"
+name = "Wi-Fi"
 type = "property"
-group = "resort"
+group = "utility"
 price = 200
 rent_model = "group_scaled"
-rents = [25, 50, 100, 200, 200, 200]
+rents = [100, 400, 400, 400, 400, 400]
 
 [[tile]]
 id = "elm_avenue"
@@ -63,10 +83,13 @@ house_cost = 50
 rents = [8, 40, 100, 300, 450, 600]
 
 [[tile]]
-id = "income_tax"
-name = "Income Tax"
-type = "tax"
-amount = 200
+id = "willow_street"
+name = "Willow Street"
+type = "property"
+group = "lightblue"
+price = 130
+house_cost = 50
+rents = [10, 50, 110, 330, 480, 650]
 
 [[tile]]
 id = "jail"
@@ -101,13 +124,13 @@ house_cost = 100
 rents = [12, 60, 180, 500, 700, 900]
 
 [[tile]]
-id = "north_resort"
-name = "North Resort"
+id = "chatbot"
+name = "The Chatbot"
 type = "property"
-group = "resort"
+group = "utility"
 price = 200
 rent_model = "group_scaled"
-rents = [25, 50, 100, 200, 200, 200]
+rents = [100, 400, 400, 400, 400, 400]
 
 [[tile]]
 id = "foundry_street"
@@ -169,13 +192,9 @@ house_cost = 150
 rents = [20, 100, 300, 750, 925, 1100]
 
 [[tile]]
-id = "east_resort"
-name = "East Resort"
-type = "property"
-group = "resort"
-price = 200
-rent_model = "group_scaled"
-rents = [25, 50, 100, 200, 200, 200]
+id = "chance_2"
+name = "Chance"
+type = "chance"
 
 [[tile]]
 id = "amber_avenue"
@@ -237,22 +256,9 @@ house_cost = 200
 rents = [28, 150, 450, 1000, 1200, 1400]
 
 [[tile]]
-id = "south_resort"
-name = "South Resort"
-type = "property"
-group = "resort"
-price = 200
-rent_model = "group_scaled"
-rents = [25, 50, 100, 200, 200, 200]
-
-[[tile]]
-id = "sovereign_court"
-name = "Sovereign Court"
-type = "property"
-group = "navy"
-price = 320
-house_cost = 200
-rents = [30, 150, 450, 1050, 1250, 1450]
+id = "chance_1"
+name = "Chance"
+type = "chance"
 
 [[tile]]
 id = "regent_plaza"
@@ -271,3 +277,9 @@ group = "navy"
 price = 400
 house_cost = 200
 rents = [50, 200, 600, 1400, 1700, 2000]
+
+[[tile]]
+id = "income_tax"
+name = "Income Tax"
+type = "tax"
+amount = 200

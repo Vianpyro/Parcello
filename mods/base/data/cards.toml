@@ -19,11 +19,11 @@ tile = "crown_heights"
 collect_go = true
 
 [[chance]]
-id = "ch_advance_resort"
-text = "A weekend at North Resort awaits."
+id = "ch_advance_chatbot"
+text = "Free unlimited queries - The Chatbot awaits."
 [chance.effect]
 type = "move_to"
-tile = "north_resort"
+tile = "chatbot"
 collect_go = true
 
 [[chance]]

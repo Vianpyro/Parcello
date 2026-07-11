@@ -349,6 +349,7 @@ class GameScreen extends StatelessWidget {
                 view: s.view,
                 mySeat: s.seat,
                 onTileTap: (i) => _tileMenu(context, i),
+                canAct: _hasTileActions,
                 center: _CenterPanel(s: s),
               ),
               // Played movement card, floating over the middle of the board.
@@ -362,9 +363,32 @@ class GameScreen extends StatelessWidget {
     );
   }
 
+  /// Whether tapping tile `i` would offer at least one action - owning a
+  /// tile always does (mortgage/redeem is unconditional below), a rival's
+  /// tile only under the same seize conditions `_tileMenu` checks. Drives
+  /// both the board's hover outline and the tap guard right below it.
+  bool _hasTileActions(int i) {
+    final v = s.view;
+    final c = s.content;
+    if (v == null || c == null) return false;
+    final def = c.board[i];
+    final ts = v.tiles[i];
+    if (ts.owner == s.seat) return true;
+    final expro = s.settings?.rules.expropriation ?? c.expropriation;
+    return ts.owner != null &&
+        ts.owner != s.seat &&
+        def.isProperty &&
+        expro > 0 &&
+        !ts.mortgaged &&
+        s.myTurn &&
+        v.turn.type == 'await_end' &&
+        v.players[s.seat!].position == i;
+  }
+
   /// Tile actions: build/sell/boost/mortgage on my tiles (ADR-0012),
   /// expropriate a rival's raw property (ADR-0011).
   void _tileMenu(BuildContext context, int i) {
+    if (!_hasTileActions(i)) return; // nothing to offer - don't even open the sheet
     final v = s.view;
     final c = s.content;
     if (v == null || c == null) return;

@@ -69,9 +69,10 @@ muted tones rather than classic Monopoly brights:
 | green | `#3F6B52` |
 | navy | `#2E3A5C` |
 
-The base mod also has a ninth group, `resort` (the four `group_scaled`
-tiles, evenly spaced every 8 tiles - ADR-0026's board relayout).
-Resorts are not one of the eight: render them as parchment cards with a
+The base mod also has a ninth group, `utility` (the two `group_scaled`
+tiles, Wi-Fi and The Chatbot - modern reinterpretations of Monopoly's
+Water Works/Electric Company, replacing the original "resort" idea).
+Utilities are not one of the eight: render them as parchment cards with a
 full `pc-gold` edge band - proposal, to confirm on the first board
 render.
 
@@ -148,7 +149,8 @@ Isometric diamond perspective (per the mockup). Content spec:
   in Source Serif 4.
 - Chance tiles: `pc-surface` dark, a lone "?" mark.
 - Corners: solid `pc-gold`, localized by tile kind (see Localization).
-- Resorts: parchment with the full gold edge band (palette note).
+- Utilities (Wi-Fi, The Chatbot): parchment with the full gold edge band
+  (palette note).
 - Centre plaza: `pc-sage`, minimal fine-line motif, no texture.
 - Blitz clock above the board: Inter tabular figures on a dark chip
   with a gold hairline; shows the 12 s ring, then the time-bank drain
