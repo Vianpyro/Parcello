@@ -20,7 +20,8 @@ class SeatInfo {
 }
 
 /// One board tile definition. Property fields are null for non-properties;
-/// `amount` is only set for tax tiles.
+/// `amount` is only set for tax tiles, `minPct`/`maxPct` only for
+/// net-worth tax tiles (ADR-0029).
 class TileDef {
   final String id;
   final String name;
@@ -30,6 +31,8 @@ class TileDef {
   final int houseCost;
   final String rentModel; // meaningful only when kind == property
   final int? amount;
+  final int? minPct;
+  final int? maxPct;
 
   TileDef.fromJson(Map<String, dynamic> j)
       : id = j['id'] as String,
@@ -39,7 +42,9 @@ class TileDef {
         price = j['kind']['price'] as int?,
         houseCost = j['kind']['house_cost'] as int? ?? 0,
         rentModel = j['kind']['rent_model'] as String? ?? 'houses',
-        amount = j['kind']['amount'] as int?;
+        amount = j['kind']['amount'] as int?,
+        minPct = j['kind']['min_pct'] as int?,
+        maxPct = j['kind']['max_pct'] as int?;
 
   bool get isProperty => kind == 'property';
 }
@@ -459,10 +464,17 @@ String describeEvent(
     case 'spotlight_started':
       final pct = e['rent_pct'] as int;
       final duration = e['duration_turns'] as int;
-      return "The Exposition spotlights ${t(e['tile'])} "
-          "(+$pct% rent for $duration turns)";
+      final span = duration <= 0
+          ? 'until the next Exposition landing'
+          : 'for $duration turns';
+      return "The Exposition spotlights ${t(e['tile'])} (+$pct% rent $span)";
     case 'spotlight_ended':
       return "The spotlight on ${t(e['tile'])} fades";
+    case 'rent_boost_consumed':
+      return "The boost on ${t(e['tile'])} is spent (one-shot trap)";
+    case 'round_bonus_awarded':
+      return "${p(e['player'])} is the round's cash leader: "
+          "+${e['points']} permanent VP";
     default:
       return e.toString();
   }

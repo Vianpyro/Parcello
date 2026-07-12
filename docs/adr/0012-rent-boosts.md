@@ -1,6 +1,10 @@
 # ADR-0012: rent boosts (pay to raise a tile's rent)
 
-Status: accepted
+Status: accepted (amended 2026-07: boosts are one-shot - the first rent
+collected at the boosted rate consumes the whole boost, whatever its
+level, announced by `Event::RentBoostConsumed`. A boost is now a trap you
+arm, not a permanent upgrade; playtests showed permanent boosts
+snowballed too hard for their cost.)
 
 ## Context
 Another Business-Tour lever for swingy games: paying to multiply a city's

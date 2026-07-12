@@ -49,6 +49,13 @@ pub enum TileKind {
     /// The Exposition corner (ADR-0026): landing here puts a random
     /// property tile in the spotlight (boosted rent for a while).
     Spotlight,
+    /// Progressive audit (ADR-0029): the lander pays a seeded-random
+    /// percent of their net worth in `min_pct..=max_pct`, weighted so the
+    /// heavier brackets are the rarer ones.
+    NetWorthTax {
+        min_pct: u8,
+        max_pct: u8,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -187,8 +194,10 @@ pub struct RuleParams {
     /// its board never triggers this regardless).
     #[serde(default)]
     pub spotlight_rent_pct: i64,
-    /// How many turns a spotlight stays active once drawn (ADR-0026); 0
-    /// disables (see `spotlight_rent_pct`).
+    /// How many turns a spotlight stays active once drawn (ADR-0026);
+    /// `<= 0` = permanent, replaced only by the next Exposition landing
+    /// (2026-07 amendment - the mechanic's off switch is
+    /// `spotlight_rent_pct = 0`).
     #[serde(default)]
     pub spotlight_duration_turns: i64,
     /// Velocity deck (ADR-0017): the movement hand is every integer in
@@ -291,6 +300,11 @@ impl GameContent {
                 if p.price <= 0 || bad_house_cost {
                     return Err(ContentError::InvalidProperty(t.id.clone()));
                 }
+            }
+            if let TileKind::NetWorthTax { min_pct, max_pct } = t.kind
+                && (min_pct < 1 || min_pct > max_pct || max_pct > 100)
+            {
+                return Err(ContentError::InvalidNetWorthTax(t.id.clone()));
             }
         }
         for c in self.chance.iter().chain(self.community.iter()) {

@@ -786,12 +786,37 @@ impl<'e> Exec<'e> {
             .property(tile)
             .ok_or(CommandError::NotAProperty)?;
         let ts = self.st.tiles[tile];
-        // Must be a rival's property, mortgage-free (the takeover shield);
-        // improved tiles are legal targets now (ADR-0022).
+        // Must be a rival's property; improved tiles are legal targets
+        // (ADR-0022).
         let from = match ts.owner {
-            Some(o) if o != p && !ts.mortgaged => o,
+            Some(o) if o != p => o,
             _ => return Err(CommandError::NotExpropriable),
         };
+        // A mortgaged tile is bought out at its flat mortgage value
+        // (price/2), paid to the owner, and transfers still mortgaged -
+        // the buyer redeems at +10% like any other transferee (ADR-0022,
+        // amended 2026-07: the mortgage used to be the takeover shield;
+        // it is now the cheap-buyout weak point instead). No expropriation
+        // percent, no market multiplier: the price is the mortgage price.
+        if ts.mortgaged {
+            let cost = prop.price / 2;
+            if self.st.players[p].cash < cost {
+                return Err(CommandError::InsufficientFunds);
+            }
+            self.st.players[p].cash -= cost;
+            self.st.players[from].cash += cost;
+            self.st.tiles[tile].owner = Some(p);
+            self.st.tiles[tile].boosts = 0;
+            self.ev.push(Event::Expropriated {
+                player: p,
+                from,
+                tile,
+                cost,
+                liquidated: 0,
+                liquidation_refund: 0,
+            });
+            return Ok(());
+        }
         let cost = self
             .apply_market_multiplier(MarketEffect::AcquisitionMultiplier, prop.price * pct / 100);
         if self.st.players[p].cash < cost {
@@ -1052,6 +1077,11 @@ impl<'e> Exec<'e> {
     /// via the seeded RNG and puts it in the spotlight, bumping whatever was
     /// previously spotlit. A no-op (no event, no state change) when the
     /// board has no property tiles at all.
+    ///
+    /// `spotlight_duration_turns <= 0` means the spotlight is permanent -
+    /// only the next Exposition landing replaces it (2026-07 playtest
+    /// decision; the mechanic's off switch is `spotlight_rent_pct = 0`, or
+    /// simply not placing a `Spotlight` tile).
     fn enter_spotlight(&mut self) {
         let Some(tile) = self.st.draw_spotlight_tile(self.content) else {
             return;
@@ -1060,9 +1090,14 @@ impl<'e> Exec<'e> {
             self.ev.push(Event::SpotlightEnded { tile: old.tile });
         }
         let duration = self.content.rules.spotlight_duration_turns;
+        let expires_at_turn = if duration <= 0 {
+            u32::MAX
+        } else {
+            self.st.turn_count + duration as u32
+        };
         self.st.spotlight = Some(Spotlight {
             tile,
-            expires_at_turn: self.st.turn_count + duration.max(0) as u32,
+            expires_at_turn,
         });
         self.ev.push(Event::SpotlightStarted {
             tile,
@@ -1114,6 +1149,22 @@ impl<'e> Exec<'e> {
                 self.charge(p, None, amount);
                 self.st.turn = TurnPhase::AwaitEnd;
             }
+            TileKind::NetWorthTax { min_pct, max_pct } => {
+                // Progressive audit (ADR-0029): a seeded-random bracket of
+                // the lander's CURRENT net worth - punishes hoarding
+                // proportionally, and the weighted draw keeps the brutal
+                // brackets rare.
+                let (min_pct, max_pct) = (*min_pct, *max_pct);
+                let pct = self.st.draw_networth_tax_pct(min_pct, max_pct);
+                let amount = self.st.net_worth(self.content, p) * pct as i64 / 100;
+                self.ev.push(Event::TaxPaid {
+                    player: p,
+                    tile,
+                    amount,
+                });
+                self.charge(p, None, amount);
+                self.st.turn = TurnPhase::AwaitEnd;
+            }
             TileKind::Property(prop) => match self.st.tiles[tile].owner {
                 None => {
                     self.ev.push(Event::BlindAuctionOpened {
@@ -1148,6 +1199,16 @@ impl<'e> Exec<'e> {
                         tile,
                         amount: rent,
                     });
+                    // A boost is a one-shot trap (ADR-0012, amended
+                    // 2026-07): the first rent collected at the boosted
+                    // rate consumes the whole boost, whatever its level.
+                    // Cleared before `charge` on purpose - the trap is
+                    // sprung by the landing, even if the payer then goes
+                    // through partial-payment bankruptcy.
+                    if self.st.tiles[tile].boosts > 0 {
+                        self.st.tiles[tile].boosts = 0;
+                        self.ev.push(Event::RentBoostConsumed { tile });
+                    }
                     self.charge(p, Some(owner), rent);
                     self.st.turn = TurnPhase::AwaitEnd;
                 }
@@ -1379,6 +1440,14 @@ impl<'e> Exec<'e> {
             .map(|(p, _)| p);
         if let Some(p) = winner {
             self.st.players[p].round_bonus_vp += 2;
+            // Announced explicitly (2026-07 playtest feedback): the round
+            // bonus was the one VP source with zero visible trace - not
+            // even a log line - so nobody understood where those points
+            // came from.
+            self.ev.push(Event::RoundBonusAwarded {
+                player: p,
+                points: 2,
+            });
         }
     }
 

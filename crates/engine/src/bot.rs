@@ -4,7 +4,13 @@
 //! and the content and returns a command, so the server stays authoritative
 //! and a buggy bot can at worst get its commands rejected. See ADR-0014 for
 //! why this lives in the engine rather than a client.
+//!
+//! Unpredictability comes from the caller: `decide` takes a `noise` word
+//! (any u64 - the session layer/CLI pass a random one) that seeds a local
+//! SplitMix64 stream for the bid jitter. Same inputs, same output - the
+//! engine itself still never draws ambient randomness.
 
+use crate::rng;
 use crate::{ClientView, CommandKind, GameContent, GamePhase, RentModel, TileKind, TurnPhase};
 
 /// Cash the bot refuses to dip under when buying or bidding.
@@ -18,15 +24,25 @@ const MAX_RENT_BOOSTS: u8 = 3;
 /// Minimum trade edge before the bot accepts an offer.
 const TRADE_MARGIN: i64 = 25;
 
-/// What the bot wants to do right now, if anything. Pure and idempotent:
-/// called after every server update, returns `None` whenever it is not this
-/// seat's move.
-pub fn decide(content: &GameContent, view: &ClientView, me: usize) -> Option<CommandKind> {
+/// What the bot wants to do right now, if anything. Pure given its inputs
+/// (`noise` included) and idempotent: called after every server update,
+/// returns `None` whenever it is not this seat's move.
+pub fn decide(
+    content: &GameContent,
+    view: &ClientView,
+    me: usize,
+    noise: u64,
+) -> Option<CommandKind> {
     if matches!(view.phase, GamePhase::Finished { .. }) || view.players[me].bankrupt {
         return None;
     }
 
-    let bot = Bot { content, view, me };
+    let bot = Bot {
+        content,
+        view,
+        me,
+        noise,
+    };
     if let Some(command) = bot.trade_response() {
         return Some(command);
     }
@@ -58,6 +74,8 @@ struct Bot<'a> {
     content: &'a GameContent,
     view: &'a ClientView,
     me: usize,
+    /// Caller-provided randomness for the bid jitter; see the module doc.
+    noise: u64,
 }
 
 impl Bot<'_> {
@@ -84,33 +102,29 @@ impl Bot<'_> {
         }
     }
 
-    /// Sealed-bid auction (ADR-0018): each seat submits exactly once. As
-    /// the discoverer, take the implicit floor if affordable (declining
-    /// outright is no longer possible once landed); otherwise, bid up to
-    /// 60%/90% of price like the old open auction, if comfortably
-    /// affordable, else abstain.
+    /// Sealed-bid auction (ADR-0018): each seat submits exactly once. Bids
+    /// a jittered 50-200% of list price (2026-07 playtest decision -
+    /// fixed-formula bots were perfectly predictable to bid against),
+    /// clamped to what the seat can afford. The discoverer never bids
+    /// below its own implicit floor (an explicit sub-floor bid would be
+    /// rejected); a seat that can't cover half the price abstains.
     fn blind_bid_action(&self, tile: usize, bids: &[Option<i64>]) -> Option<CommandKind> {
         if bids[self.me].is_some() {
             return None;
         }
         let price = self.content.property(tile)?.price;
+        let mut noise = self.noise;
+        let pct = 50 + rng::below(&mut noise, 151) as i64; // 50..=200
+        let roll = price * pct / 100;
         let amount = if self.view.current == self.me {
             if self.cash_after(price) >= 0 {
-                price
+                roll.max(price).min(self.cash())
             } else {
                 0
             }
         } else {
-            let max_bid = if self.completes_group(tile) {
-                price * 9 / 10
-            } else {
-                price * 6 / 10
-            };
-            if max_bid > 0 && self.cash_after(max_bid) >= RESERVE {
-                max_bid
-            } else {
-                0
-            }
+            let bid = roll.min(self.cash_after(RESERVE));
+            if bid >= price / 2 { bid } else { 0 }
         };
         Some(CommandKind::SubmitBlindBid { amount })
     }
@@ -565,48 +579,75 @@ mod tests {
     }
 
     #[test]
-    fn discoverer_bids_floor_when_affordable_else_abstains() {
+    fn discoverer_bids_at_least_the_floor_when_affordable_else_abstains() {
         let c = content();
         let auction = |bids| TurnPhase::BlindAuction { tile: 1, bids };
-        let rich = view(1000, auction(vec![None, None]));
-        assert!(matches!(
-            decide(&c, &rich, 0),
-            Some(CommandKind::SubmitBlindBid { amount: 100 })
-        ));
+        // Property-based across many noise words: the jittered bid always
+        // sits in [floor, cash] for a solvent discoverer (price 100).
+        for noise in 0..64u64 {
+            let rich = view(1000, auction(vec![None, None]));
+            match decide(&c, &rich, 0, noise) {
+                Some(CommandKind::SubmitBlindBid { amount }) => {
+                    assert!(
+                        (100..=1000).contains(&amount),
+                        "discoverer bid {amount} outside [floor, cash] for noise {noise}"
+                    );
+                }
+                other => panic!("expected a bid, got {other:?}"),
+            }
+        }
         let broke = view(50, auction(vec![None, None]));
         assert!(matches!(
-            decide(&c, &broke, 0),
+            decide(&c, &broke, 0, 7),
             Some(CommandKind::SubmitBlindBid { amount: 0 })
         ));
     }
 
     #[test]
-    fn non_discoverer_bids_sixty_percent_or_abstains_then_stays_quiet_once_bid() {
+    fn non_discoverer_bids_jittered_or_abstains_then_stays_quiet_once_bid() {
         let c = content();
+        // The jittered bid stays in [price/2, cash - RESERVE] (price 100),
+        // whatever the noise word.
+        for noise in 0..64u64 {
+            let mut v = view(
+                1000,
+                TurnPhase::BlindAuction {
+                    tile: 1,
+                    bids: vec![None, None],
+                },
+            );
+            v.current = 1; // someone else discovered it; seat 0 is a bidder
+            match decide(&c, &v, 0, noise) {
+                Some(CommandKind::SubmitBlindBid { amount }) => {
+                    assert!(
+                        (50..=900).contains(&amount),
+                        "bid {amount} outside [price/2, cash - reserve] for noise {noise}"
+                    );
+                }
+                other => panic!("expected a bid, got {other:?}"),
+            }
+        }
+
         let mut v = view(
-            1000,
+            120,
             TurnPhase::BlindAuction {
                 tile: 1,
                 bids: vec![None, None],
             },
         );
-        v.current = 1; // someone else discovered it; seat 0 is a bidder
+        v.current = 1;
+        // cash - RESERVE = 20 < price/2 = 50: abstain regardless of noise.
         assert!(matches!(
-            decide(&c, &v, 0),
-            Some(CommandKind::SubmitBlindBid { amount: 60 })
-        ));
-
-        v.players[0].cash = 150; // 1000 - 60 was fine, 150 - 60 is not
-        assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::SubmitBlindBid { amount: 0 })
         ));
 
+        v.players[0].cash = 1000;
         v.turn = TurnPhase::BlindAuction {
             tile: 1,
             bids: vec![Some(60), None],
         };
-        assert!(decide(&c, &v, 0).is_none());
+        assert!(decide(&c, &v, 0, 7).is_none());
     }
 
     #[test]
@@ -625,12 +666,12 @@ mod tests {
         };
         // Even rule: the 0-house tile of the group must come first.
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::Build { tile }) if tile == "b"
         ));
         // Without the full group, no building: just end the turn.
         v.tiles[2].owner = Some(1);
-        assert!(matches!(decide(&c, &v, 0), Some(CommandKind::EndTurn)));
+        assert!(matches!(decide(&c, &v, 0, 7), Some(CommandKind::EndTurn)));
     }
 
     #[test]
@@ -641,20 +682,23 @@ mod tests {
 
         // Rich and no card: bribe.
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::OfferBribe { amount: 200 })
         ));
 
         // Holding a card takes priority over everything else.
         v.players[0].jail_cards = 1;
-        assert!(matches!(decide(&c, &v, 0), Some(CommandKind::UseJailCard)));
+        assert!(matches!(
+            decide(&c, &v, 0, 7),
+            Some(CommandKind::UseJailCard)
+        ));
 
         // Too poor to comfortably bribe and no card: the safe default, an
         // ascending Legal Route.
         v.players[0].jail_cards = 0;
         v.players[0].cash = 150;
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::ChooseLegalRoute { order }) if order == vec![1, 2, 3, 4, 5]
         ));
     }
@@ -674,7 +718,7 @@ mod tests {
             receive_tiles: vec![],
         });
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::AcceptTrade { trade: 1 })
         ));
 
@@ -682,7 +726,7 @@ mod tests {
         v.pending_trades[0].give_cash = 10;
         v.pending_trades[0].receive_cash = 100;
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::DeclineTrade { trade: 2 })
         ));
     }
@@ -702,14 +746,14 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::SellHouse { tile }) if tile == "a" || tile == "b"
         ));
 
         v.tiles[1].houses = 0;
         v.tiles[2].houses = 0;
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::Mortgage { tile }) if tile == "a" || tile == "b"
         ));
     }
@@ -724,7 +768,7 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::Unmortgage { tile }) if tile == "a"
         ));
     }
@@ -738,7 +782,7 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::BoostRent { tile }) if tile == "c"
         ));
     }
@@ -751,12 +795,12 @@ mod tests {
         v.tiles[2].owner = Some(1);
         v.players[0].position = 2; // landed on "b", the rival tile
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::Expropriate { tile }) if tile == "b"
         ));
 
         v.tiles[1].owner = None;
-        assert!(matches!(decide(&c, &v, 0), Some(CommandKind::EndTurn)));
+        assert!(matches!(decide(&c, &v, 0, 7), Some(CommandKind::EndTurn)));
     }
 
     #[test]
@@ -769,7 +813,7 @@ mod tests {
         v.tiles[2].houses = 2;
         v.players[0].position = 2;
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::Expropriate { tile }) if tile == "b"
         ));
     }
@@ -784,7 +828,7 @@ mod tests {
         v.tiles[2].owner = Some(1);
         v.players[0].position = 0; // landed on "go", not on "b"
         assert!(!matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::Expropriate { .. })
         ));
     }
@@ -794,7 +838,7 @@ mod tests {
         let c = content();
         let mut v = view(1000, TurnPhase::AwaitMove);
         v.current = 1;
-        assert!(decide(&c, &v, 0).is_none());
+        assert!(decide(&c, &v, 0, 7).is_none());
         v.pending_trades.push(crate::TradeOffer {
             id: 7,
             from: 1,
@@ -805,7 +849,7 @@ mod tests {
             receive_tiles: vec![],
         });
         assert!(matches!(
-            decide(&c, &v, 0),
+            decide(&c, &v, 0, 7),
             Some(CommandKind::DeclineTrade { trade: 7 })
         ));
     }

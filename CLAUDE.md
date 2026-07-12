@@ -60,7 +60,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 136 tests, all must pass
+cargo test  --workspace --locked          # 143 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -214,7 +214,8 @@ may override it at creation via the optional `mods` field on Create
 filesystem paths). Default `mods/base` is the 32-tile fast board (9x9
 ring, no Community Chest, two "utility" tiles (Wi-Fi, The Chatbot -
 group-scaled, modern reinterpretations of the original resort idea), two
-chance tiles, one tax tile, `docs/business-tour-direction.md`);
+chance tiles, one net-worth tax tile (The Audit, ADR-0029),
+`docs/business-tour-direction.md`);
 `mods/highroller` is a rules-only example. Clients render any `4*(d-1)`
 square ring (32, 40, ...); other tile counts fall back to a wrap layout.
 
@@ -224,8 +225,10 @@ Movement is a velocity deck, no dice (ADR-0017): `PlayMovementCard` plays
 a value from a public `Player.hand`, refilled to
 `rules.velocity_min..=velocity_max` the instant it empties - that refill
 also ticks `Player.hands_cycled`, ADR-0020's round metronome; plus Go
-salary. Sealed-bid auctions on every landing (ADR-0018): a 5s
-`TurnPhase::BlindAuction` window, every living seat bids at once via
+salary. The starting player is seed-drawn (2026-07), not the host.
+Sealed-bid auctions on every landing (ADR-0018): a 12s
+`TurnPhase::BlindAuction` window (raised from 5s after playtests), every
+living seat bids at once via
 `SubmitBlindBid` (0 abstains), the discoverer gets an implicit list-price
 floor bid if silent and solvent, wins at the floor pay full price, wins
 above it after a contest pay 90% floored, ties favour the discoverer then
@@ -283,7 +286,15 @@ the "doom clock"). Optional expropriation (`rules.expropriation`, seize a
 rival's property at a premium, landing tile only, end of turn; improved
 tiles liquidate to the shared pools, owner compensated, ADR-0011/0022)
 and rent boosts (`rules.rent_boost`, +50%/step, cap 3, reset on transfer,
-ADR-0012) - both on in the base fast mod. Public market forecast
+ONE-SHOT since the 2026-07 amendment: the first rent collected at the
+boosted rate consumes the whole boost, `Event::RentBoostConsumed`,
+ADR-0012) - both on in the base fast mod. A rival's MORTGAGED tile is no
+longer takeover-proof: landing on it lets you buy it at its flat mortgage
+value (price/2 to the owner, transfers still mortgaged, ADR-0022 amended)
+- the mortgage is now the cheap-buyout weak point, not the shield. Taxes:
+the base mod's only tax tile is The Audit (`TileKind::NetWorthTax`,
+ADR-0029) at the last tile before Go - a seeded-random 5-25% slice of the
+lander's net worth, heavier brackets linearly rarer. Public market forecast
 (ADR-0021, `data/events.toml`): a seeded rolling queue of the next 3
 scheduled events plus whichever is active - `rent_multiplier`,
 `acquisition_multiplier`, one-shot `wealth_tax` - `gap_turns` apart,
@@ -291,8 +302,9 @@ public in every view (draws already made, never the generator). The
 Exposition corner (`TileKind::Spotlight`, ADR-0026, replaces the old
 no-op `free_parking` in `mods/base`): landing there draws one random
 property tile via the seeded RNG and puts it in the spotlight -
-`rules.spotlight_rent_pct`/`spotlight_duration_turns` (100%/8 turns in
-the base mod, 0 = off) - composing multiplicatively with the boost and
+`rules.spotlight_rent_pct`/`spotlight_duration_turns` (100%/permanent in
+the base mod; duration <= 0 = permanent-until-replaced since the 2026-07
+amendment, pct 0 = off) - composing multiplicatively with the boost and
 forecast above; state lives on `GameState`, not `TileState`, so it
 survives a trade/expropriation/bankruptcy of the spotlit tile untouched
 (unlike the ADR-0012 boost, which resets on transfer); re-landing

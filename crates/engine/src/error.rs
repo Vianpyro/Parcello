@@ -100,4 +100,6 @@ pub enum ContentError {
     CardTargetsUnknownTile { card: String, tile: String },
     #[error("velocity_min must be >= 1 and velocity_max must be > velocity_min")]
     InvalidVelocityRange,
+    #[error("net-worth tax tile {0} needs 1 <= min_pct <= max_pct <= 100")]
+    InvalidNetWorthTax(String),
 }

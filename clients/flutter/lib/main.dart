@@ -352,6 +352,7 @@ class GameScreen extends StatelessWidget {
                 canAct: _hasTileActions,
                 pawnPositions: s.displayPositions,
                 floaters: s.floaters,
+                highlightTile: s.hoverTile,
                 center: _CenterPanel(s: s),
               ),
               // Played movement card, floating over the middle of the board.
@@ -627,9 +628,13 @@ class _CenterPanel extends StatelessWidget {
     final sp = v?.spotlight;
     if (v == null || c == null || sp == null) return null;
     // Prefer the live room rules (host may have tweaked them, ADR-0015);
-    // fall back to the content snapshot from join.
+    // fall back to the content snapshot from join. A permanent spotlight
+    // carries u32::MAX as its expiry sentinel - don't print that.
     final pct = s.settings?.rules.spotlightRentPct ?? c.spotlightRentPct;
-    return '${c.board[sp.tile].name} spotlighted (+$pct%, ends turn ${sp.expiresAtTurn})';
+    final until = sp.expiresAtTurn >= 0xFFFFFFFF
+        ? 'until replaced'
+        : 'ends turn ${sp.expiresAtTurn}';
+    return '${c.board[sp.tile].name} spotlighted (+$pct%, $until)';
   }
 
   String _status() {
@@ -1022,6 +1027,14 @@ class _ActionsState extends State<_Actions> {
               : 'Sealed bid on ${s.tileName(t.tile!)}:',
           style: const TextStyle(fontSize: 12),
         ),
+        // The discoverer's edge (ADR-0018): landing there took the risk,
+        // so a contested win above the floor is rewarded with a discount.
+        if (isDiscoverer)
+          const Text(
+            'Outbid a rival above the floor and you pay only 90% of your '
+            'bid - your reward for landing here.',
+            style: TextStyle(fontSize: 10, color: Color(0xFF777777)),
+          ),
         SizedBox(
           width: 90,
           child: TextField(
@@ -1078,8 +1091,13 @@ class _ActionsState extends State<_Actions> {
           final route = me.jailRoute;
           if (route != null) {
             // Locked Legal Route (ADR-0024): only the front card is legal.
-            children.add(btn('Play ${route.first} (route)',
-                {'type': 'play_movement_card', 'value': route.first}));
+            children.add(MouseRegion(
+              onEnter: (_) => s.setHoverTile(
+                  (me.position + route.first) % s.content!.board.length),
+              onExit: (_) => s.setHoverTile(null),
+              child: btn('Play ${route.first} (route)',
+                  {'type': 'play_movement_card', 'value': route.first}),
+            ));
           } else if (me.inJail) {
             // Three exits: jail card, Corruption bribe, Legal Route.
             if (me.jailCards > 0) {
@@ -1088,7 +1106,9 @@ class _ActionsState extends State<_Actions> {
             }
             final sorted = [...me.hand]..sort();
             if (!_bribeSeeded) {
-              _bribe.text = '${me.cash.clamp(1, 200)}';
+              // No suggested-amount cap (2026-07): the engine allows
+              // 1..=cash, so seed the full ceiling and let them dial down.
+              _bribe.text = '${me.cash > 0 ? me.cash : 1}';
               _bribeSeeded = true;
             }
             final routeComplete = _routeOrder.length == sorted.length;
@@ -1142,10 +1162,18 @@ class _ActionsState extends State<_Actions> {
                   primary: false),
             ]);
           } else {
-            // Hand of movement cards (ADR-0017): one button per card value.
+            // Hand of movement cards (ADR-0017): one button per card
+            // value; hovering one outlines the destination tile on the
+            // board (2026-07 playtest feedback).
+            final n = s.content!.board.length;
             for (final value in me.hand) {
-              children.add(
-                  btn('$value', {'type': 'play_movement_card', 'value': value}));
+              children.add(MouseRegion(
+                onEnter: (_) =>
+                    s.setHoverTile((me.position + value) % n),
+                onExit: (_) => s.setHoverTile(null),
+                child:
+                    btn('$value', {'type': 'play_movement_card', 'value': value}),
+              ));
             }
           }
         case 'await_end':
@@ -1349,10 +1377,30 @@ class _SidePanel extends StatelessWidget {
     ]);
   }
 
+  /// VP leaderboard rank per seat (1 = leading), null for bankrupt seats
+  /// or when the VP race is off. Ties break to the lowest seat, matching
+  /// every tiebreak in the engine.
+  List<int?> _vpRanks(ClientView v) {
+    final ranks = List<int?>.filled(v.players.length, null);
+    if ((s.content?.winVictoryPoints ?? 0) <= 0) return ranks;
+    final alive = [
+      for (var i = 0; i < v.players.length; i++)
+        if (!v.players[i].bankrupt) i,
+    ]..sort((a, b) {
+        final byVp = v.players[b].victoryPoints - v.players[a].victoryPoints;
+        return byVp != 0 ? byVp : a - b;
+      });
+    for (var r = 0; r < alive.length; r++) {
+      ranks[alive[r]] = r + 1;
+    }
+    return ranks;
+  }
+
   Widget _players() {
     final v = s.view;
     final rows = <Widget>[];
     final count = v?.players.length ?? s.seats.length;
+    final ranks = v != null ? _vpRanks(v) : List<int?>.filled(count, null);
     for (var i = 0; i < count; i++) {
       final p = v?.players.elementAtOrNull(i);
       final seatInfo = s.seats.elementAtOrNull(i);
@@ -1360,6 +1408,7 @@ class _SidePanel extends StatelessWidget {
       // Whose turn is it: bold text alone read as too subtle in playtests
       // (2026-07) - a highlighted row + a leading marker reads at a glance.
       final isActive = v != null && !v.finished && v.current == i;
+      final rank = ranks[i];
       final tags = [
         if (i == s.seat) '(you)',
         if (p?.inJail == true) '[jail]',
@@ -1396,12 +1445,24 @@ class _SidePanel extends StatelessWidget {
                       size: 16, color: Color(0xFFA9812F))
                   : null,
             ),
+            // Pawn circle doubles as the live VP leaderboard: rank number
+            // inside, a crown for the current leader (2026-07 feedback).
             Container(
-              width: 12,
-              height: 12,
+              width: 18,
+              height: 18,
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                   color: pawnColors[i % pawnColors.length],
                   shape: BoxShape.circle),
+              child: rank == null
+                  ? null
+                  : rank == 1
+                      ? const Text('👑', style: TextStyle(fontSize: 10))
+                      : Text('$rank',
+                          style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -1428,6 +1489,18 @@ class _SidePanel extends StatelessWidget {
                           fontSize: 11, color: Color(0xFF9AA3B2))),
               ]),
           ]),
+        ),
+      ));
+    }
+    // Always-visible VP legend (2026-07 playtest feedback: nobody knew how
+    // or when points were earned - a hidden tooltip would not fix that).
+    if (v != null && (s.content?.winVictoryPoints ?? 0) > 0) {
+      rows.add(const Padding(
+        padding: EdgeInsets.only(top: 4),
+        child: Text(
+          'VP: 3 per full colour group · 2 per conglomerate · 1 per '
+          'utility · +2 each round to the richest. First to the target wins.',
+          style: TextStyle(fontSize: 10, color: Color(0xFF9AA3B2)),
         ),
       ));
     }

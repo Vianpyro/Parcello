@@ -133,11 +133,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             sink.send(Message::Text(serde_json::to_string(&ack)?.into()))
                                 .await?;
                         }
+                        // Bid-jitter noise for the shared heuristic: clock
+                        // nanos are plenty for a test client (no new dep).
+                        let noise = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.subsec_nanos() as u64 ^ d.as_secs())
+                            .unwrap_or(0);
                         if args.bot && fresh_view
                             && let (Some(content), Some(view), Some(me)) =
                                 (&ctx.content, &ctx.view, ctx.my_seat)
                             && let Some(kind) =
-                                parcello_engine::bot::decide(&content.content, view, me)
+                                parcello_engine::bot::decide(&content.content, view, me, noise)
                         {
                             // Pace bot actions so a watching client has time
                             // to play out the pawn-movement animation.
@@ -766,6 +772,14 @@ impl Ctx {
                 self.player(*player),
                 self.tile_name(*tile)
             ),
+            Event::RentBoostConsumed { tile } => format!(
+                "the boost on {} is spent (one-shot trap)",
+                self.tile_name(*tile)
+            ),
+            Event::RoundBonusAwarded { player, points } => format!(
+                "{} is the round's cash leader: +{points} permanent VP",
+                self.player(*player)
+            ),
             Event::PropertyMortgaged {
                 player,
                 tile,
@@ -877,10 +891,17 @@ impl Ctx {
                 tile,
                 rent_pct,
                 duration_turns,
-            } => format!(
-                "The Exposition spotlights {} (+{rent_pct}% rent for {duration_turns} turns)",
-                self.tile_name(*tile)
-            ),
+            } => {
+                let span = if *duration_turns <= 0 {
+                    "until the next Exposition landing".to_string()
+                } else {
+                    format!("for {duration_turns} turns")
+                };
+                format!(
+                    "The Exposition spotlights {} (+{rent_pct}% rent {span})",
+                    self.tile_name(*tile)
+                )
+            }
             Event::SpotlightEnded { tile } => {
                 format!("the spotlight on {} fades", self.tile_name(*tile))
             }

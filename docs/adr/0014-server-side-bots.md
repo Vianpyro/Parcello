@@ -1,6 +1,10 @@
 # ADR-0014: server-side bot seats
 
-Status: accepted
+Status: accepted (amended 2026-07: `bot::decide` now takes a caller-
+provided `noise: u64` seeding its sealed-bid jitter - bots bid a random
+50-200% of list price, clamped to cash, floor-respecting for the
+discoverer. The randomness is injected by the session layer/CLI; the
+engine stays pure given its inputs.)
 
 ## Context
 Playtesting and casual play both want to fill empty seats without a second

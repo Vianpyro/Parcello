@@ -1,6 +1,10 @@
 # ADR-0026: property spotlight (the Exposition corner)
 
-Status: accepted
+Status: accepted (amended 2026-07: `spotlight_duration_turns <= 0` now
+means PERMANENT - only the next Exposition landing replaces the spotlight
+- and the base mod uses exactly that; the mechanic's off switch is
+`spotlight_rent_pct = 0` or simply not placing a Spotlight tile. The
+original 8-turn expiry proved fiddly to track in playtests.)
 
 ## Context
 `free_parking` (one of the four board corners) has always been a pure

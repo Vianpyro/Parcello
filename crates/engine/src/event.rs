@@ -136,6 +136,12 @@ pub enum Event {
         boosts: u8,
         cost: i64,
     },
+    /// The first rent collected at a boosted rate consumed the whole boost
+    /// (ADR-0012, amended 2026-07: boosts are one-shot traps). Follows the
+    /// `RentPaid` that sprang it.
+    RentBoostConsumed {
+        tile: usize,
+    },
     PropertyMortgaged {
         player: usize,
         tile: usize,
@@ -245,10 +251,18 @@ pub enum Event {
     MarketEventExpired {
         event_id: String,
     },
+    /// The strictly-richest surviving player banked the permanent per-round
+    /// victory-point bonus (ADR-0020) - announced so the one non-reversible
+    /// VP source is visible to the table.
+    RoundBonusAwarded {
+        player: usize,
+        points: i64,
+    },
     /// The Exposition corner (ADR-0026) put a property in the spotlight.
     /// Landing again while one is active first emits `SpotlightEnded` for
     /// the bumped tile (even if the redraw lands on the same one), then
-    /// this.
+    /// this. `duration_turns <= 0` means permanent: only the next
+    /// Exposition landing replaces it.
     SpotlightStarted {
         tile: usize,
         rent_pct: i64,

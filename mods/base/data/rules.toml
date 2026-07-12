@@ -36,6 +36,8 @@ win_victory_points = 20
 subsidiary_pool_factor = 6
 conglomerate_pool_factor = 3
 # The Exposition corner (ADR-0026): landing there puts a random property
-# in the spotlight - rent doubles there for the next 8 turns.
+# in the spotlight - rent doubles there. duration 0 = permanent (2026-07
+# playtest decision): only the next Exposition landing replaces it; the
+# mechanic's off switch is spotlight_rent_pct = 0.
 spotlight_rent_pct = 100
-spotlight_duration_turns = 8
+spotlight_duration_turns = 0

@@ -55,8 +55,19 @@ int ringSide(int n) => n ~/ 4 + 1; // the `d` above
 class CashFloater {
   final int id;
   final int tile;
-  final int amount;
-  const CashFloater({required this.id, required this.tile, required this.amount});
+  /// Rendered as-is ("+$200", "-$50", "+2 VP").
+  final String text;
+  final bool gain;
+  /// Victory-point deltas render gold instead of green/red (ADR-0020: the
+  /// race is the game, so its feedback gets its own colour).
+  final bool vp;
+  const CashFloater({
+    required this.id,
+    required this.tile,
+    required this.text,
+    required this.gain,
+    this.vp = false,
+  });
 }
 
 class BoardWidget extends StatefulWidget {
@@ -72,6 +83,8 @@ class BoardWidget extends StatefulWidget {
   final Map<int, int> pawnPositions;
   /// Live cash floaters (ADR-0028 extras).
   final List<CashFloater> floaters;
+  /// Tile to outline as a movement destination (hovered hand card), if any.
+  final int? highlightTile;
   final Widget center;
 
   const BoardWidget({
@@ -83,6 +96,7 @@ class BoardWidget extends StatefulWidget {
     required this.canAct,
     this.pawnPositions = const {},
     this.floaters = const [],
+    this.highlightTile,
     required this.center,
   });
 
@@ -156,7 +170,11 @@ class _BoardWidgetState extends State<BoardWidget> {
 
   Widget _floater(CashFloater f, double w, double h, int d) {
     final c = cellOf(f.tile, d);
-    final gain = f.amount > 0;
+    final color = f.vp
+        ? const Color(0xFFA9812F)
+        : f.gain
+            ? const Color(0xFF2F6F3E)
+            : const Color(0xFFC0564F);
     return Positioned(
       left: (c.c - 1) * w,
       top: (c.r - 1) * h,
@@ -173,13 +191,11 @@ class _BoardWidgetState extends State<BoardWidget> {
               offset: Offset(0, -h * 0.4 * t),
               child: Center(
                 child: Text(
-                  '${gain ? '+' : '-'}\$${f.amount.abs()}',
+                  f.text,
                   style: TextStyle(
                     fontSize: (w * 0.16).clamp(13.0, 18.0),
                     fontWeight: FontWeight.w800,
-                    color: gain
-                        ? const Color(0xFF2F6F3E)
-                        : const Color(0xFFC0564F),
+                    color: color,
                     shadows: const [Shadow(color: Colors.white, blurRadius: 4)],
                   ),
                 ),
@@ -215,6 +231,22 @@ class _BoardWidgetState extends State<BoardWidget> {
     ]);
   }
 
+  /// Whether `owner` holds every tile of `group` - drives the "SET"
+  /// full-group badge (the classic unimproved x2 was invisible before:
+  /// 2026-07 playtest feedback).
+  bool _ownsFullGroup(int owner, String? group) {
+    if (group == null) return false;
+    final v = widget.view;
+    if (v == null) return false;
+    final b = widget.content.board;
+    for (var i = 0; i < b.length && i < v.tiles.length; i++) {
+      if (b[i].isProperty && b[i].group == group && v.tiles[i].owner != owner) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   Widget _tile(int i, {required double cellW, bool staticPawns = false}) {
     final def = widget.content.board[i];
     final ts = widget.view?.tiles.elementAtOrNull(i);
@@ -222,6 +254,10 @@ class _BoardWidgetState extends State<BoardWidget> {
     // check needs no seat-masking, unlike ts?.owner.
     final spotlit = widget.view?.spotlight?.tile == i;
     final hovering = _hoveredTile == i && widget.canAct(i);
+    // Movement-card hover: outline where the hovered card would land.
+    final dest = widget.highlightTile == i;
+    final fullGroup =
+        ts?.owner != null && _ownsFullGroup(ts!.owner!, def.group);
     // Text scales with the cell so it stays legible on any window size.
     final nameSize = (cellW * 0.115).clamp(11.0, 17.0);
     final metaSize = (cellW * 0.095).clamp(9.0, 13.0);
@@ -240,11 +276,14 @@ class _BoardWidgetState extends State<BoardWidget> {
       child: Container(
         // A separate outer ring from the inner ownership/spotlight border
         // below, so the hover outline never competes with those for the
-        // same edge - it just frames the whole tile when relevant.
+        // same edge - it just frames the whole tile when relevant. The
+        // card-destination outline wins over the can-act hover.
         decoration: BoxDecoration(
-          border: hovering
-              ? Border.all(color: const Color(0xFF3D7DC0), width: 1.5)
-              : null,
+          border: dest
+              ? Border.all(color: const Color(0xFF3D7DC0), width: 3)
+              : hovering
+                  ? Border.all(color: const Color(0xFF3D7DC0), width: 1.5)
+                  : null,
           borderRadius: BorderRadius.circular(3),
         ),
         child: GestureDetector(
@@ -279,10 +318,27 @@ class _BoardWidgetState extends State<BoardWidget> {
                     ),
                   ),
                 ),
+                // Buildings as icons, not text markers (2026-07 playtest
+                // feedback): one house each, a single tower at the top
+                // (conglomerate) level.
+                if (ts != null && ts.houses > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 3),
+                    child: Row(children: [
+                      if (ts.houses >= 5)
+                        Icon(Icons.apartment,
+                            size: metaSize + 5, color: const Color(0xFF2F6F3E))
+                      else
+                        for (var h = 0; h < ts.houses; h++)
+                          Icon(Icons.home,
+                              size: metaSize + 3,
+                              color: const Color(0xFF2F6F3E)),
+                    ]),
+                  ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 0, 4, 3),
                   child: Text(
-                    _meta(def, ts, spotlit: spotlit),
+                    _meta(def, ts, spotlit: spotlit, fullGroup: fullGroup),
                     style: TextStyle(
                       fontSize: metaSize,
                       fontWeight: FontWeight.w700,
@@ -351,13 +407,20 @@ class _BoardWidgetState extends State<BoardWidget> {
     );
   }
 
-  String _meta(TileDef def, TileState? ts, {bool spotlit = false}) {
+  String _meta(
+    TileDef def,
+    TileState? ts, {
+    bool spotlit = false,
+    bool fullGroup = false,
+  }) {
     final parts = <String>[];
     if (def.isProperty) parts.add('\$${def.price}');
     if (def.amount != null) parts.add('pay \$${def.amount}');
-    if (ts != null && ts.houses > 0) {
-      parts.add(ts.houses == 5 ? 'CONGLOMERATE' : '▪' * ts.houses);
-    }
+    if (def.minPct != null) parts.add('${def.minPct}-${def.maxPct}% NW');
+    // Full colour group: the classic rule doubles UNIMPROVED rent only -
+    // surface it ("SET x2"), and keep a plain "SET" marker once houses
+    // take over the escalation.
+    if (fullGroup) parts.add((ts?.houses ?? 0) == 0 ? 'SET ×2' : 'SET');
     if (ts != null && ts.boosts > 0) parts.add('⚡${ts.boosts}');
     if (ts?.mortgaged == true) parts.add('MORT.');
     if (spotlit) parts.add('✨ SPOTLIGHT');

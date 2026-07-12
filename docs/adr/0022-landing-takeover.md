@@ -1,6 +1,11 @@
 # ADR-0022: takeover happens on the landing tile (amends ADR-0011)
 
-Status: accepted
+Status: accepted (amended 2026-07: the "mortgaged tiles are the shield"
+doctrine below is REVERSED - landing on a rival's mortgaged tile now lets
+you buy it outright for its flat mortgage value (price/2, paid to the
+owner, no expropriation percent, no market multiplier); it transfers
+still mortgaged, so activating it costs the usual +10% redemption on top.
+Mortgaging is now risky liquidity, not a safe harbor.)
 
 ## Context
 ADR-0011's `Expropriate` targets any rival tile that is unimproved and

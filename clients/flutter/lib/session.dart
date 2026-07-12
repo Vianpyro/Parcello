@@ -146,6 +146,16 @@ class GameSession extends ChangeNotifier {
   final List<CashFloater> floaters = [];
   int _floaterId = 0;
 
+  /// Tile the hovered movement card would land on (null = no hover): the
+  /// board outlines it so players see where a card takes them before
+  /// committing (2026-07 playtest feedback).
+  int? hoverTile;
+  void setHoverTile(int? tile) {
+    if (hoverTile == tile) return;
+    hoverTile = tile;
+    notifyListeners();
+  }
+
   /// Updates not yet rendered (ADR-0028): played strictly in order, one at
   /// a time; each is acked to the server once its beats finish.
   final List<Map<String, dynamic>> _pendingUpdates = [];
@@ -443,8 +453,20 @@ class GameSession extends ChangeNotifier {
         cardSeq++;
       }
     }
+    // Victory-point deltas float over each player's tile once the beats
+    // are done and the authoritative totals land (ADR-0020 visibility:
+    // covers every source at once - groups completed/lost, conglomerates,
+    // utilities, the round bonus - without re-deriving the scoring).
+    final oldVp = [
+      for (final p in view?.players ?? const <PlayerView>[]) p.victoryPoints
+    ];
     view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
     _syncDisplayPositions();
+    if (oldVp.isNotEmpty) {
+      for (var i = 0; i < view!.players.length && i < oldVp.length; i++) {
+        _floatVp(i, view!.players[i].victoryPoints - oldVp[i]);
+      }
+    }
     turnEndsAt = _deadlineFrom(_effectiveTurnSeconds());
     banks = (msg['banks'] as List?)?.cast<int>();
     _trackTimedWindows();
@@ -494,9 +516,12 @@ class GameSession extends ChangeNotifier {
         // playtest feedback) - spell out the actual effect.
         final pct = e['rent_pct'] as int;
         final turns = e['duration_turns'] as int;
+        final span = turns <= 0
+            ? 'until the next Exposition landing'
+            : 'for $turns turns';
         spotlightFlashText =
             '${tileName(e['tile'] as int)} is in the spotlight!\n'
-            '+$pct% rent for $turns turns';
+            '+$pct% rent $span';
         spotlightFlashSeq++;
         notifyListeners();
         await Future.delayed(const Duration(milliseconds: 1800));
@@ -531,10 +556,25 @@ class GameSession extends ChangeNotifier {
   /// extras); removes it once its own animation has run out.
   void _floatCash(int player, int amount) {
     if (amount == 0) return;
+    final sign = amount > 0 ? '+' : '-';
+    _float(player, '$sign\$${amount.abs()}', gain: amount > 0);
+  }
+
+  /// Spawns a rising "+N VP"/"-N VP" over the player's tile: the VP race is
+  /// the primary win condition (ADR-0020) but its gains were invisible -
+  /// nobody understood when or why points moved (2026-07 playtest).
+  void _floatVp(int player, int delta) {
+    if (delta == 0) return;
+    final sign = delta > 0 ? '+' : '-';
+    _float(player, '$sign${delta.abs()} VP', gain: delta > 0, vp: true);
+  }
+
+  void _float(int player, String text, {required bool gain, bool vp = false}) {
     final tile = displayPositions[player] ??
         view?.players.elementAtOrNull(player)?.position ??
         0;
-    final f = CashFloater(id: _floaterId++, tile: tile, amount: amount);
+    final f = CashFloater(
+        id: _floaterId++, tile: tile, text: text, gain: gain, vp: vp);
     floaters.add(f);
     notifyListeners();
     Timer(const Duration(milliseconds: 1200), () {

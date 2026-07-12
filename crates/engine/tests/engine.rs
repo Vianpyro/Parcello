@@ -117,10 +117,14 @@ fn engine_with(content: GameContent) -> Engine {
 }
 
 fn two_players(engine: &Engine) -> GameState {
-    engine.new_game(
+    let mut st = engine.new_game(
         vec![("p0".into(), "Alice".into()), ("p1".into(), "Bob".into())],
         42,
-    )
+    );
+    // The starting player is seed-drawn since the 2026-07 alpha tuning;
+    // these tests script p0's moves, so pin the draw back to seat 0.
+    st.current = 0;
+    st
 }
 
 fn cmd(player: &str, kind: CommandKind) -> PlayerCommand {
@@ -496,6 +500,7 @@ fn corruption_bribe_succeeds_with_majority_and_splits_by_floor_division() {
         7,
     );
     let mut st = st;
+    st.current = 0; // seed-drawn starter (2026-07); the script needs p0
     st.players[0].position = 5;
     st.players[0].jailed = true;
 
@@ -1116,24 +1121,10 @@ fn expropriation_is_gated() {
             .unwrap_err(),
         CommandError::NotExpropriable
     );
+    // A mortgaged rival tile is no longer the takeover shield: it is now
+    // buyable at the flat mortgage price instead (ADR-0022, amended
+    // 2026-07) - covered by its own test below, so no rejection here.
     st.tiles[2].owner = Some(1);
-    st.tiles[2].mortgaged = true;
-    assert_eq!(
-        engine
-            .apply(
-                &st,
-                &cmd(
-                    "p0",
-                    CommandKind::Expropriate {
-                        tile: "ave_a".into()
-                    }
-                )
-            )
-            .unwrap_err(),
-        CommandError::NotExpropriable,
-        "mortgaged tiles stay the takeover shield"
-    );
-    st.tiles[2].mortgaged = false;
     st.players[0].cash = 10;
     assert_eq!(
         engine
@@ -1971,7 +1962,8 @@ fn discoverer_resigning_mid_window_does_not_abort_the_auction() {
         ("p1".to_string(), "Bob".to_string()),
         ("p2".to_string(), "Carol".to_string()),
     ];
-    let st = engine.new_game(players, 42);
+    let mut st = engine.new_game(players, 42);
+    st.current = 0; // seed-drawn starter (2026-07); the script needs p0
     let (st, _) = play(&engine, &st, "p0", 2);
     assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 2, .. }));
 
@@ -2953,6 +2945,7 @@ fn wealth_tax_charges_every_alive_player_via_bankruptcy_path() {
         ],
         1,
     );
+    st.current = 0; // seed-drawn starter (2026-07); the script needs p0
     st.tiles[2].owner = Some(2); // p2 owns ave_a (price 60), cash-poor
     st.players[2].cash = 5;
     st.turn = TurnPhase::AwaitEnd;
@@ -3291,4 +3284,229 @@ fn same_seed_schedules_the_same_spotlight_draw() {
     let (st2, _) = play(&engine, &st2, "p0", 3);
 
     assert_eq!(st1.spotlight, st2.spotlight);
+}
+
+// -- 2026-07 alpha tuning batch (ADR-0029 + amendments) ----------------------
+
+#[test]
+fn boost_is_consumed_by_the_first_paid_rent() {
+    let engine = engine_with_rules(|r| r.rent_boost = 100);
+    let mut st = two_players(&engine);
+    st.tiles[6].owner = Some(0); // blvd, singleton navy -> full group, rent 20
+    st.tiles[6].boosts = 2; // +100%: rent 40
+
+    st.current = 1;
+    st.players[1].position = 3;
+    st.turn = TurnPhase::AwaitMove;
+    let (st, ev) = play(&engine, &st, "p1", 3);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentPaid { amount: 40, .. })),
+        "the first landing still pays the boosted rate"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentBoostConsumed { tile: 6 })),
+        "the paid boost is announced as consumed"
+    );
+    assert_eq!(st.tiles[6].boosts, 0, "one payment clears the whole boost");
+
+    // The next landing pays the plain rate again.
+    let mut st = st;
+    st.current = 1;
+    st.players[1].position = 3;
+    st.players[1].hand = vec![3, 4]; // the first landing spent the 3
+    st.turn = TurnPhase::AwaitMove;
+    let (_, ev) = play(&engine, &st, "p1", 3);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::RentPaid { amount: 20, .. })),
+        "the trap is spent: back to base rent"
+    );
+}
+
+#[test]
+fn mortgaged_tile_buys_out_at_half_price_and_stays_mortgaged() {
+    let engine = engine_with_rules(|r| r.expropriation = 200);
+    let mut st = two_players(&engine);
+    st.tiles[2].owner = Some(1); // p1 owns ave_a (price 60)...
+    st.tiles[2].mortgaged = true; // ...mortgaged: the cheap-buyout weak point
+    st.turn = TurnPhase::AwaitEnd;
+    st.players[0].position = 2;
+
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::Expropriate {
+                tile: "ave_a".into(),
+            },
+        ),
+    );
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Expropriated {
+            player: 0,
+            from: 1,
+            tile: 2,
+            cost: 30, // flat mortgage value: price/2, not the 200% takeover
+            liquidated: 0,
+            liquidation_refund: 0,
+        }
+    )));
+    assert_eq!(st.tiles[2].owner, Some(0));
+    assert!(
+        st.tiles[2].mortgaged,
+        "transfers as-is; buyer redeems at +10%"
+    );
+    assert_eq!(st.players[0].cash, 1500 - 30);
+    assert_eq!(
+        st.players[1].cash,
+        1500 + 30,
+        "the owner gets the full price/2"
+    );
+}
+
+/// 0 go, 1 filler property, 2 the Audit (5-25% of net worth), 3 jail.
+fn audit_board() -> GameContent {
+    GameContent {
+        board: vec![
+            tile("go", "Go", TileKind::Go),
+            tile(
+                "ave_a",
+                "Ave A",
+                prop("brown", 60, 50, [2, 10, 30, 90, 160, 250]),
+            ),
+            tile(
+                "audit",
+                "The Audit",
+                TileKind::NetWorthTax {
+                    min_pct: 5,
+                    max_pct: 25,
+                },
+            ),
+            tile("jail", "Jail", TileKind::Jail),
+        ],
+        chance: vec![],
+        community: vec![],
+        rules: RuleParams::default(),
+        market_events: vec![],
+        forecast_gap_turns: 0,
+    }
+}
+
+#[test]
+fn networth_tax_takes_a_seeded_bracket_of_net_worth() {
+    let engine = engine_with(audit_board());
+    let mut st = two_players(&engine);
+    st.tiles[1].owner = Some(0); // ave_a: +60 equity -> net worth 1560
+    let net_worth = 1500 + 60;
+
+    let (st, ev) = play(&engine, &st, "p0", 2); // 0 -> 2, the Audit
+    let amount = ev
+        .iter()
+        .find_map(|e| match e {
+            Event::TaxPaid { amount, .. } => Some(*amount),
+            _ => None,
+        })
+        .expect("landing on the audit taxes the lander");
+    let pct = (5..=25)
+        .find(|p| net_worth * p / 100 == amount)
+        .expect("the amount must be an exact 5-25% bracket of the lander's net worth");
+    assert!(
+        (5..=25).contains(&pct),
+        "bracket {pct} outside the configured range"
+    );
+    assert_eq!(st.players[0].cash, 1500 - amount);
+
+    // Same seed, same draw: the bracket comes from the game RNG.
+    let engine2 = engine_with(audit_board());
+    let mut st2 = two_players(&engine2);
+    st2.tiles[1].owner = Some(0);
+    let (_, ev2) = play(&engine2, &st2, "p0", 2);
+    assert!(
+        ev2.iter()
+            .any(|e| matches!(e, Event::TaxPaid { amount: a, .. } if *a == amount)),
+        "same seed must draw the same bracket"
+    );
+}
+
+#[test]
+fn networth_tax_validation_rejects_bad_brackets() {
+    let mut content = audit_board();
+    content.board[2] = tile(
+        "audit",
+        "The Audit",
+        TileKind::NetWorthTax {
+            min_pct: 30,
+            max_pct: 10,
+        },
+    );
+    assert!(matches!(
+        content.validate(),
+        Err(parcello_engine::ContentError::InvalidNetWorthTax(id)) if id == "audit"
+    ));
+}
+
+#[test]
+fn first_player_is_drawn_from_the_seed() {
+    let engine = engine_with(plain_board());
+    let players = || {
+        vec![
+            ("p0".to_string(), "P0".to_string()),
+            ("p1".to_string(), "P1".to_string()),
+            ("p2".to_string(), "P2".to_string()),
+        ]
+    };
+    // Deterministic: same seed, same starter.
+    assert_eq!(
+        engine.new_game(players(), 5).current,
+        engine.new_game(players(), 5).current
+    );
+    // Actually random across seeds: 32 seeds all landing on one starter
+    // out of three has probability 3^-31 - not a flake risk.
+    let starters: std::collections::HashSet<usize> = (0..32u64)
+        .map(|seed| engine.new_game(players(), seed).current)
+        .collect();
+    assert!(starters.len() > 1, "the starter must vary with the seed");
+}
+
+#[test]
+fn spotlight_with_zero_duration_is_permanent_until_replaced() {
+    let engine = spotlight_engine(|r| {
+        r.spotlight_rent_pct = 100;
+        r.spotlight_duration_turns = 0; // permanent (2026-07)
+    });
+    let st = two_players(&engine);
+
+    let (st, _) = play(&engine, &st, "p0", 3); // 0 -> 3, the Exposition
+    let first = st.spotlight.expect("spotlight starts");
+    assert_eq!(first.expires_at_turn, u32::MAX, "never expires on its own");
+
+    // Several turn transitions later it is still lit.
+    let mut st = st;
+    for _ in 0..6 {
+        st.turn = TurnPhase::AwaitEnd;
+        let (next, ev) = step(
+            &engine,
+            &st,
+            cmd(&st.players[st.current].id.clone(), CommandKind::EndTurn),
+        );
+        assert!(
+            !ev.iter().any(|e| matches!(e, Event::SpotlightEnded { .. })),
+            "a permanent spotlight must not expire on a turn tick"
+        );
+        st = next;
+    }
+    assert_eq!(st.spotlight, Some(first));
+
+    // Only a fresh Exposition landing replaces it.
+    st.current = 0;
+    st.players[0].position = 0;
+    st.players[0].hand = vec![3];
+    st.turn = TurnPhase::AwaitMove;
+    let (st, ev) = play(&engine, &st, "p0", 3);
+    assert!(ev.iter().any(|e| matches!(e, Event::SpotlightEnded { .. })));
+    assert!(st.spotlight.is_some());
 }

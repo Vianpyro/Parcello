@@ -15,11 +15,12 @@
 # tile in turn 1 regardless of play order - a random draw there is more
 # fun than a deterministic rent trap. Position 28 (between Go To Jail and
 # Go) is chance for the same "keep the run-in to Go lively" reason, moved
-# there from position 3 (too close to Go to matter much). Income Tax
-# sits at position 31, the last tile before Go (like Monopoly, no dice
-# needed for this one) - a player low on cash after a bad lap gets one
-# final gut-check (possibly a forced mortgage/sale) right before the
-# relief of another salary. The Exposition (pos 16) replaces the old
+# there from position 3 (too close to Go to matter much). The Audit
+# (net_worth_tax, ADR-0029) sits at position 31, the last tile before Go:
+# a seeded-random 5-25% slice of the lander's net worth, heavier brackets
+# rarer - one final gut-check (possibly a forced mortgage/sale) right
+# before the relief of another salary, and it scales with wealth instead
+# of the old flat $200. The Exposition (pos 16) replaces the old
 # free-parking no-op with the spotlight mechanic (ADR-0026). board[0]
 # must be the Go tile; corners sit at 0, 8, 16, 24.
 
@@ -279,7 +280,8 @@ house_cost = 200
 rents = [100, 200, 600, 1400, 1700, 2000]
 
 [[tile]]
-id = "income_tax"
-name = "Income Tax"
-type = "tax"
-amount = 200
+id = "audit"
+name = "The Audit"
+type = "net_worth_tax"
+min_pct = 5
+max_pct = 25

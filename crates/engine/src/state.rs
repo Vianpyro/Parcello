@@ -272,6 +272,10 @@ impl GameState {
         for _ in 0..3 {
             forecast.draw_next(content, &mut rng, 0);
         }
+        // First player drawn from the seed (2026-07 playtest decision), not
+        // hardwired to the host's seat 0 - deterministic and replay-safe
+        // like every other draw. Turn order itself stays the seating order.
+        let first = rng::below(&mut rng, player_count as u64) as usize;
         let full_hand: Vec<u8> = (rules.velocity_min..=rules.velocity_max).collect();
         Self {
             phase: GamePhase::Active,
@@ -291,7 +295,7 @@ impl GameState {
                     round_bonus_vp: 0,
                 })
                 .collect(),
-            current: 0,
+            current: first,
             turn: TurnPhase::AwaitMove,
             tiles: vec![TileState::default(); content.board.len()],
             chance_deck,
@@ -305,6 +309,27 @@ impl GameState {
             forecast,
             spotlight: None,
         }
+    }
+
+    /// Draws the net-worth tax bracket for an audit tile landing
+    /// (ADR-0029): a percent in `min_pct..=max_pct` with linearly
+    /// decreasing weight, so the heaviest bracket is the rarest (weight
+    /// of `p` is `max_pct - p + 1`; e.g. for 5..=25, 5% is 21x more
+    /// likely than 25%). Validated content guarantees `min <= max`.
+    pub(crate) fn draw_networth_tax_pct(&mut self, min_pct: u8, max_pct: u8) -> u8 {
+        let (min, max) = (min_pct as u64, max_pct as u64);
+        // Total weight of the descending triangle min..=max.
+        let n = max - min + 1;
+        let total: u64 = (1..=n).sum();
+        let mut r = rng::below(&mut self.rng, total);
+        for pct in min..=max {
+            let weight = max - pct + 1;
+            if r < weight {
+                return pct as u8;
+            }
+            r -= weight;
+        }
+        min_pct // unreachable with a correct total; safe fallback
     }
 
     /// Draws a uniformly random property tile via the seeded RNG

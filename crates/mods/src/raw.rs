@@ -30,6 +30,9 @@ pub(crate) struct TileRaw {
     pub rent_model: Option<RentModel>,
     // Tax field (required when type = "tax").
     pub amount: Option<i64>,
+    // Net-worth tax fields (required when type = "net_worth_tax", ADR-0029).
+    pub min_pct: Option<u8>,
+    pub max_pct: Option<u8>,
 }
 
 impl TileRaw {
@@ -51,6 +54,14 @@ impl TileRaw {
                 amount: self
                     .amount
                     .ok_or_else(|| invalid("tax requires `amount`"))?,
+            },
+            "net_worth_tax" => TileKind::NetWorthTax {
+                min_pct: self
+                    .min_pct
+                    .ok_or_else(|| invalid("net_worth_tax requires `min_pct`"))?,
+                max_pct: self
+                    .max_pct
+                    .ok_or_else(|| invalid("net_worth_tax requires `max_pct`"))?,
             },
             "property" => {
                 let rent_model = self.rent_model.unwrap_or_default();

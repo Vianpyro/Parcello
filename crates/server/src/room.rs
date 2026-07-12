@@ -805,7 +805,11 @@ impl Room {
             // The engine's content carries the effective rules after
             // start_game rebuilds it (ADR-0015), so the bot plays by the
             // room's actual settings.
-            if let Some(kind) = parcello_engine::bot::decide(self.engine.content(), &view, i) {
+            // Fresh noise per decision (bid jitter): randomness lives in
+            // the session layer; the engine heuristic stays pure given it.
+            if let Some(kind) =
+                parcello_engine::bot::decide(self.engine.content(), &view, i, rand::random())
+            {
                 return Some((st.players[i].id.clone(), kind));
             }
         }
@@ -1493,26 +1497,30 @@ mod tests {
         .await
         .expect("room task alive");
         tokio::time::sleep(Duration::from_millis(150)).await;
+        let mut new_start = None;
         for (i, rx) in rxs.iter_mut().enumerate() {
             let mut restarted = false;
             while let Ok(msg) = rx.try_recv() {
-                if matches!(msg, ServerMessage::GameStarted { .. }) {
+                if let ServerMessage::GameStarted { view, .. } = msg {
                     restarted = true;
+                    new_start = Some(view.current);
                 }
             }
             assert!(restarted, "seat {i} must be pulled into the new game");
         }
+        let start = new_start.expect("GameStarted carries the new starter");
+        let ids = ["guest:alice", "guest:bob"];
 
         // The new game is live: a move from the acting player is accepted.
         room.send(RoomCmd::Game {
-            player_id: "guest:alice".into(),
+            player_id: ids[start].into(),
             cmd: CommandKind::PlayMovementCard { value: 2 },
         })
         .await
         .expect("room task alive");
         tokio::time::sleep(Duration::from_millis(100)).await;
         let mut moved = false;
-        while let Ok(msg) = rxs[1].try_recv() {
+        while let Ok(msg) = rxs[1 - start].try_recv() {
             if let ServerMessage::Update { events, .. } = msg
                 && events
                     .iter()
@@ -1719,17 +1727,19 @@ mod tests {
         })
         .await
         .expect("room task alive");
-        // Alice (seat 0) is the acting player and drops off.
+        // The (seed-drawn) acting player drops off.
+        let start = starting_seat(&mut client_rxs[0]).await;
+        let ids = ["guest:alice", "guest:bob"];
         room.send(RoomCmd::Disconnect {
-            player_id: "guest:alice".into(),
+            player_id: ids[start].into(),
         })
         .await
         .expect("room task alive");
 
-        // With no turn timeout, the grace alone must auto-play alice's move;
-        // bob sees it without sending anything.
+        // With no turn timeout, the grace alone must auto-play their move;
+        // the other seat sees it without sending anything.
         let auto_played = tokio::time::timeout(Duration::from_secs(300), async {
-            while let Some(msg) = client_rxs[1].recv().await {
+            while let Some(msg) = client_rxs[1 - start].recv().await {
                 if let ServerMessage::Update { events, .. } = msg
                     && events
                         .iter()
@@ -1980,13 +1990,14 @@ mod tests {
     fn bot_seat_acts_on_its_turn() {
         let content = base_content();
         let engine = Engine::new(Arc::new(content.content.clone())).unwrap();
-        let state = engine.new_game(
+        let mut state = engine.new_game(
             vec![
                 ("bot:1".into(), "Bot 1".into()),
                 ("guest:al".into(), "Al".into()),
             ],
             7,
         );
+        state.current = 0; // seed-drawn starter (2026-07); the test wants the bot
         let mut room = test_room(content);
         room.seats = vec![human_seat("bot:1"), human_seat("guest:al")];
         room.seats[0].is_bot = true;
@@ -2187,6 +2198,7 @@ mod tests {
     ) -> (
         mpsc::Sender<RoomCmd>,
         Vec<mpsc::UnboundedReceiver<ServerMessage>>,
+        usize,
     ) {
         let content = Arc::new(
             parcello_mods::resolve(
@@ -2226,7 +2238,8 @@ mod tests {
         })
         .await
         .expect("room task alive");
-        (room, client_rxs)
+        let start = starting_seat(&mut client_rxs[0]).await;
+        (room, client_rxs, start)
     }
 
     /// A connected seat that overruns the plain turn window but acts before
@@ -2234,22 +2247,24 @@ mod tests {
     /// deducted from its bank instead (ADR-0023).
     #[tokio::test(start_paused = true)]
     async fn time_bank_absorbs_overrun_without_auto_play() {
-        let (room, mut client_rxs) =
+        let (room, mut client_rxs, start) =
             started_room_with_bank(Some(Duration::from_secs(5)), Some(Duration::from_secs(20)))
                 .await;
+        let ids = ["guest:alice", "guest:bob"];
+        let other = 1 - start;
 
-        // Alice stalls 7s (5s over the turn limit, well inside the 20s
-        // bank) then moves herself - the bank absorbs the 2s overage.
+        // The starter stalls 7s (5s over the turn limit, well inside the
+        // 20s bank) then moves - the bank absorbs the 2s overage.
         tokio::time::sleep(Duration::from_secs(7)).await;
         room.send(RoomCmd::Game {
-            player_id: "guest:alice".into(),
+            player_id: ids[start].into(),
             cmd: CommandKind::PlayMovementCard { value: 2 },
         })
         .await
         .expect("room task alive");
 
         let (played_herself, banks) = tokio::time::timeout(Duration::from_secs(60), async {
-            while let Some(msg) = client_rxs[1].recv().await {
+            while let Some(msg) = client_rxs[other].recv().await {
                 if let ServerMessage::Update { events, banks, .. } = msg {
                     let played = events
                         .iter()
@@ -2263,11 +2278,13 @@ mod tests {
         })
         .await
         .expect("an update must arrive");
-        assert!(played_herself, "alice's own move must be accepted");
+        assert!(played_herself, "the starter's own move must be accepted");
+        let mut expected = vec![20u64, 20];
+        expected[start] = 18;
         assert_eq!(
             banks,
-            Some(vec![18, 20]),
-            "alice's bank drains by the 2s overage; bob's is untouched"
+            Some(expected),
+            "the starter's bank drains by the 2s overage; the other is untouched"
         );
     }
 
@@ -2275,12 +2292,13 @@ mod tests {
     /// canonical action auto-plays and the bank reads zero (ADR-0023).
     #[tokio::test(start_paused = true)]
     async fn time_bank_hard_stops_when_exhausted() {
-        let (_room, mut client_rxs) =
+        let (_room, mut client_rxs, start) =
             started_room_with_bank(Some(Duration::from_secs(5)), Some(Duration::from_secs(3)))
                 .await;
+        let other = 1 - start;
 
         let (auto_played, banks) = tokio::time::timeout(Duration::from_secs(300), async {
-            while let Some(msg) = client_rxs[1].recv().await {
+            while let Some(msg) = client_rxs[other].recv().await {
                 if let ServerMessage::Update { events, banks, .. } = msg
                     && events
                         .iter()
@@ -2294,7 +2312,9 @@ mod tests {
         .await
         .expect("an update must arrive before the mock-clock timeout");
         assert!(auto_played, "AFK timer should move once the bank is dry");
-        assert_eq!(banks, Some(vec![0, 3]), "alice's bank is fully spent");
+        let mut expected = vec![3u64, 3];
+        expected[start] = 0;
+        assert_eq!(banks, Some(expected), "the starter's bank is fully spent");
     }
 
     /// A disconnected seat is skipped after `DISCONNECTED_GRACE` alone; the
@@ -2302,19 +2322,21 @@ mod tests {
     /// extra time).
     #[tokio::test(start_paused = true)]
     async fn disconnected_seat_ignores_the_time_bank() {
-        let (room, mut client_rxs) = started_room_with_bank(
+        let (room, mut client_rxs, start) = started_room_with_bank(
             Some(Duration::from_secs(5)),
             Some(Duration::from_secs(1000)),
         )
         .await;
+        let ids = ["guest:alice", "guest:bob"];
+        let other = 1 - start;
         room.send(RoomCmd::Disconnect {
-            player_id: "guest:alice".into(),
+            player_id: ids[start].into(),
         })
         .await
         .expect("room task alive");
 
         let auto_played = tokio::time::timeout(Duration::from_secs(120), async {
-            while let Some(msg) = client_rxs[1].recv().await {
+            while let Some(msg) = client_rxs[other].recv().await {
                 if let ServerMessage::Update { events, .. } = msg
                     && events
                         .iter()
@@ -2328,6 +2350,23 @@ mod tests {
         .await
         .expect("must move within DISCONNECTED_GRACE, far short of the 1000s bank");
         assert!(auto_played, "a disconnected seat must not draw on its bank");
+    }
+
+    /// Reads this client's stream until `GameStarted` and returns the
+    /// seed-drawn starting seat (2026-07: no longer always the host) -
+    /// fixtures can no longer assume seat 0 opens the game.
+    async fn starting_seat(rx: &mut mpsc::UnboundedReceiver<ServerMessage>) -> usize {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::GameStarted { view, .. } =
+                    rx.recv().await.expect("room task alive")
+                {
+                    return view.current;
+                }
+            }
+        })
+        .await
+        .expect("GameStarted must arrive")
     }
 
     /// Waits for the next `Update` and returns its view, skipping any other
@@ -2406,10 +2445,11 @@ mod tests {
     /// phase, so neither of those is touched while it's armed).
     #[tokio::test(start_paused = true)]
     async fn sealed_bid_window_auto_abstains_a_silent_seat() {
-        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let (room, mut client_rxs, start) = started_room_with_bank(None, None).await;
         let ids = ["guest:alice", "guest:bob"];
 
-        let discoverer = roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        let discoverer =
+            roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, start).await;
 
         // The discoverer bids; the other seat stays silent.
         room.send(RoomCmd::Game {
@@ -2444,10 +2484,11 @@ mod tests {
     /// timer is a fallback, not a wait (ADR-0018).
     #[tokio::test(start_paused = true)]
     async fn sealed_bid_window_resolves_early_once_everyone_has_bid() {
-        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let (room, mut client_rxs, start) = started_room_with_bank(None, None).await;
         let ids = ["guest:alice", "guest:bob"];
 
-        let discoverer = roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        let discoverer =
+            roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, start).await;
         let other = 1 - discoverer;
 
         room.send(RoomCmd::Game {
@@ -2500,10 +2541,10 @@ mod tests {
     /// resolution lands at cap + window, not at window.
     #[tokio::test(start_paused = true)]
     async fn bid_window_waits_for_animation_acks_before_its_clock_starts() {
-        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let (room, mut client_rxs, start) = started_room_with_bank(None, None).await;
         let ids = ["guest:alice", "guest:bob"];
 
-        roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, start).await;
         let opened_at = tokio::time::Instant::now();
 
         let resolved_at = tokio::time::timeout(Duration::from_secs(60), async {
@@ -2531,10 +2572,10 @@ mod tests {
     /// clock starts immediately - well before the hard cap (ADR-0028).
     #[tokio::test(start_paused = true)]
     async fn bid_window_clock_starts_early_once_everyone_acks() {
-        let (room, mut client_rxs) = started_room_with_bank(None, None).await;
+        let (room, mut client_rxs, start) = started_room_with_bank(None, None).await;
         let ids = ["guest:alice", "guest:bob"];
 
-        roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, start).await;
         let opened_at = tokio::time::Instant::now();
         ack(&room, "guest:alice").await;
         ack(&room, "guest:bob").await;
@@ -2565,11 +2606,12 @@ mod tests {
     /// auto-play lands at cap + turn limit.
     #[tokio::test(start_paused = true)]
     async fn turn_clock_waits_for_the_acting_seats_ack() {
-        let (room, mut client_rxs) =
+        let (room, mut client_rxs, start) =
             started_room_with_bank(Some(Duration::from_secs(5)), None).await;
         let ids = ["guest:alice", "guest:bob"];
 
-        let discoverer = roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, 0).await;
+        let discoverer =
+            roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, start).await;
         let other = 1 - discoverer;
         // Resolve the window fast (both bid); the discoverer then sits in
         // AwaitEnd with the 5s turn clock gated on their (never-sent) ack.
@@ -2634,6 +2676,7 @@ mod tests {
             ],
             7,
         );
+        state.current = 0; // seed-drawn starter (2026-07); the script needs alice
         state.players[0].jailed = true;
         state.turn = TurnPhase::AwaitMove;
 
@@ -2691,6 +2734,7 @@ mod tests {
             ],
             7,
         );
+        state.current = 0; // seed-drawn starter (2026-07); the script needs alice
         state.players[0].jailed = true;
         state.turn = TurnPhase::AwaitMove;
 

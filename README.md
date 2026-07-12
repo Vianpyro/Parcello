@@ -127,7 +127,7 @@ ADR-0025); only the CLI accepts a pasted token instead.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 136 tests, formatting, and lints (all must pass before a PR)
+# Rust: 143 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -242,8 +242,9 @@ mods/<id>/
 The default `mods/base` is the **32-tile fast board** (a 9x9 ring, no
 Community Chest, two "utility" tiles - Wi-Fi and The Chatbot,
 group-scaled like Monopoly's Water Works/Electric Company - instead of
-four stations, two chance tiles, one tax tile; the design goal is fast,
-dynamic games). Base is loaded first; merge is last-loaded-wins per
+four stations, two chance tiles, and one progressive net-worth tax tile ("The
+Audit", 5-25% of the lander's net worth, heavier brackets rarer,
+ADR-0029); the design goal is fast, dynamic games). Base is loaded first; merge is last-loaded-wins per
 key: tiles and cards replace in place by id, rule scalars override by
 name; every conflict is logged at WARN. Unknown rule keys are ignored
 with a warning. The resolved bundle is pushed to clients on join, so
@@ -281,7 +282,7 @@ and plays one card per turn (`PlayMovementCard`), collecting Go salary on
 passing/landing on Go; the hand refills to the full range the instant it
 empties, and full refills are the metronome for the victory-point race's
 round bonus (ADR-0020). Sealed-bid auctions on every landing (ADR-0018):
-a 5s window opens the instant a player lands on an unowned property, and
+a 12s window opens the instant a player lands on an unowned property, and
 every living seat - not just the landing player - submits exactly one bid
 at once (`0` abstains); the landing player (the "discoverer") is treated
 as bidding list price if they stay silent and can afford it, and an
@@ -352,8 +353,14 @@ owner is compensated, ADR-0011, tightened by ADR-0022 - improved tiles are
 seizable too, their buildings liquidating at half cost to the former owner
 on top of the usual compensation and returning to the shared pools) and
 rent boosts
-(pay to raise an owned tile's rent one step, capped, ADR-0012) - both on by
-default in the base fast board. Multiple win conditions: last player
+(pay to raise an owned tile's rent one step, capped, ADR-0012 - one-shot
+since 2026-07: the first rent collected at the boosted rate consumes the
+whole boost) - both on by default in the base fast board. A rival's
+mortgaged tile is buyable outright by whoever lands on it, for its flat
+mortgage value paid to the owner (transfers still mortgaged; the
+mortgage is the cheap-buyout weak point now, not a takeover shield -
+ADR-0022 amended). The starting player is drawn from the game seed, not
+fixed to the host. Multiple win conditions: last player
 standing, richest at the time limit (ADR-0010), a domination win - control
 N complete colour groups (`rules.win_full_groups`, off by default in the
 base fast board, ADR-0013) - and the primary v2 win condition, a race to
@@ -390,7 +397,9 @@ property tile via the seeded RNG and puts it in the spotlight for
 above. Unlike the rent boost, the spotlight is a fact about the tile, not
 the owner: it survives a trade, expropriation, or bankruptcy transfer of
 the spotlit property untouched. Landing on the corner again re-rolls and
-replaces whichever tile was previously spotlit.
+replaces whichever tile was previously spotlit; with the base mod's
+`spotlight_duration_turns = 0` that replacement is the ONLY way a
+spotlight ends (permanent until re-rolled, ADR-0026 amended).
 
 Deliberate V1 simplifications: no immediate interest charge when mortgaged
 tiles change hands (trades and bankruptcy transfer them as-is);
