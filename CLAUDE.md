@@ -60,7 +60,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 143 tests, all must pass
+cargo test  --workspace --locked          # 145 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -149,8 +149,10 @@ architecture doc section 5; dependencies point downward only):
   the settings, so the config is frozen and replay-safe once Active; smart
   per-turn AFK timer (`afk_deadline`, recomputed each loop so a mid-turn
   disconnect shortens it): a disconnected acting seat is auto-played the
-  canonical action (lowest hand card / ascending Legal Route / EndTurn,
-  ADR-0017/0024 - `BlindAuction`/`BribeVote` have no single actor, so
+  canonical action (a bot-chosen movement card via `bot::movement_card` -
+  smart, not just the lowest - / ascending Legal Route / EndTurn,
+  ADR-0017/0024; movement/route/end only, an AFK auto-play never spends
+  the seat's cash - `BlindAuction`/`BribeVote` have no single actor, so
   `acting_seat` excludes them and their own parallel `bid_deadline`/
   `vote_deadline` timers auto-abstain/auto-reject silent seats instead)
   after `DISCONNECTED_GRACE` = 30s
@@ -284,7 +286,10 @@ condition - a race to `rules.win_victory_points` (ADR-0020, 20 in base:
 3/complete colour group, 2/conglomerate-level tile, 1/group-scaled
 ("utility") tile owned, plus a stored, non-reversible `+2`/round bonus to
 whoever has the strictly highest cash each time every surviving player
-has completed a hand refill, ties to the lowest seat; reaching the target
+has completed a hand refill, ties to the lowest seat - `Player.hands_cycled`
+is public in `PlayerView` so clients can render round progress (the round
+number is the MIN across survivors; the bonus fires when the last straggler
+refills and lifts it), plus `Event::RoundBonusAwarded`; reaching the target
 ends the game instantly, `Event::WonByPoints`; if a `Build` empties the
 conglomerate pool first, the game ends immediately too - highest score
 wins, ties by net worth then lowest seat, `Event::WonByPoolExhaustion`,

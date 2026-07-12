@@ -81,6 +81,12 @@ class BoardWidget extends StatefulWidget {
   /// Director-driven pawn positions (ADR-0028), advanced beat by beat;
   /// falls back to the view's authoritative positions when absent.
   final Map<int, int> pawnPositions;
+  /// Per-seat "glide straight, don't hop" flag for the current move (a
+  /// teleport, or a "do not pass Go" card); see `GameSession.pawnGlide`.
+  final Map<int, bool> pawnGlide;
+  /// Per-seat "hop the whole way even if it's a long teleport" flag: a
+  /// card that wraps forward through Go; see `GameSession.pawnForceHop`.
+  final Map<int, bool> pawnForceHop;
   /// Live cash floaters (ADR-0028 extras).
   final List<CashFloater> floaters;
   /// Tile to outline as a movement destination (hovered hand card), if any.
@@ -95,6 +101,8 @@ class BoardWidget extends StatefulWidget {
     required this.onTileTap,
     required this.canAct,
     this.pawnPositions = const {},
+    this.pawnGlide = const {},
+    this.pawnForceHop = const {},
     this.floaters = const [],
     this.highlightTile,
     required this.center,
@@ -159,7 +167,13 @@ class _BoardWidgetState extends State<BoardWidget> {
             ),
           // Animated pawns ride on top of the tiles.
           Positioned.fill(
-            child: _PawnLayer(side: d, cellW: w, cellH: h, pawns: _pawns()),
+            child: _PawnLayer(
+                side: d,
+                cellW: w,
+                cellH: h,
+                pawns: _pawns(),
+                glide: widget.pawnGlide,
+                forceHop: widget.pawnForceHop),
           ),
           // Rising cash deltas over their tiles (ADR-0028 extras).
           for (final f in widget.floaters) _floater(f, w, h, d),
@@ -441,6 +455,17 @@ class PawnData {
   });
 }
 
+/// Total hop-animation time for a `forward`-tile trip: the normal,
+/// perceptible 260ms/tile rate up to 12 tiles (a real movement-card play
+/// never exceeds the velocity deck's max, well under that), and a
+/// tapering, faster rate beyond it so a long forced hop (a card teleport
+/// wrapping through Go) stays brisk rather than taking several seconds.
+/// Public (not `_PawnLayerState`-private) so `GameSession._moveDuration`
+/// can mirror it exactly for the beat's `await`.
+int hopMillis(int forward) => forward <= 12
+    ? (forward * 260).clamp(400, 3200)
+    : (900 + forward * 60).clamp(900, 2400);
+
 /// Overlay that draws each pawn and animates it when its tile changes.
 /// A normal move (short forward distance) hops tile by tile around the
 /// ring; a teleport (card, jail, backward) slides straight to the target.
@@ -448,11 +473,20 @@ class _PawnLayer extends StatefulWidget {
   final int side; // ring grid dimension (d)
   final double cellW, cellH;
   final List<PawnData> pawns;
+  /// Per-seat "glide straight, don't hop" hint for the current move.
+  final Map<int, bool> glide;
+  /// Per-seat "hop the whole way even if it's a long teleport" hint: a card
+  /// that wraps forward through Go always collects salary, so it must be
+  /// seen crossing Go or the salary floater reads as coming from nowhere
+  /// (2026-07 playtest feedback).
+  final Map<int, bool> forceHop;
   const _PawnLayer({
     required this.side,
     required this.cellW,
     required this.cellH,
     required this.pawns,
+    this.glide = const {},
+    this.forceHop = const {},
   });
 
   @override
@@ -505,23 +539,37 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
     super.didUpdateWidget(old);
     for (final p in widget.pawns) {
       final a = _anims.putIfAbsent(p.seat, () => _makeAnim(p.position));
-      if (p.position != a.target) _animate(a, p.position);
+      if (p.position != a.target) {
+        _animate(a, p.position,
+            straight: widget.glide[p.seat] == true,
+            forceHop: widget.forceHop[p.seat] == true);
+      }
     }
   }
 
-  void _animate(_PawnAnim a, int to) {
+  void _animate(_PawnAnim a, int to, {bool straight = false, bool forceHop = false}) {
     final from = a.target;
     a.lastHopSeg = 0;
     final forward = (to - from) % _boardLen; // 0..39
     final List<int> path;
-    if (forward >= 1 && forward <= 12) {
-      // Short move: hop each tile so the pawn follows the border.
-      // ~260ms per tile, eased per hop (see _offsetOf), so the step-by-step
-      // travel reads clearly rather than as one fast glide.
+    // `straight` forces a glide even for a short forward distance: a "do
+    // not pass Go" card can move only a few tiles yet must not appear to
+    // hop through the Go corner. `forceHop` is the opposite override: a
+    // card teleport that wraps through Go always collects salary, so it
+    // must hop the whole way even if the distance is long - otherwise the
+    // pawn just vanishes and the +$salary floater has no visible cause.
+    if (!straight && (forceHop || (forward >= 1 && forward <= 12))) {
+      // Hop each tile so the pawn follows the border. ~260ms per tile for
+      // a normal short move, eased per hop (see _offsetOf) so the
+      // step-by-step travel reads clearly rather than as one fast glide.
+      // A forced long hop (wrapping through Go) tapers the per-tile time
+      // down instead, so crossing a quarter of the board doesn't take
+      // several seconds - still visibly a hop, just a brisk one.
       path = [for (var k = 0; k <= forward; k++) (from + k) % _boardLen];
-      a.ctrl.duration = Duration(milliseconds: (forward * 260).clamp(400, 3200));
+      a.ctrl.duration = Duration(milliseconds: hopMillis(forward));
     } else {
-      // Teleport / backward / long jump: glide straight to the target.
+      // Teleport / backward / long jump that doesn't cross Go: glide
+      // straight to the target.
       path = [from, to];
       a.ctrl.duration = const Duration(milliseconds: 700);
     }

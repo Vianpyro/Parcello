@@ -88,6 +88,33 @@ pub fn decide(
     }
 }
 
+/// Just the movement-card choice for `seat` (the tile-scoring heuristic
+/// `decide` uses in `AwaitMove`), or `None` when it is not a plain move
+/// (jailed, mid-route, empty hand, or not this seat's turn). The session
+/// layer uses this to auto-play a timed-out seat's *movement* with bot
+/// smarts instead of the dumb lowest-card canonical action (2026-07) -
+/// deliberately scoped to movement, so an AFK auto-play never spends the
+/// player's money (building, bribing, boosting) behind their back.
+pub fn movement_card(content: &GameContent, view: &ClientView, seat: usize) -> Option<u8> {
+    if view.current != seat || !matches!(view.turn, TurnPhase::AwaitMove) {
+        return None;
+    }
+    let player = &view.players[seat];
+    if player.in_jail || player.jail_route.is_some() {
+        return None;
+    }
+    let bot = Bot {
+        content,
+        view,
+        me: seat,
+        noise: 0,
+    };
+    match bot.choose_movement_card() {
+        Some(CommandKind::PlayMovementCard { value }) => Some(value),
+        _ => None,
+    }
+}
+
 struct Bot<'a> {
     content: &'a GameContent,
     view: &'a ClientView,
@@ -579,6 +606,7 @@ mod tests {
             victory_points: 0,
             hand: vec![1, 2, 3, 4, 5],
             jail_route: None,
+            hands_cycled: 0,
         }
     }
 
@@ -878,5 +906,33 @@ mod tests {
             decide(&c, &v, 0, 7),
             Some(CommandKind::DeclineTrade { trade: 7 })
         ));
+    }
+
+    #[test]
+    fn movement_card_picks_the_best_scoring_card_only_for_a_plain_move() {
+        let c = content();
+        // From Go (0), cards 1/2/4/5 all land on a buyable property (top
+        // score); the tie-break takes the lowest, so card 1.
+        let v = view(1500, TurnPhase::AwaitMove);
+        assert_eq!(movement_card(&c, &v, 0), Some(1));
+
+        // Not this seat's turn: no movement.
+        let mut other = view(1500, TurnPhase::AwaitMove);
+        other.current = 1;
+        assert_eq!(movement_card(&c, &other, 0), None);
+
+        // Jailed or mid-route: the caller must use the jail exit / route
+        // front instead, so movement_card declines.
+        let mut jailed = view(1500, TurnPhase::AwaitMove);
+        jailed.players[0].in_jail = true;
+        assert_eq!(movement_card(&c, &jailed, 0), None);
+
+        let mut routed = view(1500, TurnPhase::AwaitMove);
+        routed.players[0].jail_route = Some(vec![2, 1]);
+        assert_eq!(movement_card(&c, &routed, 0), None);
+
+        // Wrong phase (waiting to end the turn): no movement.
+        let ended = view(1500, TurnPhase::AwaitEnd);
+        assert_eq!(movement_card(&c, &ended, 0), None);
     }
 }

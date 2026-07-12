@@ -93,9 +93,9 @@ Server flags: `--bind 0.0.0.0:7878`, `--mods-dir mods`, `--mod base`
 start if it has no `index.html`, ADR-0025),
 `--insecure-guest`, `--history <file.db>` (SQLite game logs; omit for
 in-memory, see ADR-0005), `--turn-timeout <secs>` (auto-play the pending
-canonical action - lowest hand card / ascending Legal Route / decline /
-end turn - for a *connected* player who stalls that long, unless their
-time bank still covers the overage;
+canonical action - a bot-chosen movement card (smart, not just the lowest)
+/ ascending Legal Route / decline / end turn - for a *connected* player who
+stalls that long, unless their time bank still covers the overage;
 default 12, 0 = disabled - a *disconnected* player is always skipped after a
 30s grace regardless), `--time-bank-seconds <secs>` (personal per-match
 reserve a connected player draws on to overrun the turn limit, never
@@ -127,7 +127,7 @@ ADR-0025); only the CLI accepts a pasted token instead.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 143 tests, formatting, and lints (all must pass before a PR)
+# Rust: 145 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings

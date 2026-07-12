@@ -61,6 +61,13 @@ pub struct PlayerView {
     /// transparency is the price of the immediate exit and rent freeze.
     #[serde(default)]
     pub jail_route: Option<Vec<u8>>,
+    /// Hands fully cycled (ADR-0020's round metronome). Public so clients
+    /// can show round progress: the round number is the MINIMUM of this
+    /// across surviving players, and the `+2` round bonus fires the moment
+    /// the last straggler refills and lifts that minimum. Without it the
+    /// bonus looked like it arrived out of nowhere (2026-07 playtest).
+    #[serde(default)]
+    pub hands_cycled: u32,
 }
 
 impl ClientView {
@@ -112,6 +119,7 @@ impl ClientView {
                     victory_points: state.victory_points(content, i),
                     hand: p.hand.clone(),
                     jail_route: p.jail_route.clone(),
+                    hands_cycled: p.hands_cycled,
                 })
                 .collect(),
             current: state.current,

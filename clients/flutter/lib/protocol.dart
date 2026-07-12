@@ -183,6 +183,10 @@ class PlayerView {
   /// `Some(queue)` while serving a locked, public Legal Route (ADR-0024) -
   /// transparency is the price of the immediate exit and rent freeze.
   final List<int>? jailRoute;
+  /// Hands fully cycled (ADR-0020's round metronome): the round number is
+  /// the minimum of this across surviving players, and the +2 round bonus
+  /// fires when the last straggler refills and lifts that minimum.
+  final int handsCycled;
 
   PlayerView.fromJson(Map<String, dynamic> j)
       : id = j['id'] as String,
@@ -194,7 +198,8 @@ class PlayerView {
         bankrupt = j['bankrupt'] as bool,
         victoryPoints = j['victory_points'] as int? ?? 0,
         hand = (j['hand'] as List? ?? []).cast<int>(),
-        jailRoute = (j['jail_route'] as List?)?.cast<int>();
+        jailRoute = (j['jail_route'] as List?)?.cast<int>(),
+        handsCycled = j['hands_cycled'] as int? ?? 0;
 }
 
 class TileState {

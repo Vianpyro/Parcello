@@ -727,11 +727,13 @@ impl Room {
         }
     }
 
-    /// The action the game is waiting for, per `TurnPhase` (the same mapping
-    /// the deterministic-replay test uses). Never invalid for the returned
-    /// player, so applying it always advances a stalled game. A stalled
-    /// jailed seat's canonical action is the Legal Route in ascending order
-    /// (ADR-0024) - deterministic, and nobody rots in jail.
+    /// The action the game is waiting for, per `TurnPhase`. Never invalid
+    /// for the returned player, so applying it always advances a stalled
+    /// game. A plain move is chosen by the bot heuristic (2026-07) so a
+    /// timed-out seat moves smartly, not just with its lowest card; a
+    /// jailed seat's action is the Legal Route in ascending order
+    /// (ADR-0024); end of turn is `EndTurn`. Movement/route/end only - an
+    /// AFK auto-play never spends the player's cash.
     fn afk_command(&self) -> Option<(PlayerId, CommandKind)> {
         let Phase::Active(st) = &self.phase else {
             return None;
@@ -747,11 +749,22 @@ impl Room {
                     let order: Vec<u8> = (rules.velocity_min..=rules.velocity_max).collect();
                     CommandKind::ChooseLegalRoute { order }
                 } else {
-                    let value = *player
-                        .hand
-                        .iter()
-                        .min()
-                        .expect("hand never empty in AwaitMove");
+                    // Auto-play the *movement* with bot smarts (2026-07):
+                    // a timed-out seat gets its best-scoring card, not the
+                    // dumb lowest one - it should feel like the bot stepped
+                    // in, not like a forfeit. Movement only: no auto-spend
+                    // of their cash. Falls back to the lowest card if the
+                    // heuristic declines (it never should in AwaitMove).
+                    let view = ClientView::for_seat(st, self.engine.content(), seat);
+                    let value =
+                        parcello_engine::bot::movement_card(self.engine.content(), &view, seat)
+                            .unwrap_or_else(|| {
+                                *player
+                                    .hand
+                                    .iter()
+                                    .min()
+                                    .expect("hand never empty in AwaitMove")
+                            });
                     CommandKind::PlayMovementCard { value }
                 }
             }

@@ -351,6 +351,8 @@ class GameScreen extends StatelessWidget {
                 onTileTap: (i) => _tileMenu(context, i),
                 canAct: _hasTileActions,
                 pawnPositions: s.displayPositions,
+                pawnGlide: s.pawnGlide,
+                pawnForceHop: s.pawnForceHop,
                 floaters: s.floaters,
                 highlightTile: s.hoverTile,
                 center: _CenterPanel(s: s),
@@ -390,12 +392,15 @@ class GameScreen extends StatelessWidget {
     final def = c.board[i];
     final ts = v.tiles[i];
     if (ts.owner == s.seat) return true;
+    // Buying out a rival's tile you've landed on (ADR-0011/0022): a bare
+    // tile is seized at the expropriation premium, a mortgaged one bought
+    // out at its flat mortgage value - both go through the same
+    // `expropriate` command, both gated on the expropriation rule being on.
     final expro = s.settings?.rules.expropriation ?? c.expropriation;
     return ts.owner != null &&
         ts.owner != s.seat &&
         def.isProperty &&
         expro > 0 &&
-        !ts.mortgaged &&
         s.myTurn &&
         v.turn.type == 'await_end' &&
         v.players[s.seat!].position == i;
@@ -464,18 +469,29 @@ class GameScreen extends StatelessWidget {
         } else if (rival &&
             def.isProperty &&
             expro > 0 &&
-            !ts.mortgaged &&
             s.myTurn &&
             v.turn.type == 'await_end' &&
             v.players[s.seat!].position == i) {
-          // Improved tiles liquidate on seizure - the former owner is
-          // refunded half cost per level on top of the usual compensation
-          // (ADR-0022).
+          // A mortgaged rival tile is bought out at its flat mortgage
+          // value (price/2), transferring still mortgaged (ADR-0022
+          // amended). A bare tile is seized at the expropriation premium;
+          // improved tiles liquidate on seizure, the former owner refunded
+          // half cost per level on top of compensation (ADR-0022).
+          final String label;
+          final String subtitle;
+          if (ts.mortgaged) {
+            label = 'Buy out mortgage (\$${price ~/ 2})';
+            subtitle = 'take this tile - stays mortgaged, redeem it after';
+          } else if (ts.houses > 0) {
+            label = 'Seize + liquidate (\$${price * expro ~/ 100})';
+            subtitle = 'take this tile from its owner';
+          } else {
+            label = 'Seize (\$${price * expro ~/ 100})';
+            subtitle = 'take this tile from its owner';
+          }
           items.add(ListTile(
-              title: Text(ts.houses > 0
-                  ? 'Seize + liquidate (\$${price * expro ~/ 100})'
-                  : 'Seize (\$${price * expro ~/ 100})'),
-              subtitle: const Text('take this tile from its owner'),
+              title: Text(label),
+              subtitle: Text(subtitle),
               onTap: () {
                 s.sendCmd({'type': 'expropriate', 'tile': def.id});
                 close();
@@ -577,12 +593,129 @@ class _CenterPanel extends StatelessWidget {
           Text(_spotlightLine()!,
               style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
         ],
+        if (_vpLegend() != null) ...[
+          const SizedBox(height: 6),
+          _vpLegend()!,
+        ],
         const SizedBox(height: 6),
         _Actions(s: s),
         const SizedBox(height: 6),
         Expanded(child: _EventLog(log: s.log)),
       ]),
     );
+  }
+
+  /// How victory points are earned (ADR-0020), front and center on the
+  /// table - the race is the win condition but its scoring was opaque in
+  /// playtests (2026-07). Null when the VP race is off.
+  Widget? _vpLegend() {
+    final target = s.content?.winVictoryPoints ?? 0;
+    if (s.view == null || target <= 0) return null;
+    const rows = [
+      ('3', 'a complete colour group'),
+      ('2', 'a maxed (conglomerate) tile'),
+      ('1', 'a utility tile you own'),
+      ('+2', 'each round, to the richest player'),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFD8B45A).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: const Color(0xFFD8B45A), width: 1),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('VICTORY POINTS  ·  first to $target wins',
+            style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFA9812F),
+                letterSpacing: 1)),
+        const SizedBox(height: 3),
+        for (final (pts, what) in rows)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Row(children: [
+              SizedBox(
+                width: 24,
+                child: Text(pts,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFA9812F))),
+              ),
+              Expanded(
+                child: Text(what,
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF444444))),
+              ),
+            ]),
+          ),
+        ..._roundProgress(),
+      ]),
+    );
+  }
+
+  /// Live state of the round metronome (ADR-0020), so the `+2` above stops
+  /// looking like it arrives out of nowhere: a "round" completes when every
+  /// surviving player has cycled a full hand of movement cards, and the
+  /// bonus banks to whoever is richest at that instant. The round number is
+  /// the MINIMUM hands-cycled across survivors - so progress is simply how
+  /// many players have already pulled ahead of that minimum.
+  List<Widget> _roundProgress() {
+    final v = s.view;
+    if (v == null || v.finished) return const [];
+    final alive = [
+      for (var i = 0; i < v.players.length; i++)
+        if (!v.players[i].bankrupt) i,
+    ];
+    if (alive.isEmpty) return const [];
+    final round =
+        alive.map((i) => v.players[i].handsCycled).reduce((a, b) => a < b ? a : b);
+    final done = alive.where((i) => v.players[i].handsCycled > round).toList();
+    // Whoever would bank the +2 if the round closed right now: strictly
+    // richest, ties to the lowest seat (mirrors `award_round_bonus`).
+    var leader = alive.first;
+    for (final i in alive) {
+      if (v.players[i].cash > v.players[leader].cash) leader = i;
+    }
+    return [
+      const SizedBox(height: 6),
+      const Divider(height: 1, color: Color(0x33A9812F)),
+      const SizedBox(height: 5),
+      Row(children: [
+        Text('ROUND ${round + 1}',
+            style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFA9812F),
+                letterSpacing: 1)),
+        const SizedBox(width: 8),
+        // One pip per surviving player: filled once they have cycled their
+        // hand for this round. All filled = the bonus fires.
+        for (final i in alive)
+          Container(
+            width: 10,
+            height: 10,
+            margin: const EdgeInsets.only(right: 3),
+            decoration: BoxDecoration(
+              color: done.contains(i)
+                  ? pawnColors[i % pawnColors.length]
+                  : Colors.transparent,
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: pawnColors[i % pawnColors.length], width: 1.5),
+            ),
+          ),
+        const SizedBox(width: 4),
+        Text('${done.length}/${alive.length} hands cycled',
+            style: const TextStyle(fontSize: 10, color: Color(0xFF666666))),
+      ]),
+      const SizedBox(height: 2),
+      Text(
+        '+2 VP to ${s.playerName(leader)} (richest) when the round closes',
+        style: const TextStyle(fontSize: 10, color: Color(0xFF444444)),
+      ),
+    ];
   }
 
   /// Shared building pools (ADR-0019): "the tension only works if everyone
@@ -932,6 +1065,28 @@ class _BannerFlashState extends State<_BannerFlash> {
   }
 }
 
+/// Caps a numeric text field at `max`, clamping down any edit that would
+/// exceed it (used for the sealed-bid amount, bounded by the seat's cash).
+/// Empty input passes through so the field can be cleared and retyped.
+class _MaxValueFormatter extends TextInputFormatter {
+  final int max;
+  const _MaxValueFormatter(this.max);
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    if (newValue.text.isEmpty) return newValue;
+    final v = int.tryParse(newValue.text);
+    if (v == null) return oldValue; // non-numeric edit (paired with digitsOnly)
+    if (v <= max) return newValue;
+    final clamped = '$max';
+    return TextEditingValue(
+      text: clamped,
+      selection: TextSelection.collapsed(offset: clamped.length),
+    );
+  }
+}
+
 class _Actions extends StatefulWidget {
   final GameSession s;
   const _Actions({required this.s});
@@ -1009,15 +1164,20 @@ class _ActionsState extends State<_Actions> {
         return const SizedBox.shrink();
       }
       final price = s.content!.board[t.tile!].price ?? 0;
+      final cash = v.players[seat].cash;
       final isDiscoverer = v.current == seat;
       if (_bidInitTile != t.tile) {
-        _bid.text = '$price';
+        // Seed at the list price, but never above what you can actually
+        // bid (the sealed-bid invariant validates against cash, ADR-0018).
+        _bid.text = '${price.clamp(0, cash)}';
         _bidInitTile = t.tile;
       }
+      // Quick raises cap at cash: a bid over your balance would just be
+      // rejected, so clamp it to an all-in instead (2026-07 feedback).
       void bumpBid(int pct) {
         final current = int.tryParse(_bid.text) ?? price;
         final bump = (price * pct / 100).round();
-        _bid.text = '${current + bump}';
+        _bid.text = '${(current + bump).clamp(0, cash)}';
       }
 
       children.addAll([
@@ -1040,14 +1200,22 @@ class _ActionsState extends State<_Actions> {
           child: TextField(
             controller: _bid,
             keyboardType: TextInputType.number,
+            // Digits only, and never more than the seat can afford - the
+            // field itself refuses an over-cash bid as you type (2026-07).
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              _MaxValueFormatter(cash),
+            ],
             style: const TextStyle(color: Color(0xFF2A2A2A)),
             decoration: const InputDecoration(isDense: true),
           ),
         ),
         hoverSfx(FilledButton(
+          // Clamp at submit too, belt-and-suspenders: the field is already
+          // capped, but the amount on the wire must never exceed cash.
           onPressed: () => s.sendCmd({
             'type': 'submit_blind_bid',
-            'amount': int.tryParse(_bid.text) ?? 0
+            'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
           }),
           child: const Text('Bid'),
         )),
@@ -1063,6 +1231,12 @@ class _ActionsState extends State<_Actions> {
             style: touch,
             child: Text('+$pct%'),
           )),
+        // All-in: the highest bid the sealed-bid invariant will accept.
+        hoverSfx(OutlinedButton(
+          onPressed: () => _bid.text = '$cash',
+          style: touch,
+          child: Text('Max (\$$cash)'),
+        )),
       ]);
     } else if (t.type == 'bribe_vote') {
       // Every living opponent may vote at once (ADR-0024), not a single
@@ -1401,6 +1575,17 @@ class _SidePanel extends StatelessWidget {
     final rows = <Widget>[];
     final count = v?.players.length ?? s.seats.length;
     final ranks = v != null ? _vpRanks(v) : List<int?>.filled(count, null);
+    // Round metronome (ADR-0020): the round is the minimum hands-cycled
+    // across survivors, so anyone above that minimum has already done their
+    // hand this round - tag them so it is obvious who the table waits on.
+    final int? round = (v == null || v.finished)
+        ? null
+        : v.players
+            .asMap()
+            .entries
+            .where((e) => !e.value.bankrupt)
+            .map((e) => e.value.handsCycled)
+            .fold<int?>(null, (m, h) => m == null || h < m ? h : m);
     for (var i = 0; i < count; i++) {
       final p = v?.players.elementAtOrNull(i);
       final seatInfo = s.seats.elementAtOrNull(i);
@@ -1409,7 +1594,10 @@ class _SidePanel extends StatelessWidget {
       // (2026-07) - a highlighted row + a leading marker reads at a glance.
       final isActive = v != null && !v.finished && v.current == i;
       final rank = ranks[i];
+      final cycled =
+          round != null && p != null && !p.bankrupt && p.handsCycled > round;
       final tags = [
+        if (cycled) '✓ hand cycled',
         if (i == s.seat) '(you)',
         if (p?.inJail == true) '[jail]',
         if (p?.jailRoute != null) '[route: ${p!.jailRoute!.join(',')} left]',
@@ -1492,18 +1680,8 @@ class _SidePanel extends StatelessWidget {
         ),
       ));
     }
-    // Always-visible VP legend (2026-07 playtest feedback: nobody knew how
-    // or when points were earned - a hidden tooltip would not fix that).
-    if (v != null && (s.content?.winVictoryPoints ?? 0) > 0) {
-      rows.add(const Padding(
-        padding: EdgeInsets.only(top: 4),
-        child: Text(
-          'VP: 3 per full colour group · 2 per conglomerate · 1 per '
-          'utility · +2 each round to the richest. First to the target wins.',
-          style: TextStyle(fontSize: 10, color: Color(0xFF9AA3B2)),
-        ),
-      ));
-    }
+    // The VP scoring breakdown lives in the center panel now
+    // (`_CenterPanel._vpLegend`), where it reads at the table's focus.
     return Column(children: rows);
   }
 

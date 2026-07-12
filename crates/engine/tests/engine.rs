@@ -50,6 +50,48 @@ fn move_to_card_collects_salary_and_resolves_landing() {
     assert_eq!(st.turn, TurnPhase::AwaitEnd);
 }
 
+/// A "go directly to X, do not pass Go" card (`collect_go: false`) must
+/// never pay salary even when the target sits "behind" the traveler on
+/// the board (the wrap-detection condition `to <= from` that would
+/// normally trigger it) - `collect_go` gates `passed_go` unconditionally.
+/// This is what the Flutter client's `passed_go` field relies on to
+/// decide whether to hop the pawn through Go or glide it straight there
+/// (2026-07 playtest feedback): the client must never show a false
+/// "crossed Go" hop for a card that explicitly skips it.
+#[test]
+fn move_to_card_without_collect_go_never_pays_salary_even_when_wrapping() {
+    let card = CardDef {
+        id: "goto_ave_a_no_go".into(),
+        text: "Go directly to Ave A. Do not pass Go.".into(),
+        effect: CardEffect::MoveTo {
+            tile: "ave_a".into(),
+            collect_go: false,
+        },
+    };
+    let engine = engine_with(card_board(vec![card]));
+    let st = two_players(&engine);
+
+    // p0: Go(0) -> Chance(3) draws the card -> Ave A(1). The target sits
+    // behind the chance tile (to=1 <= from=3), the exact geometry that
+    // pays salary when collect_go is true (see the sibling test above).
+    let (st, ev) = play(&engine, &st, "p0", 3);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::Moved {
+            player: 0,
+            from: 3,
+            to: 1,
+            passed_go: false,
+        }
+    )));
+    assert!(
+        !ev.iter().any(|e| matches!(e, Event::SalaryPaid { .. })),
+        "collect_go: false must never pay salary, wrap or not"
+    );
+    assert_eq!(st.players[0].position, 1);
+    assert_eq!(st.players[0].cash, 1500, "no salary collected");
+}
+
 #[test]
 fn same_seed_produces_identical_games() {
     // Drive both runs with state-derived canonical actions so the script
@@ -428,6 +470,34 @@ fn view_hides_rng_and_deck_order() {
     assert!(!json.contains("rng"));
     assert!(!json.contains("deck"));
     assert_eq!(view.players.len(), 2);
+}
+
+/// The round metronome (ADR-0020) is public: clients derive the round
+/// number (the minimum across survivors) and its progress from it, which
+/// is what makes the `+2` round bonus's timing legible.
+#[test]
+fn view_exposes_hands_cycled_for_round_progress() {
+    let engine = engine_with(plain_board());
+    let mut st = two_players(&engine);
+    st.players[0].hands_cycled = 3;
+    st.players[1].hands_cycled = 2;
+
+    let view = ClientView::of(&st, engine.content());
+    assert_eq!(view.players[0].hands_cycled, 3);
+    assert_eq!(view.players[1].hands_cycled, 2);
+    // The round is the laggard's count: p0 is one hand ahead, so the table
+    // is still waiting on p1 before the bonus can fire.
+    let round = view
+        .players
+        .iter()
+        .filter(|p| !p.bankrupt)
+        .map(|p| p.hands_cycled)
+        .min()
+        .expect("someone is alive");
+    assert_eq!(round, 2);
+
+    let json = serde_json::to_string(&view).expect("view serializes");
+    assert!(json.contains("hands_cycled"), "wire field must be present");
 }
 
 #[test]

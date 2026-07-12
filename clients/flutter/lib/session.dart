@@ -9,7 +9,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import 'board.dart' show CashFloater;
+import 'board.dart' show CashFloater, hopMillis;
 import 'protocol.dart';
 import 'session_storage.dart';
 import 'sfx.dart';
@@ -141,6 +141,18 @@ class GameSession extends ChangeNotifier {
   /// chains (chance -> reveal -> teleport) read as separate moments; they
   /// converge on the authoritative view positions once the Update applies.
   final Map<int, int> displayPositions = {};
+
+  /// Per-seat "the current move is a straight teleport glide, not a
+  /// tile-by-tile hop" flag (ADR-0028): set on every `moved`/`went_to_jail`
+  /// beat so a "do not pass Go" card slides straight instead of appearing
+  /// to cross the Go corner. Read by the board's pawn layer.
+  final Map<int, bool> pawnGlide = {};
+
+  /// Per-seat "hop the whole way even though it's a long teleport" flag:
+  /// a card that wraps forward through Go always collects salary, so it
+  /// must be seen crossing Go (2026-07 playtest feedback) - otherwise the
+  /// pawn just vanishes and the +$salary floater has no visible cause.
+  final Map<int, bool> pawnForceHop = {};
 
   /// Transient cash-delta floaters over board tiles (ADR-0028 extras).
   final List<CashFloater> floaters = [];
@@ -497,12 +509,28 @@ class GameSession extends ChangeNotifier {
         final p = e['player'] as int;
         final from = e['from'] as int? ?? displayPositions[p] ?? 0;
         final to = e['to'] as int;
+        // A forward wrap that collects salary (`passed_go`) always
+        // crossed Go - it must hop the whole way, even for a long card
+        // teleport, or the +$salary floater has no visible cause
+        // (2026-07 playtest feedback). A wrap WITHOUT salary ("do not
+        // pass Go") is the opposite case: it must glide straight instead
+        // of appearing to hop through Go. Every moved beat sets both so a
+        // later plain walk never inherits a stale flag from either.
+        final n = content?.board.length ?? 0;
+        final wraps = n > 0 && from + ((to - from) % n) >= n;
+        final passedGo = e['passed_go'] == true;
+        pawnGlide[p] = wraps && !passedGo;
+        pawnForceHop[p] = wraps && passedGo;
         displayPositions[p] = to;
         notifyListeners();
-        await Future.delayed(_moveDuration(from, to));
+        await Future.delayed(_moveDuration(from, to,
+            straight: pawnGlide[p]!, forceHop: pawnForceHop[p]!));
       case 'went_to_jail':
         final p = e['player'] as int;
         final jail = content?.board.indexWhere((t) => t.kind == 'jail') ?? -1;
+        // The jail hop is a teleport - always a straight slide.
+        pawnGlide[p] = true;
+        pawnForceHop[p] = false;
         if (jail >= 0) displayPositions[p] = jail;
         notifyListeners();
         await Future.delayed(const Duration(milliseconds: 1100));
@@ -540,14 +568,16 @@ class GameSession extends ChangeNotifier {
     }
   }
 
-  /// Mirrors `_PawnLayer`'s hop timing (260ms per tile, plus its 260ms
-  /// wind-up) so a beat waits for the glide it just triggered.
-  Duration _moveDuration(int from, int to) {
+  /// Mirrors `_PawnLayer`'s hop timing (`hopMillis`, plus its 260ms
+  /// wind-up) so a beat waits for the glide it just triggered. A straight
+  /// glide (teleport) matches the layer's fixed 700ms slide.
+  Duration _moveDuration(int from, int to,
+      {bool straight = false, bool forceHop = false}) {
     final n = content?.board.length ?? 0;
     if (n == 0) return const Duration(milliseconds: 700);
     final forward = (to - from) % n;
-    final glide = (forward >= 1 && forward <= 12)
-        ? (forward * 260).clamp(400, 3200)
+    final glide = (!straight && (forceHop || (forward >= 1 && forward <= 12)))
+        ? hopMillis(forward)
         : 700;
     return Duration(milliseconds: 260 + glide + 150);
   }
@@ -600,6 +630,8 @@ class GameSession extends ChangeNotifier {
     _animating = false;
     floaters.clear();
     displayPositions.clear();
+    pawnGlide.clear();
+    pawnForceHop.clear();
     _syncDisplayPositions();
   }
 
