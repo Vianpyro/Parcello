@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::content::GameContent;
 use crate::content::{MarketEffect, RentModel, RuleParams};
 use crate::rng;
+use crate::tuning::{
+    FORECAST_QUEUE_LEN, MORTGAGE_VALUE_PCT, VP_PER_CONGLOMERATE, VP_PER_FULL_GROUP,
+    VP_PER_GROUP_SCALED,
+};
 
 /// Global player identity issued by the identity service ("provider:sub")
 /// or a guest id in insecure mode.
@@ -269,7 +273,7 @@ impl GameState {
         // Seed the public forecast with 3 events, gap_turns apart (ADR-0021);
         // a no-op loop when the content ships no market events.
         let mut forecast = MarketForecast::default();
-        for _ in 0..3 {
+        for _ in 0..FORECAST_QUEUE_LEN {
             forecast.draw_next(content, &mut rng, 0);
         }
         // First player drawn from the seed (2026-07 playtest decision), not
@@ -385,7 +389,7 @@ impl GameState {
     /// the points.
     pub fn victory_points(&self, content: &GameContent, player: usize) -> i64 {
         let cap = content.rules.max_houses_per_property.min(5);
-        let mut points = 3 * self.full_groups_owned(content, player) as i64;
+        let mut points = VP_PER_FULL_GROUP * self.full_groups_owned(content, player) as i64;
         for (i, tile) in self.tiles.iter().enumerate() {
             if tile.owner != Some(player) {
                 continue;
@@ -394,10 +398,10 @@ impl GameState {
                 continue;
             };
             if tile.houses >= cap {
-                points += 2;
+                points += VP_PER_CONGLOMERATE;
             }
             if prop.rent_model == RentModel::GroupScaled {
-                points += 1;
+                points += VP_PER_GROUP_SCALED;
             }
         }
         points + self.players[player].round_bonus_vp
@@ -417,7 +421,7 @@ impl GameState {
             }
             if let Some(prop) = content.property(i) {
                 worth += if tile.mortgaged {
-                    prop.price / 2
+                    prop.price * MORTGAGE_VALUE_PCT / 100
                 } else {
                     prop.price
                 };

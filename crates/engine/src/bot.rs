@@ -11,6 +11,7 @@
 //! engine itself still never draws ambient randomness.
 
 use crate::rng;
+use crate::tuning::{MORTGAGE_INTEREST_PCT, MORTGAGE_VALUE_PCT};
 use crate::{ClientView, CommandKind, GameContent, GamePhase, RentModel, TileKind, TurnPhase};
 
 /// Cash the bot refuses to dip under when buying or bidding.
@@ -19,10 +20,27 @@ const RESERVE: i64 = 100;
 const BUILD_RESERVE: i64 = 300;
 /// Extra comfort required before redeeming mortgages.
 const REDEEM_RESERVE: i64 = 500;
-/// Maximum per-tile boost level enforced by the engine.
-const MAX_RENT_BOOSTS: u8 = 3;
+use crate::tuning::MAX_RENT_BOOSTS;
 /// Minimum trade edge before the bot accepts an offer.
 const TRADE_MARGIN: i64 = 25;
+/// Sealed-bid jitter bounds, as percent of list price (2026-07: bots got
+/// unpredictable on purpose - fixed formulas were trivial to outbid).
+const BID_JITTER_MIN_PCT: i64 = 50;
+const BID_JITTER_MAX_PCT: i64 = 200;
+/// Below this fraction of list price the bot abstains instead of
+/// lowballing a bid that could never win against the discoverer floor.
+const MIN_BID_PCT: i64 = 50;
+/// Landing-score weights for movement-card choice (heuristic, not rules).
+const SCORE_GO_TO_JAIL: i64 = -1000;
+const SCORE_BUYABLE_UNOWNED: i64 = 20;
+const SCORE_OWN_TILE: i64 = 5;
+const SCORE_NEUTRAL: i64 = 1;
+/// Rival-tile penalty, percent of its price (steer away from the pricey).
+const RIVAL_TILE_PENALTY_PCT: i64 = 5;
+/// Strategic premium on group-completing/completed tiles, percent of price.
+const GROUP_PREMIUM_PCT: i64 = 50;
+/// Baseline priority weight per tile, percent of price (tie-breaker).
+const PRIORITY_PRICE_PCT: i64 = 10;
 
 /// What the bot wants to do right now, if anything. Pure given its inputs
 /// (`noise` included) and idempotent: called after every server update,
@@ -114,7 +132,11 @@ impl Bot<'_> {
         }
         let price = self.content.property(tile)?.price;
         let mut noise = self.noise;
-        let pct = 50 + rng::below(&mut noise, 151) as i64; // 50..=200
+        let pct = BID_JITTER_MIN_PCT
+            + rng::below(
+                &mut noise,
+                (BID_JITTER_MAX_PCT - BID_JITTER_MIN_PCT + 1) as u64,
+            ) as i64;
         let roll = price * pct / 100;
         let amount = if self.view.current == self.me {
             if self.cash_after(price) >= 0 {
@@ -124,7 +146,11 @@ impl Bot<'_> {
             }
         } else {
             let bid = roll.min(self.cash_after(RESERVE));
-            if bid >= price / 2 { bid } else { 0 }
+            if bid >= price * MIN_BID_PCT / 100 {
+                bid
+            } else {
+                0
+            }
         };
         Some(CommandKind::SubmitBlindBid { amount })
     }
@@ -150,21 +176,21 @@ impl Bot<'_> {
     fn landing_score(&self, from: usize, value: u8, len: usize) -> i64 {
         let to = (from + value as usize) % len;
         match &self.content.board[to].kind {
-            TileKind::GoToJail => -1000,
+            TileKind::GoToJail => SCORE_GO_TO_JAIL,
             TileKind::Property(prop) => match self.view.tiles[to].owner {
                 None => {
                     if self.cash_after(prop.price) >= RESERVE {
-                        20
+                        SCORE_BUYABLE_UNOWNED
                     } else {
                         0
                     }
                 }
-                Some(o) if o == self.me => 5,
+                Some(o) if o == self.me => SCORE_OWN_TILE,
                 // Cheap rival tiles are a shrug; expensive ones are worth
                 // steering away from when there's a choice.
-                Some(_) => -(prop.price / 20),
+                Some(_) => -(prop.price * RIVAL_TILE_PENALTY_PCT / 100),
             },
-            _ => 1,
+            _ => SCORE_NEUTRAL,
         }
     }
 
@@ -353,13 +379,13 @@ impl Bot<'_> {
             return 0;
         };
         let mortgage_value = if self.view.tiles[tile].mortgaged {
-            prop.price / 2
+            prop.price * MORTGAGE_VALUE_PCT / 100
         } else {
             prop.price
         };
         let improvement_value = self.view.tiles[tile].houses as i64 * prop.house_cost;
         let strategic = if self.completes_group(tile) {
-            prop.price / 2
+            prop.price * GROUP_PREMIUM_PCT / 100
         } else {
             0
         };
@@ -371,11 +397,11 @@ impl Bot<'_> {
             return 0;
         };
         let group_bonus = if self.owns_full_group(&prop.group) {
-            prop.price / 2
+            prop.price * GROUP_PREMIUM_PCT / 100
         } else {
             0
         };
-        self.tile_base_rent(tile) + group_bonus + prop.price / 10
+        self.tile_base_rent(tile) + group_bonus + prop.price * PRIORITY_PRICE_PCT / 100
     }
 
     fn tile_base_rent(&self, tile: usize) -> i64 {
@@ -451,8 +477,8 @@ impl Bot<'_> {
 }
 
 fn mortgage_redeem_cost(price: i64) -> i64 {
-    let principal = price / 2;
-    principal + principal / 10
+    let principal = price * MORTGAGE_VALUE_PCT / 100;
+    principal + principal * MORTGAGE_INTEREST_PCT / 100
 }
 
 #[cfg(test)]

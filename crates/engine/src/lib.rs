@@ -17,6 +17,7 @@ pub mod strategy;
 pub mod view;
 
 mod apply;
+mod tuning;
 
 pub use command::{CommandKind, PlayerCommand};
 pub use content::{

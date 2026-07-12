@@ -103,13 +103,19 @@ architecture doc section 5; dependencies point downward only):
 
 - `crates/engine` - pure synchronous rules. `lib.rs` wires strategies
   (`RentCalculator`, `BankruptcyResolver` as `Box<dyn>`);
-  `apply.rs` is the whole command pipeline (validate -> mutate clone ->
-  emit events); `state.rs` (GameState, TurnPhase incl. `BlindAuction` and
+  `apply.rs` is the command pipeline entry (validate -> mutate clone ->
+  emit events), with the `Exec` methods split by domain under `apply/`
+  (movement, jail, trade, auction, estate, landing, cash, turn - all
+  `pub(super)`, the pipeline stays the only entry point); `tuning.rs`
+  gathers the fixed game-policy numbers that are NOT mod-configurable
+  (VP weights, mortgage/refund percents, the 90% contested-win discount
+  - promote to `RuleParams` with an ADR before making one moddable);
+  `state.rs` (GameState, TurnPhase incl. `BlindAuction` and
   `BribeVote` variants, TradeOffer), `content.rs` (GameContent, RentModel),
   `view.rs`. `bot.rs`
-  is the shared autopilot heuristic (`bot::decide(content, view, seat) ->
-  Option<CommandKind>`): pure like everything here, used by both the
-  server's bot seats and the CLI `--bot` (ADR-0014).
+  is the shared autopilot heuristic (`bot::decide(content, view, seat,
+  noise) -> Option<CommandKind>`): pure like everything here, used by both
+  the server's bot seats and the CLI `--bot` (ADR-0014).
 - `crates/mods` - TOML mod bundles. `RegistryBuilder` merges
   last-loaded-wins per key (tiles/cards replace in place by id, rule
   scalars override; conflicts logged WARN). Base game content is itself a
@@ -328,10 +334,12 @@ lobby-editable (ADR-0015).
 - Errors: typed enums (`CommandError` serializes with tag "code" and is
   sent only to the offending player as `Rejected`). Add a variant rather
   than overloading an existing one with a wrong message.
-- Tests: every non-trivial engine rule gets a test in
-  `crates/engine/tests/engine.rs` (use `FixedDice` and the `plain_board`/
-  `transit_board` fixtures). Keep the wire-format tests green - they are
-  compatibility contracts.
+- Tests: every non-trivial engine rule gets an integration test under
+  `crates/engine/tests/` - themed files (`engine.rs` core flow/wins,
+  `auction_and_trade.rs`, `jail_and_corruption.rs`,
+  `estate_and_economy.rs`) over the shared fixtures in
+  `tests/common/mod.rs` (`plain_board`/`transit_board`/...). Keep the
+  wire-format tests green - they are compatibility contracts.
 - Small changes as focused diffs; do not reformat unrelated code.
 - Known borrow pitfall: `Exec::owned_property` returns
   `&'e PropertyDef` borrowed from `content` (not `&self`) precisely so

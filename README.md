@@ -140,11 +140,12 @@ cargo audit
 ```
 
 Always pass `--locked` so builds are reproducible against the committed
-`Cargo.lock`. Engine rules are covered in `crates/engine/tests/engine.rs`
-(scripted movement via `PlayMovementCard`, `plain_board`/`transit_board`
-fixtures); session behaviour (rooms, reconnect tokens, private trades,
-feedback) has async tests in `crates/server/src/room.rs`; the wire format
-is pinned by tests in `parcello-protocol`.
+`Cargo.lock`. Engine rules are covered by the themed integration tests in
+`crates/engine/tests/` (scripted movement via `PlayMovementCard`, shared
+fixtures in `tests/common/mod.rs`); session behaviour (rooms, reconnect
+tokens, private trades, feedback) has async tests in
+`crates/server/src/room/tests.rs`; the wire format is pinned by tests in
+`parcello-protocol`.
 
 Flutter client (needs the Flutter SDK):
 
