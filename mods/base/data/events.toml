@@ -17,10 +17,3 @@ name = "Market Crash"
 effect = "rent_multiplier"
 magnitude_pct = -50
 duration_turns = 4
-
-[[event]]
-id = "tax_audit"
-name = "Tax Audit"
-effect = "wealth_tax"
-magnitude_pct = 10
-duration_turns = 0

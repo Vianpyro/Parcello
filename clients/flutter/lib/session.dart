@@ -75,6 +75,26 @@ class GameSession extends ChangeNotifier {
   int? turnSeconds;
   DateTime? turnEndsAt;
 
+  /// Floor on the decision window for a jailed seat still choosing its
+  /// exit (Legal Route / Corruption / jail card) - mirrors the server's
+  /// `JAIL_DECISION_SECS` (`crates/server/src/room.rs`): an ordinary blitz
+  /// turn is too short for that decision (2026-07 playtest feedback).
+  static const _jailDecisionSecs = 20;
+
+  /// `turnSeconds`, floored to `_jailDecisionSecs` while whoever is
+  /// currently acting is jailed and hasn't chosen an exit yet - a local
+  /// approximation of the server's own floor (`turn_limit_secs`), so the
+  /// displayed countdown doesn't appear to expire well before the server
+  /// would actually auto-play. The server alone decides when it fires.
+  int? _effectiveTurnSeconds() {
+    final base = turnSeconds;
+    if (base == null) return null;
+    final v = view;
+    final acting = v?.players.elementAtOrNull(v.current);
+    final jailedDeciding = acting?.inJail == true && acting?.jailRoute == null;
+    return jailedDeciding && base < _jailDecisionSecs ? _jailDecisionSecs : base;
+  }
+
   /// Personal time bank in seconds (ADR-0023); null when off. `banks` is the
   /// live per-seat remaining amount from the latest Update; `bankEndsAt` is
   /// derived from it and only starts counting down once `turnEndsAt` passes
@@ -84,14 +104,16 @@ class GameSession extends ChangeNotifier {
   DateTime? bankEndsAt;
 
   /// Sealed-bid / bribe-vote window deadlines (ADR-0018/ADR-0024): a local
-  /// approximation of the server's 5s window, set the moment we first see
-  /// the phase and cleared once it's gone - the server alone resolves the
-  /// window.
+  /// approximation of the server's window (12s for bids, 5s for votes),
+  /// set the moment we first see the phase and cleared once it's gone -
+  /// the server alone resolves the window, and its own clock only starts
+  /// once the table's render acks land (ADR-0028), so this is a rough
+  /// upper bound, not a precise mirror.
   DateTime? bidEndsAt;
   DateTime? voteEndsAt;
   void _trackTimedWindows() {
     bidEndsAt = view?.turn.type == 'blind_auction'
-        ? (bidEndsAt ?? DateTime.now().add(const Duration(seconds: 5)))
+        ? (bidEndsAt ?? DateTime.now().add(const Duration(seconds: 12)))
         : null;
     voteEndsAt = view?.turn.type == 'bribe_vote'
         ? (voteEndsAt ?? DateTime.now().add(const Duration(seconds: 5)))
@@ -133,6 +155,12 @@ class GameSession extends ChangeNotifier {
   /// so a mid-flight beat sequence aborts instead of applying stale state.
   int _updateEpoch = 0;
   bool _disposed = false;
+
+  /// True while an Update's beats are still playing (ADR-0028). UI
+  /// countdowns (turn clock, time bank, bid/vote windows) should freeze
+  /// rather than tick down during this - none of them are actually
+  /// consumed server-side while the table is still rendering.
+  bool get isAnimating => _animating;
 
   /// Net worth of a seat, mirroring `GameState::net_worth` on the server so
   /// the shown ranking predicts the timed-game winner: cash + property
@@ -325,14 +353,17 @@ class GameSession extends ChangeNotifier {
         if (msg['reconnect'] != null) {
           _saveToken(code!, msg['reconnect'] as String);
         }
-        gameEndsAt = _deadlineFrom(msg['time_remaining']);
-        turnSeconds = msg['turn_seconds'] as int?;
-        turnEndsAt = _deadlineFrom(turnSeconds);
-        timeBankSeconds = msg['time_bank_seconds'] as int?;
-        banks = null;
+        // Set before turnEndsAt below - a reconnect mid-game may land
+        // straight into a jailed seat's extended decision window, and
+        // _effectiveTurnSeconds needs the fresh view to know that.
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
+        gameEndsAt = _deadlineFrom(msg['time_remaining']);
+        turnSeconds = msg['turn_seconds'] as int?;
+        turnEndsAt = _deadlineFrom(_effectiveTurnSeconds());
+        timeBankSeconds = msg['time_bank_seconds'] as int?;
+        banks = null;
         _resetDirector();
         _trackTimedWindows();
         joined = true;
@@ -349,7 +380,7 @@ class GameSession extends ChangeNotifier {
         feedbackDone = false;
         gameEndsAt = _deadlineFrom(msg['time_remaining']);
         turnSeconds = msg['turn_seconds'] as int?;
-        turnEndsAt = _deadlineFrom(turnSeconds);
+        turnEndsAt = _deadlineFrom(_effectiveTurnSeconds());
         timeBankSeconds = msg['time_bank_seconds'] as int?;
         banks = null;
         _trackTimedWindows();
@@ -381,6 +412,10 @@ class GameSession extends ChangeNotifier {
     final msg = _pendingUpdates.removeAt(0);
     _playUpdate(msg).whenComplete(() {
       _animating = false;
+      // Without this, a countdown frozen via isAnimating could keep
+      // showing its last frozen value until some unrelated rebuild
+      // happened to come along and notice the flag had flipped.
+      if (!_disposed) notifyListeners();
       _drainUpdates();
     });
   }
@@ -410,7 +445,7 @@ class GameSession extends ChangeNotifier {
     }
     view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
     _syncDisplayPositions();
-    turnEndsAt = _deadlineFrom(turnSeconds);
+    turnEndsAt = _deadlineFrom(_effectiveTurnSeconds());
     banks = (msg['banks'] as List?)?.cast<int>();
     _trackTimedWindows();
     // The bank only starts draining once the plain turn window is
@@ -455,10 +490,16 @@ class GameSession extends ChangeNotifier {
         notifyListeners();
         await Future.delayed(const Duration(milliseconds: 1700));
       case 'spotlight_started':
-        spotlightFlashText = tileName(e['tile'] as int);
+        // Naming a tile alone didn't explain what happened (2026-07
+        // playtest feedback) - spell out the actual effect.
+        final pct = e['rent_pct'] as int;
+        final turns = e['duration_turns'] as int;
+        spotlightFlashText =
+            '${tileName(e['tile'] as int)} is in the spotlight!\n'
+            '+$pct% rent for $turns turns';
         spotlightFlashSeq++;
         notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 1100));
+        await Future.delayed(const Duration(milliseconds: 1800));
       case 'salary_paid':
         _floatCash(e['player'] as int, e['amount'] as int);
         await Future.delayed(const Duration(milliseconds: 500));

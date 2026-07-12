@@ -38,12 +38,20 @@ pub const DISCONNECTED_GRACE: Duration = Duration::from_secs(30);
 /// A bot seat pauses this long before each move so humans can follow the
 /// action; without it a table of bots would resolve instantly (ADR-0014).
 const BOT_THINK: Duration = Duration::from_millis(800);
+/// Floor on the plain-turn window for a jailed seat choosing its exit
+/// (Legal Route / Corruption / jail card, ADR-0024): a genuine multi-way
+/// decision needs more room than an ordinary blitz turn, so the effective
+/// limit is `max(settings.turn_seconds, this)` rather than the room's
+/// plain default (2026-07 playtest feedback).
+const JAIL_DECISION_SECS: u64 = 20;
 /// Sealed-bid auction window (ADR-0018): every living seat has this long to
 /// submit a bid once a window opens; silent seats are auto-abstained at
 /// expiry. A separate, parallel timer from the turn clock/time bank -
 /// `acting_seat()` returns `None` for the whole duration, so neither is
-/// consumed while it's armed.
-const BID_WINDOW: Duration = Duration::from_secs(5);
+/// consumed while it's armed. 12s (not the original 5s): with real
+/// players, quick-bid buttons still need enough headroom to read the
+/// property and react (2026-07 playtest feedback).
+const BID_WINDOW: Duration = Duration::from_secs(12);
 /// Corruption bribe vote window (ADR-0024): the same timed-collection-window
 /// pattern as `BID_WINDOW`, kept as its own independently-armed timer rather
 /// than a shared primitive - matching how `game_deadline` and `bid_deadline`
@@ -613,6 +621,30 @@ impl Room {
         self.seq
     }
 
+    /// Effective plain-turn limit for `seat` right now, or `None` when the
+    /// room has no turn limit at all. Normally `settings.turn_seconds`,
+    /// floored to `JAIL_DECISION_SECS` for a jailed seat still choosing its
+    /// exit (`jail_route.is_none()` - once any exit is chosen the player
+    /// either un-jails immediately or, on a failed bribe, is back at this
+    /// same decision next turn, so the floor reapplies correctly either
+    /// way). Shared by `afk_deadline` and `drain_bank` so the auto-play
+    /// trigger and the bank drain always agree on the same budget.
+    fn turn_limit_secs(&self, seat: usize) -> Option<u64> {
+        let base = self.settings.turn_seconds?;
+        let Phase::Active(state) = &self.phase else {
+            return Some(base);
+        };
+        let jailed_deciding = state
+            .players
+            .get(seat)
+            .is_some_and(|p| p.jailed && p.jail_route.is_none());
+        Some(if jailed_deciding {
+            base.max(JAIL_DECISION_SECS)
+        } else {
+            base
+        })
+    }
+
     /// How long the acting seat may stall before its canonical action is
     /// auto-played, or `None` for no limit. A disconnected seat (truly AFK)
     /// is skipped after `DISCONNECTED_GRACE` whether or not a turn limit is
@@ -621,7 +653,7 @@ impl Room {
     /// gets the room's turn limit extended by whatever bank they have left.
     fn afk_deadline(&self) -> Option<Duration> {
         let seat = self.acting_seat()?;
-        let turn_limit = self.settings.turn_seconds.map(Duration::from_secs);
+        let turn_limit = self.turn_limit_secs(seat).map(Duration::from_secs);
         let connected = self.seats.get(seat).is_some_and(|s| s.tx.is_some());
         if connected {
             let bank = Duration::from_secs(self.banks.get(seat).copied().unwrap_or(0));
@@ -641,7 +673,7 @@ impl Room {
         if self.seats.get(seat).is_none_or(|s| s.tx.is_none()) {
             return 0;
         }
-        let Some(turn_limit) = self.settings.turn_seconds.map(Duration::from_secs) else {
+        let Some(turn_limit) = self.turn_limit_secs(seat).map(Duration::from_secs) else {
             return 0;
         };
         let overage = elapsed.saturating_sub(turn_limit).as_secs();
@@ -2641,6 +2673,109 @@ mod tests {
         let (tx, rx) = mpsc::channel(64);
         tokio::spawn(room.run(rx, Rooms::default()));
         (tx, client_rxs)
+    }
+
+    /// Same setup as `jailed_room`, but with a plain turn limit shorter
+    /// than `JAIL_DECISION_SECS` - to prove the floor actually overrides
+    /// the room's own setting rather than merely being the default.
+    async fn jailed_room_with_short_turn_limit() -> (
+        mpsc::Sender<RoomCmd>,
+        Vec<mpsc::UnboundedReceiver<ServerMessage>>,
+    ) {
+        let content = base_content();
+        let engine = Engine::new(Arc::new(content.content.clone())).expect("engine builds");
+        let mut state = engine.new_game(
+            vec![
+                ("guest:alice".into(), "Alice".into()),
+                ("guest:bob".into(), "Bob".into()),
+            ],
+            7,
+        );
+        state.players[0].jailed = true;
+        state.turn = TurnPhase::AwaitMove;
+
+        let settings = RoomSettings {
+            game_seconds: None,
+            turn_seconds: Some(5),
+            time_bank_seconds: None,
+            rules: content.content.rules.clone(),
+        };
+        let mut room = Room {
+            code: "TESTS".into(),
+            content,
+            engine,
+            seats: vec![human_seat("guest:alice"), human_seat("guest:bob")],
+            phase: Phase::Active(state),
+            history: Arc::new(MemoryHistory::new()),
+            settings,
+            game_deadline: None,
+            bot_counter: 0,
+            banks: vec![0, 0],
+            bid_deadline: None,
+            vote_deadline: None,
+            seq: 0,
+            acked: Vec::new(),
+            anim_broadcast_at: tokio::time::Instant::now(),
+            table_settled_at: None,
+            acting_settled_at: None,
+            bid_gate: false,
+            vote_gate: false,
+        };
+        let mut client_rxs = Vec::new();
+        for seat in &mut room.seats {
+            let (tx, rx) = mpsc::unbounded_channel();
+            seat.tx = Some(tx);
+            client_rxs.push(rx);
+        }
+        let (tx, rx) = mpsc::channel(64);
+        tokio::spawn(room.run(rx, Rooms::default()));
+        (tx, client_rxs)
+    }
+
+    /// A jailed seat choosing its exit gets a floored 20s decision window
+    /// even when the room's plain turn limit is much shorter: the
+    /// canonical Legal Route must not auto-play at the room's 5s limit,
+    /// only once the `JAIL_DECISION_SECS` floor passes (2026-07 playtest
+    /// feedback - the ordinary blitz turn was too short for this decision).
+    #[tokio::test(start_paused = true)]
+    async fn jail_decision_gets_the_extended_floor_not_the_room_turn_limit() {
+        let (_room, mut client_rxs) = jailed_room_with_short_turn_limit().await;
+
+        // Nothing must auto-play within the room's plain 5s limit.
+        let early = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::LegalRouteChosen { .. }))
+                {
+                    return true;
+                }
+            }
+        })
+        .await;
+        assert!(
+            early.is_err(),
+            "must not auto-play the jail decision at the room's plain 5s limit"
+        );
+
+        // It does fire once the extended floor passes.
+        let resolved = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let ServerMessage::Update { events, .. } =
+                    client_rxs[1].recv().await.expect("room task alive")
+                    && events
+                        .iter()
+                        .any(|e| matches!(e, Event::LegalRouteChosen { .. }))
+                {
+                    return true;
+                }
+            }
+        })
+        .await
+        .expect("must auto-play once the extended floor passes");
+        assert!(resolved);
     }
 
     /// A silent opponent is auto-rejected once the bribe vote's own 5s

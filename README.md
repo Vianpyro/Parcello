@@ -378,8 +378,11 @@ through the normal bankruptcy machinery). The whole queue is public in every
 view - the draws already made, never the generator (seed/deck order stay
 hidden) - so players can plan around it; `gap_turns` apart, chained,
 deterministic from the game seed. The base mod ships a starter pool (market
-bubble / crash / tax audit) with deliberately rough numbers - calibration is
-a playtest task, never an engine change. The Exposition corner (ADR-0026,
+bubble / crash) with deliberately rough numbers - calibration is
+a playtest task, never an engine change. (A third starter event, a wealth
+tax, shipped originally but was cut after playtesting - it artificially
+slowed games down; `wealth_tax` stays a supported effect for mods that
+want it.) The Exposition corner (ADR-0026,
 replaces the old no-op Free Parking): landing there draws one random
 property tile via the seeded RNG and puts it in the spotlight for
 `spotlight_duration_turns` turns, boosting its rent by `spotlight_rent_pct`

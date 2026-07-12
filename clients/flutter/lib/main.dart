@@ -366,7 +366,7 @@ class GameScreen extends StatelessWidget {
                 child: _BannerFlash(
                   seq: s.spotlightFlashSeq,
                   text: '✨ ${s.spotlightFlashText}',
-                  hold: const Duration(milliseconds: 1000),
+                  hold: const Duration(milliseconds: 1600),
                 ),
               ),
             ]),
@@ -521,7 +521,11 @@ class _CenterPanel extends StatelessWidget {
             _Countdown(
                 endsAt: s.turnEndsAt!,
                 icon: Icons.hourglass_bottom,
-                warnSecs: 10),
+                warnSecs: 10,
+                // The server's own clock only starts once this seat's
+                // render ack lands (ADR-0028) - the display must not look
+                // like movement/animation is eating thinking time.
+                paused: s.isAnimating),
           ],
           // Personal time bank (ADR-0023): a flat reserve for the whole
           // plain turn window, then counts down to the hard stop. Never
@@ -532,18 +536,29 @@ class _CenterPanel extends StatelessWidget {
                 endsAt: s.bankEndsAt!,
                 holdUntil: s.turnEndsAt,
                 icon: Icons.account_balance,
-                warnSecs: 10),
+                warnSecs: 10,
+                paused: s.isAnimating),
           ],
-          // Sealed-bid window (ADR-0018): a one-shot 5s countdown, local
-          // estimate only - the server alone decides when it actually closes.
+          // Sealed-bid window (ADR-0018): a one-shot ~12s countdown, local
+          // estimate only - the server alone decides when it actually
+          // closes, and its clock waits for the whole table's acks
+          // (ADR-0028).
           if (s.bidEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
-            _Countdown(endsAt: s.bidEndsAt!, icon: Icons.gavel, warnSecs: 2),
+            _Countdown(
+                endsAt: s.bidEndsAt!,
+                icon: Icons.gavel,
+                warnSecs: 3,
+                paused: s.isAnimating),
           ],
           // Corruption bribe vote window (ADR-0024): same pattern.
           if (s.voteEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
-            _Countdown(endsAt: s.voteEndsAt!, icon: Icons.how_to_vote, warnSecs: 2),
+            _Countdown(
+                endsAt: s.voteEndsAt!,
+                icon: Icons.how_to_vote,
+                warnSecs: 2,
+                paused: s.isAnimating),
           ],
         ]),
         if (_poolsLine() != null) ...[
@@ -664,11 +679,19 @@ class _Countdown extends StatefulWidget {
   /// turn window and only start draining once that window is spent
   /// (ADR-0023), not from the moment the turn begins.
   final DateTime? holdUntil;
+  /// While true, freezes the display at whatever it last showed instead of
+  /// ticking down (ADR-0028): none of these server timers are actually
+  /// running while the table is still rendering an Update, so the display
+  /// must not look like it is - a fresh deadline always follows once the
+  /// animation settles, at which point this naturally shows the full
+  /// duration again rather than jumping.
+  final bool paused;
   const _Countdown(
       {required this.endsAt,
       this.icon = Icons.timer,
       this.warnSecs = 60,
-      this.holdUntil});
+      this.holdUntil,
+      this.paused = false});
 
   @override
   State<_Countdown> createState() => _CountdownState();
@@ -681,8 +704,14 @@ class _CountdownState extends State<_Countdown> {
 
   Timer? _timer;
   int? _lastTicked;
+  int? _frozenSecs;
 
   int _secsLeft() {
+    if (widget.paused) return _frozenSecs ?? _liveSecsLeft();
+    return _frozenSecs = _liveSecsLeft();
+  }
+
+  int _liveSecsLeft() {
     final now = DateTime.now();
     final holdUntil = widget.holdUntil;
     final reference =
@@ -695,6 +724,7 @@ class _CountdownState extends State<_Countdown> {
   void initState() {
     super.initState();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (widget.paused) return; // no tick cue while frozen
       final secs = _secsLeft();
       if (secs != _lastTicked && _milestones.contains(secs)) {
         _lastTicked = secs;
@@ -708,7 +738,10 @@ class _CountdownState extends State<_Countdown> {
   void didUpdateWidget(covariant _Countdown old) {
     super.didUpdateWidget(old);
     // A new deadline (next turn, restarted game clock) resets the cues.
-    if (old.endsAt != widget.endsAt) _lastTicked = null;
+    if (old.endsAt != widget.endsAt) {
+      _lastTicked = null;
+      _frozenSecs = null;
+    }
   }
 
   @override
@@ -904,8 +937,21 @@ class _Actions extends StatefulWidget {
 
 class _ActionsState extends State<_Actions> {
   final _bid = TextEditingController();
-  final _route = TextEditingController();
   final _bribe = TextEditingController();
+  /// Tile the bid field's current text was seeded for - reseeding only on
+  /// a *new* tile (not every rebuild) is the fix for a real bug: this
+  /// widget rebuilds on every notifyListeners() (animation beats, other
+  /// seats' bids arriving), and unconditionally resetting `_bid.text` each
+  /// time made it impossible to type a bid before it got wiped out from
+  /// under you (2026-07 playtest feedback).
+  int? _bidInitTile;
+  /// Same bug, same fix, for the bribe amount field.
+  bool _bribeSeeded = false;
+  /// Legal Route order built by tapping cards in sequence rather than
+  /// typing them (2026-07 playtest feedback: a free-text field either got
+  /// mistyped and silently rejected, or - being pre-filled - never edited
+  /// at all). Values, not indices: the hand has no duplicates (ADR-0017).
+  final List<int> _routeOrder = [];
 
   @override
   Widget build(BuildContext context) {
@@ -913,6 +959,21 @@ class _ActionsState extends State<_Actions> {
     final v = s.view;
     if (v == null || v.finished) return const SizedBox.shrink();
     final t = v.turn;
+
+    // Clear the jail-decision UI state the moment we're not actually in
+    // that decision (route chosen, bribe sent and the turn moved on, or
+    // simply not our situation) - preserved for as long as we ARE still
+    // deciding, across however many unrelated rebuilds happen meanwhile.
+    final mySeatIdx = s.seat;
+    final myPlayer = mySeatIdx != null ? v.players.elementAtOrNull(mySeatIdx) : null;
+    final jailDeciding = t.type == 'await_move' &&
+        s.myTurn &&
+        myPlayer?.inJail == true &&
+        myPlayer?.jailRoute == null;
+    if (!jailDeciding) {
+      _routeOrder.clear();
+      _bribeSeeded = false;
+    }
 
     final touch = ButtonStyle(
       minimumSize: WidgetStateProperty.all(const Size(0, 46)),
@@ -929,6 +990,9 @@ class _ActionsState extends State<_Actions> {
     }
 
     final children = <Widget>[];
+    // Reset once the window closes so a later auction - even on the same
+    // tile - always reseeds fresh instead of showing a stale leftover bid.
+    if (t.type != 'blind_auction') _bidInitTile = null;
     // Every living seat may bid at once (ADR-0018), not a single actor:
     // show the overlay whenever we haven't submitted yet, regardless of
     // whose turn it nominally is.
@@ -939,9 +1003,18 @@ class _ActionsState extends State<_Actions> {
           v.players[seat].bankrupt) {
         return const SizedBox.shrink();
       }
-      final price = s.content!.board[t.tile!].price;
+      final price = s.content!.board[t.tile!].price ?? 0;
       final isDiscoverer = v.current == seat;
-      _bid.text = '$price';
+      if (_bidInitTile != t.tile) {
+        _bid.text = '$price';
+        _bidInitTile = t.tile;
+      }
+      void bumpBid(int pct) {
+        final current = int.tryParse(_bid.text) ?? price;
+        final bump = (price * pct / 100).round();
+        _bid.text = '${current + bump}';
+      }
+
       children.addAll([
         Text(
           isDiscoverer
@@ -967,6 +1040,16 @@ class _ActionsState extends State<_Actions> {
         )),
         btn('Abstain', {'type': 'submit_blind_bid', 'amount': 0},
             primary: false),
+        // Quick raises as a percent of the list price, so escalating a bid
+        // doesn't mean typing out full numbers under the clock. Mutating
+        // the controller already repaints the TextField bound to it - no
+        // setState needed (and one less rebuild to guard against).
+        for (final pct in [10, 25, 50, 100])
+          hoverSfx(OutlinedButton(
+            onPressed: () => bumpBid(pct),
+            style: touch,
+            child: Text('+$pct%'),
+          )),
       ]);
     } else if (t.type == 'bribe_vote') {
       // Every living opponent may vote at once (ADR-0024), not a single
@@ -1004,27 +1087,43 @@ class _ActionsState extends State<_Actions> {
                   primary: false));
             }
             final sorted = [...me.hand]..sort();
-            _route.text = sorted.join(',');
-            _bribe.text = '${me.cash.clamp(1, 200)}';
+            if (!_bribeSeeded) {
+              _bribe.text = '${me.cash.clamp(1, 200)}';
+              _bribeSeeded = true;
+            }
+            final routeComplete = _routeOrder.length == sorted.length;
             children.addAll([
-              const Text('Route order:', style: TextStyle(fontSize: 12)),
-              SizedBox(
-                width: 120,
-                child: TextField(
-                  controller: _route,
-                  style: const TextStyle(color: Color(0xFF2A2A2A)),
-                  decoration: const InputDecoration(
-                      isDense: true, hintText: 'e.g. 1,2,3,4,5'),
-                ),
+              const Text('Tap your cards in the order you want to play them:',
+                  style: TextStyle(fontSize: 12)),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final value in sorted) _routeChip(value, touch),
+                ],
               ),
-              btn('Choose route', {
-                'type': 'choose_legal_route',
-                'order': _route.text
-                    .split(',')
-                    .map((x) => int.tryParse(x.trim()))
-                    .whereType<int>()
-                    .toList(),
-              }, primary: false),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                hoverSfx(OutlinedButton(
+                  onPressed: routeComplete
+                      ? () {
+                          s.sendCmd({
+                            'type': 'choose_legal_route',
+                            'order': _routeOrder,
+                          });
+                          setState(() => _routeOrder.clear());
+                        }
+                      : null,
+                  style: touch,
+                  child: const Text('Choose route'),
+                )),
+                if (_routeOrder.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  hoverSfx(TextButton(
+                    onPressed: () => setState(() => _routeOrder.clear()),
+                    child: const Text('Reset'),
+                  )),
+                ],
+              ]),
               SizedBox(
                 width: 90,
                 child: TextField(
@@ -1060,6 +1159,32 @@ class _ActionsState extends State<_Actions> {
         runSpacing: 6,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: children);
+  }
+
+  /// One tappable movement-card chip for the Legal Route builder: tap to
+  /// append it to `_routeOrder`, tap an already-picked one to remove it
+  /// again (no need for a full reset just to fix one misclick). Picked
+  /// chips show their position in the sequence.
+  Widget _routeChip(int value, ButtonStyle style) {
+    final pos = _routeOrder.indexOf(value);
+    final picked = pos >= 0;
+    return hoverSfx(OutlinedButton(
+      onPressed: () => setState(() {
+        if (picked) {
+          _routeOrder.remove(value);
+        } else {
+          _routeOrder.add(value);
+        }
+      }),
+      style: style.copyWith(
+        backgroundColor: WidgetStateProperty.all(
+            picked ? const Color(0xFFD8B45A).withValues(alpha: 0.3) : null),
+        side: WidgetStateProperty.all(BorderSide(
+            color:
+                picked ? const Color(0xFFA9812F) : const Color(0xFF9AA3B2))),
+      ),
+      child: Text(picked ? '$value  #${pos + 1}' : '$value'),
+    ));
   }
 }
 
@@ -1232,6 +1357,9 @@ class _SidePanel extends StatelessWidget {
       final p = v?.players.elementAtOrNull(i);
       final seatInfo = s.seats.elementAtOrNull(i);
       final name = p?.name ?? seatInfo?.name ?? 'seat $i';
+      // Whose turn is it: bold text alone read as too subtle in playtests
+      // (2026-07) - a highlighted row + a leading marker reads at a glance.
+      final isActive = v != null && !v.finished && v.current == i;
       final tags = [
         if (i == s.seat) '(you)',
         if (p?.inJail == true) '[jail]',
@@ -1242,42 +1370,65 @@ class _SidePanel extends StatelessWidget {
         else if (seatInfo?.connected == false)
           '(offline)',
       ].join(' ');
-      rows.add(Opacity(
-        opacity: p?.bankrupt == true ? 0.4 : 1,
-        child: Row(children: [
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-                color: pawnColors[i % pawnColors.length],
-                shape: BoxShape.circle),
+      rows.add(AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding: EdgeInsets.symmetric(horizontal: 6, vertical: isActive ? 5 : 2),
+        decoration: BoxDecoration(
+          color: isActive
+              ? const Color(0xFFD8B45A).withValues(alpha: 0.16)
+              : null,
+          borderRadius: BorderRadius.circular(4),
+          border: Border(
+            left: BorderSide(
+              color: isActive ? const Color(0xFFD8B45A) : Colors.transparent,
+              width: 3,
+            ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text('$name $tags',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight:
-                      v != null && v.current == i ? FontWeight.bold : null,
-                  decoration:
-                      p?.bankrupt == true ? TextDecoration.lineThrough : null,
-                )),
-          ),
-          if (p != null)
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('\$${p.cash}'),
-              // Net worth decides a timed game (ADR-0010), so surface it then.
-              if (s.gameEndsAt != null)
-                Text('NW \$${s.netWorth(i)}',
-                    style: const TextStyle(
-                        fontSize: 11, color: Color(0xFF9AA3B2))),
-              // Victory-point race (ADR-0020): "the race IS the game".
-              if ((s.content?.winVictoryPoints ?? 0) > 0)
-                Text('VP ${p.victoryPoints}/${s.content!.winVictoryPoints}',
-                    style: const TextStyle(
-                        fontSize: 11, color: Color(0xFF9AA3B2))),
-            ]),
-        ]),
+        ),
+        child: Opacity(
+          opacity: p?.bankrupt == true ? 0.4 : 1,
+          child: Row(children: [
+            SizedBox(
+              width: 16,
+              child: isActive
+                  ? const Icon(Icons.play_arrow,
+                      size: 16, color: Color(0xFFA9812F))
+                  : null,
+            ),
+            Container(
+              width: 12,
+              height: 12,
+              decoration: BoxDecoration(
+                  color: pawnColors[i % pawnColors.length],
+                  shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('$name $tags',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: isActive ? FontWeight.bold : null,
+                    decoration:
+                        p?.bankrupt == true ? TextDecoration.lineThrough : null,
+                  )),
+            ),
+            if (p != null)
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('\$${p.cash}'),
+                // Net worth decides a timed game (ADR-0010), so surface it then.
+                if (s.gameEndsAt != null)
+                  Text('NW \$${s.netWorth(i)}',
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF9AA3B2))),
+                // Victory-point race (ADR-0020): "the race IS the game".
+                if ((s.content?.winVictoryPoints ?? 0) > 0)
+                  Text('VP ${p.victoryPoints}/${s.content!.winVictoryPoints}',
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF9AA3B2))),
+              ]),
+          ]),
+        ),
       ));
     }
     return Column(children: rows);

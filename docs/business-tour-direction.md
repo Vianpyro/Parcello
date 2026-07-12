@@ -81,7 +81,9 @@ protocol break, so version accordingly):
    takeover cost - sealed-bid pricing from ADR-0018 doesn't exist yet),
    `wealth_tax` (one-shot, every alive player pays a percent of net worth
    through the normal bankruptcy machinery). The base mod ships a starter
-   pool (bubble/crash/audit).
+   pool (bubble/crash); a `wealth_tax` starter event (audit) shipped
+   originally too but was cut after playtesting slowed games down more
+   than intended - `wealth_tax` itself stays a supported effect.
 4. **DONE (2026-07).** ADR-0018 sealed bids: `TurnPhase::AwaitBuy`/`Auction`
    and `CommandKind::Buy`/`Decline`/`Bid`/`Pass` are gone, replaced by
    `TurnPhase::BlindAuction { tile, bids }` and a single
