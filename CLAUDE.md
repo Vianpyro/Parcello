@@ -71,7 +71,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 162 tests, all must pass
+cargo test  --workspace --locked          # 163 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -202,7 +202,7 @@ architecture doc section 5; dependencies point downward only):
   `seq`, clients ack rendered-through-N via `animation_done`, and the
   bid/vote windows (table-wide), turn clock/bank drain (acting seat) and
   `BOT_THINK` (table) wait for the watermark, bounded by
-  `ANIM_ACK_CAP` = 6s - bots/disconnected seats/the CLI settle instantly,
+  `ANIM_ACK_CAP` = 10s - bots/disconnected seats/the CLI settle instantly,
   the game clock is never gated; post-game
   survey `feedback` message:
   Finished phase only, once per seat, rating 1-5 + comment capped at 500
@@ -255,7 +255,7 @@ architecture doc section 5; dependencies point downward only):
   - `tokens.dart` - the palette and geometry from
     `docs/visual-identity.md`. A colour exists here or nowhere; a hex
     literal at a use site is a bug.
-  - `motion.dart` - every duration, curve, tier and the `ANIM_BUDGET`.
+  - `motion.dart` - every duration, curve, tier and the animation budget.
     A duration literal anywhere else is a bug: the director and the pawn
     layer used to derive their timing independently and could drift.
   - `stage.dart` - `StageState`, the *transient* visual state (what the
@@ -273,7 +273,8 @@ architecture doc section 5; dependencies point downward only):
   - ADR-0028's contract is unchanged: Updates queue, play in order, the
     view applies after the beats, the `animation_done` ack releases the
     server's gated timers. ADR-0030 adds that the client must never
-    exceed `ANIM_BUDGET` = 4s against the server's `ANIM_ACK_CAP` = 6s -
+    exceed its animation budget (tiered 8s/6s/4s by the loudest beat in
+    the Update) against the server's `ANIM_ACK_CAP` = 10s -
     a client that outruns the cap is not slow, it is *behind the game*.
 
 Mods: the server resolves a default set at boot (`--mod`), and each room
@@ -315,7 +316,11 @@ redeem, house-free group required, mortgaged tiles pay nothing but count
 for ownership); taxes; cyclic seeded decks, card chains capped at depth
 4. Jail is entered unchanged (Go To Jail tile/card) but escaped by choice
 under the blitz clock, not dice (ADR-0024): Legal Route
-(`ChooseLegalRoute`, a locked public permutation of the full hand - the
+(`ChooseLegalRoute`, a locked public permutation of the full FRESH hand -
+every velocity value, `velocity_min..=velocity_max`; whatever was left in
+hand is DISCARDED, so this is not a permutation of the cards you still
+hold, and a client that offers those builds a command the engine can only
+reject - the
 first card plays in the same command, un-jailing immediately; each
 following turn only the route's front card is a legal
 `PlayMovementCard`; while any of it remains, the route holder's tiles

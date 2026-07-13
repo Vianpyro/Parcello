@@ -45,8 +45,14 @@ Map<String, dynamic> content() => {
       },
     };
 
-Map<String, dynamic> view({String turn = 'await_move'}) => {
+Map<String, dynamic> view({
+  String turn = 'await_move',
+  Map<String, dynamic>? market,
+}) =>
+    {
       'phase': {'type': 'active'},
+      if (market != null)
+        'forecast': {'queue': <dynamic>[], 'active': market},
       'players': [
         {
           'id': 'guest:a',
@@ -81,9 +87,9 @@ Map<String, dynamic> view({String turn = 'await_move'}) => {
 /// The board plus the overlay, in the same z-order the game uses: chits are
 /// drawn above both the board and the HUD, because that is the only place from
 /// which they can cross between them.
-Widget harness(StageState stage, {Widget? side}) {
+Widget harness(StageState stage, {Map<String, dynamic>? market}) {
   final c = GameContent.fromJson(content());
-  final v = ClientView.fromJson(view());
+  final v = ClientView.fromJson(view(market: market));
   return MaterialApp(
     home: Scaffold(
       backgroundColor: Pc.bg,
@@ -184,6 +190,38 @@ void main() {
 
     expect(find.text('BOB IS BANKRUPT'), findsOneWidget);
     expect(find.text('Alice takes the estate.'), findsOneWidget);
+  });
+
+  testWidgets('a market event moves the price printed on the tiles',
+      (tester) async {
+    // While an acquisition multiplier is active, the list price on the tile is
+    // simply not the price. The forecast strip promised this three turns ago;
+    // the board is where the promise gets kept.
+    final stage = StageState();
+    await tester.pumpWidget(harness(stage, market: {
+      'event_id': 'market_bubble',
+      'effect': 'acquisition_multiplier',
+      'magnitude_pct': -30,
+      'ends_at_turn': 40,
+    }));
+
+    // Tile 4 lists at $104; a -30% bubble makes it $72 to take.
+    expect(find.textContaining(r'$72 (was $104)'), findsOneWidget);
+    expect(find.textContaining(r'$104  '), findsNothing);
+  });
+
+  testWidgets('a rent-only market event leaves prices alone', (tester) async {
+    // Market Crash scales rent, not acquisition. Showing a moved price here
+    // would be a lie, and the grammar only works while it never lies.
+    final stage = StageState();
+    await tester.pumpWidget(harness(stage, market: {
+      'event_id': 'market_crash',
+      'effect': 'rent_multiplier',
+      'magnitude_pct': -50,
+      'ends_at_turn': 40,
+    }));
+
+    expect(find.textContaining('was'), findsNothing);
   });
 
   testWidgets('a refused command shakes the tile that refused it',

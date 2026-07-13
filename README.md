@@ -127,7 +127,7 @@ ADR-0025); only the CLI accepts a pasted token instead.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 162 tests, formatting, and lints (all must pass before a PR)
+# Rust: 163 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -341,7 +341,9 @@ mortgage), taxes, chance/community decks (cyclic, seeded shuffle, chained
 card moves capped at depth 4), jail entered the same way as before (the Go
 To Jail tile or a card) but escaped by choice under the blitz clock, not
 dice (ADR-0024): Legal Route (`ChooseLegalRoute`, commit to a locked,
-public permutation of the full hand - the first card plays immediately
+public permutation of the full FRESH hand - every velocity value; whatever
+was left in your hand is discarded, so the route is always the full length
+however few cards you were holding when you were jailed. The first card plays immediately
 and un-jails you, each following turn only the route's front card is a
 legal `PlayMovementCard`, and while any of the route remains your owned
 tiles charge no rent to visitors; the hand refills normally, one

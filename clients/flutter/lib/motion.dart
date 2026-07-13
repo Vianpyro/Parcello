@@ -50,12 +50,24 @@ enum MotionProfile {
 }
 
 abstract final class Motion {
-  /// Hard ceiling on one Update's beats (ADR-0030). The server's
-  /// `ANIM_ACK_CAP` is 6s; past it the server un-gates and proceeds without
-  /// us. The 2s margin absorbs frame-rate slop and a slow first paint. A plan
-  /// over this budget is compressed, never played long: a client that outruns
-  /// the cap is not slow, it is *behind the game*.
-  static const budget = Duration(milliseconds: 4000);
+  /// Hard ceiling on one Update's beats (ADR-0030), by the loudest beat in it.
+  ///
+  /// A plan over its budget is compressed, never played long: the server
+  /// un-gates at `ANIM_ACK_CAP` = 10s and proceeds without us, and a client
+  /// that outruns the cap is not slow - it is *behind the game*. The 2s margin
+  /// under the cap absorbs frame-rate slop and a slow first paint.
+  ///
+  /// The budget is tiered because the tiers already say who is waiting and why:
+  /// a bankruptcy or a win is the moment the whole table stops for, and it can
+  /// afford eight seconds. A routine move cannot - it happens every twelve.
+  static Duration budgetFor(Tier tier) => switch (tier) {
+        Tier.arrest => const Duration(milliseconds: 8000),
+        Tier.decide => const Duration(milliseconds: 6000),
+        Tier.consequence || Tier.ambient => const Duration(milliseconds: 4000),
+      };
+
+  /// The ceiling any plan can claim - what the server's cap must clear.
+  static const maxBudget = Duration(milliseconds: 8000);
 
   // -- movement ------------------------------------------------------------
 

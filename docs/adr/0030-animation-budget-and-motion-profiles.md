@@ -25,15 +25,26 @@ The design work behind both is `docs/motion-language.md`; this ADR records
 the two decisions in it that are contracts rather than taste.
 
 ## Decision
-- **Animation budget.** `ANIM_BUDGET` = 4000ms is a client invariant: no
-  `Update`'s beats may exceed it. The 2s margin under `ANIM_ACK_CAP`
-  absorbs frame-rate slop and a slow first paint. The client enforces it by
-  **compiling the whole Update into a plan before playing any of it** - the
-  cost is known before the first frame - and compressing an over-budget plan
-  in a fixed order: coalesce same-kind beats on the same subject, demote P3
-  beats to their instant form, compress the exclusive lane (floor 40%), then
-  truncate the middle of a chain (first and last beat always survive).
-  P1 beats (bankruptcy, every win) are never compressed.
+- **Animation budget, tiered.** No `Update`'s beats may exceed the budget set
+  by the **loudest beat in it**: 8000ms when it carries a P1, 6000ms for a P2,
+  4000ms otherwise. The tiers already say who is waiting and why, so they are
+  the right axis: a bankruptcy or a win is the moment the whole table stops
+  for and can afford eight seconds; a routine move cannot, because it happens
+  every twelve. (Amended 2026-07 after the first full playtest: a flat 4s
+  rushed the moments that matter and gained nothing on the ones that don't.)
+- **`ANIM_ACK_CAP` = 10s** (was 6s), keeping the 2s margin over the largest
+  budget for frame-rate slop and a slow first paint. **The two constants are
+  coupled by contract**: raising the client budget without raising the server
+  cap reopens the exact desync ADR-0028 exists to prevent. The cost of the
+  larger cap is that a client which never acks can delay an animation-gated
+  timer by up to 10s instead of 6 - still bounded, still never the absolute
+  game clock, and bots and disconnected seats still settle instantly.
+- The client enforces the budget by **compiling the whole Update into a plan
+  before playing any of it** - the cost is known before the first frame - and
+  compressing an over-budget plan in a fixed order: coalesce same-kind beats
+  on the same subject, demote P3 beats to their instant form, compress the
+  exclusive lane (floor 40%), then truncate the middle of a chain (first and
+  last beat always survive). P1 beats are never compressed.
 - **Tiers.** Beats are assigned one of four priorities - P1 arrest (table
   stops), P2 decide (a window is open), P3 consequence (value moved), P4
   ambient (never a beat, an implicit transition). The tier is a contract
@@ -64,8 +75,10 @@ the two decisions in it that are contracts rather than taste.
   which is strictly worse, and the log retains every event.
 - Beat durations stay client-side and tunable without a protocol change, as
   ADR-0028 established; only their *sum* is now bounded.
-- `ANIM_BUDGET` and `ANIM_ACK_CAP` are coupled by this ADR. Changing the
-  server constant without revisiting the client one reopens the desync.
+- The client budget and `ANIM_ACK_CAP` are coupled by this ADR. Changing
+  either without revisiting the other reopens the desync. `Motion.maxBudget`
+  is the ceiling any plan can claim and is what the server cap must clear;
+  `test/director_test.dart` asserts no plan ever exceeds it.
 - The tier system makes some events louder for the seat they hurt, so a
   compiled plan is per-seat, not a table-wide broadcast. Trade events were
   already per-seat (ADR-0007), so no new mechanism is introduced.

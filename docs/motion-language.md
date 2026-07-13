@@ -255,21 +255,31 @@ Motion introduces no new hues.
 ## 5. The animation budget (hard constraint)
 
 ADR-0028 gates server timers on client render acks, bounded by
-`ANIM_ACK_CAP = 6 s` (`crates/server/src/room.rs`). Past the cap the server
-proceeds **without** the client. A client whose beats outrun the cap is
-therefore not merely slow - it is *behind the game*: the bid window opens,
+`ANIM_ACK_CAP` (`crates/server/src/room.rs`, now 10 s). Past the cap the
+server proceeds **without** the client. A client whose beats outrun the cap
+is therefore not merely slow - it is *behind the game*: the bid window opens,
 or a bot moves, while it is still animating the previous turn. That is the
 exact desynchronisation ADR-0028 was written to prevent.
 
-**The current build violates this.** A single `Update` can chain: movement
-(1970 ms) + card reveal (1700 ms) + card-driven teleport through Go
-(2810 ms) + salary (500 ms) = **~6980 ms**, over the cap. Card chains
-recurse to `MAX_CARD_CHAIN_DEPTH = 4`, so the worst case is far past it.
+**The build before this document violated it.** A single `Update` could
+chain: movement (1970 ms) + card reveal (1700 ms) + card-driven teleport
+through Go (2810 ms) + salary (500 ms) = **~6980 ms**, over the then-6 s cap.
+Card chains recurse to `MAX_CARD_CHAIN_DEPTH = 4`, so the worst case was far
+past it. Nothing bounded the *sum* of the beats, which is the whole reason
+the budget below is a compile-time property and not a hope.
 
 **The rule:**
 
-> **No `Update` may exceed `ANIM_BUDGET` = 4000 ms of beats** (a 2 s margin
-> under the cap for frame-rate slop and a slow first paint).
+> **No `Update` may exceed the budget set by the loudest beat in it** - 8 s
+> when it carries a P1, 6 s for a P2, 4 s otherwise - against a server
+> `ANIM_ACK_CAP` of 10 s (a 2 s margin for frame-rate slop and a slow first
+> paint).
+
+The budget is tiered along the tiers because the tiers already say *who is
+waiting and why*. A bankruptcy or a win is the moment the whole table stops
+for, and it can afford eight seconds. A routine move cannot - it happens every
+twelve. (A flat 4 s was the first cut; the first full playtest showed it
+rushed the moments that matter and bought nothing on the ones that don't.)
 
 The scheduler enforces this by **compiling the whole Update before playing
 any of it** - the plan's cost is known up front - and compressing when over
@@ -472,6 +482,15 @@ satisfying one.
 
 **`MarketEventActivated` (ADR-0021) - the forecast is a promise; activation is it being kept.**
 
+The tile is where the promise is kept, not just the strip. While an
+`acquisition_multiplier` is active (the base mod's Market Bubble, -30%), the
+list price printed on a property **is not the price** - it is not what a
+sealed-bid winner settles at, nor what a takeover costs. So the tile shows the
+effective number with the old one beside it (`$72 (was $104)`), tinted by the
+grammar the player already knows: cheaper to take reads as a gain, dearer as a
+loss. A `rent_multiplier` (Market Crash) does *not* touch prices, and the tile
+must not pretend it does - the grammar only works while it never lies.
+
 The forecast strip is a queue the player has been watching for three turns.
 When an event fires, it must be *the same object* arriving - the slot
 **slides left into the active position**. Never a popup, never a fresh
@@ -612,7 +631,7 @@ Tokens (theme)     const palette + shapes from visual-identity.md
   socket, no widgets, no clock. This is the whole point: the budget rule,
   the coalescing rule, the tier assignment and the lane assignment are all
   decided in a function that a unit test can call in a loop. The invariant
-  "no plan exceeds `ANIM_BUDGET`" becomes an assertion, not a hope.
+  "no plan exceeds its budget" becomes an assertion, not a hope.
 - **`StageState` is a separate notifier** from `GameSession`. Animation
   frames repaint the board; they do not touch the action panel. Concretely:
   the action panel is built by `GameScreen` (which only rebuilds on server
@@ -718,7 +737,7 @@ commitment** - which is what a placed building should feel like.
 | **Fixed camera, always** | Competitive spatial memory; peripheral readability | No cinematics, no dramatic zoom on the win. The win is sold by *recede* + stillness instead. |
 | **No bounce/spring anywhere** | Art Deco register; bounce reads as casual | The game feels "quieter" than a mobile title. That is the intent, and it is a real trade. |
 | **Money travels; it is never a delta** | Makes "who paid whom" free; fixes rent being invisible to the earner | Costs ~500 ms per transfer and one more moving object on screen. Worth it. |
-| **Budget of 4 s/Update, enforced by compiling first** | The 6 s server cap is a hard wall; overrunning it desyncs the client | Long card chains get truncated. The alternative - being behind the game - is strictly worse. |
+| **Tiered budget (8/6/4 s per Update), enforced by compiling first** | The 10 s server cap is a hard wall; overrunning it desyncs the client. Tiering it along the tiers spends the time where a player actually needs it | Long card chains get truncated. The alternative - being behind the game - is strictly worse. Raising the budget forced raising `ANIM_ACK_CAP` with it: the two are one contract. |
 | **Coalescing over enumeration** | An 8-tile bankruptcy is *one* event, not eight | Individual tile transfers are less individually visible. They are still in the log. |
 | **Tier is per-observer** | Being attacked must never be ambient | Slightly more compile-time logic; a shared Plan cannot be broadcast identically to all seats (it never could - ADR-0007 already makes trades private). |
 | **Instant profile is a first-class path** | Accessibility; and it is the path ADR-0028 already guarantees the server tolerates | Every beat must be written so its `apply()` is meaningful with zero duration. This is a real constraint on how beats are authored, and it is a good one. |
@@ -741,7 +760,7 @@ implementation is worse than no spec.
 | Transient stage state, anchors, chits, the three attention devices | `lib/stage.dart` |
 | The compiler - pure `compile()`, the budget rule, coalescing, per-observer money | `lib/director.dart` |
 | Travelling chits and the P1 arrest | `lib/overlay.dart` |
-| Board: real palette, recede/lift/frame, threat flash, band sweep, refusal shake | `lib/board.dart` |
+| Board: real palette, recede/lift/frame, threat flash, band sweep, refusal shake, market-adjusted prices | `lib/board.dart` |
 | Sealed-bid reveal on the seat markers; the motion-profile knob; Escape to skip | `lib/main.dart` |
 | 24 tests: the budget invariant, coalescing, the truth rule, the money rule, the render path | `test/director_test.dart`, `test/stage_render_test.dart` |
 

@@ -219,6 +219,10 @@ class _BoardWidgetState extends State<BoardWidget> {
     final sweepTo = st.sweeping[i];
     final owner = sweepTo ?? ts?.owner;
 
+    // What this property costs to take right now, if a market event is moving
+    // prices; null otherwise.
+    final marketPrice = _marketPrice(def);
+
     final nameSize = (cellW * 0.115).clamp(11.0, 17.0);
     final metaSize = (cellW * 0.095).clamp(9.0, 13.0);
     final bandH = (cellW * 0.11).clamp(9.0, 18.0);
@@ -344,9 +348,17 @@ class _BoardWidgetState extends State<BoardWidget> {
                                   ? Pc.oxblood
                                   : spotlit
                                       ? Pc.goldDark
-                                      : def.isProperty
-                                          ? Pc.textFaint
-                                          : Pc.textMuted,
+                                      // A market event moving the price says so
+                                      // in the grammar the player already knows:
+                                      // cheaper to take reads as a gain, dearer
+                                      // as a loss.
+                                      : marketPrice != null
+                                          ? (marketPrice < (def.price ?? 0)
+                                              ? Pc.gainInk
+                                              : Pc.lossInk)
+                                          : def.isProperty
+                                              ? Pc.textFaint
+                                              : Pc.textMuted,
                             ),
                           ),
                         ),
@@ -412,6 +424,27 @@ class _BoardWidgetState extends State<BoardWidget> {
     );
   }
 
+  /// What a property actually costs to take *right now*, or null when no market
+  /// event is moving prices.
+  ///
+  /// An `acquisition_multiplier` (the base mod's Market Bubble) scales what a
+  /// sealed-bid winner settles at and what a takeover costs - so while it is
+  /// active, the list price printed on the tile is simply not the price. The
+  /// forecast strip promised a consequence three turns ago; the board is where
+  /// that promise has to be kept. Mirrors the engine's `apply_market_multiplier`
+  /// exactly, including its truncating division.
+  int? _marketPrice(TileDef def) {
+    final active = widget.view?.forecast.active;
+    if (!def.isProperty ||
+        active == null ||
+        active.effect != 'acquisition_multiplier') {
+      return null;
+    }
+    final base = def.price ?? 0;
+    final scaled = base * (100 + active.magnitudePct) ~/ 100;
+    return scaled == base ? null : (scaled < 0 ? 0 : scaled);
+  }
+
   String _meta(
     TileDef def,
     TileState? ts, {
@@ -419,7 +452,15 @@ class _BoardWidgetState extends State<BoardWidget> {
     bool fullGroup = false,
   }) {
     final parts = <String>[];
-    if (def.isProperty) parts.add('\$${def.price}');
+    if (def.isProperty) {
+      final market = _marketPrice(def);
+      // The list price stays visible next to it: a player must be able to see
+      // that the number moved, and by how much, not just that it is different
+      // from the one they memorised.
+      parts.add(market == null
+          ? '\$${def.price}'
+          : '\$$market (was \$${def.price})');
+    }
     if (def.amount != null) parts.add('pay \$${def.amount}');
     if (def.minPct != null) parts.add('${def.minPct}-${def.maxPct}% NW');
     // The classic rule doubles UNIMPROVED rent only - surface it, and keep a

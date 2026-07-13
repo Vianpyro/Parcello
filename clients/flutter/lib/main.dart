@@ -1387,7 +1387,18 @@ class _ActionsState extends State<_Actions> {
               children.add(btn('Use jail card', {'type': 'use_jail_card'},
                   primary: false));
             }
-            final sorted = [...me.hand]..sort();
+            // A Legal Route is a permutation of the full FRESH hand - every
+            // velocity value - not of the cards still in hand: choosing it
+            // discards whatever is left and deals a whole new hand (ADR-0024,
+            // and the rent freeze for the route's whole length is the price of
+            // it). Offering the residual hand here built a command the engine
+            // could only reject, which made the Legal Route unusable for anyone
+            // not jailed on a fresh hand - i.e. almost everyone, since you
+            // reach Go To Jail by playing cards (2026-07 playtest).
+            final rules = s.settings?.rules;
+            final vMin = rules?.velocityMin ?? 2;
+            final vMax = rules?.velocityMax ?? 6;
+            final sorted = [for (var v = vMin; v <= vMax; v++) v];
             if (!_bribeSeeded) {
               // No suggested-amount cap (2026-07): the engine allows
               // 1..=cash, so seed the full ceiling and let them dial down.
@@ -1396,7 +1407,11 @@ class _ActionsState extends State<_Actions> {
             }
             final routeComplete = _routeOrder.length == sorted.length;
             children.addAll([
-              const Text('Tap your cards in the order you want to play them:',
+              const Text(
+                  'Legal Route: take a fresh hand and lock in the order you '
+                  'will play it. You leave jail at once and the first card '
+                  'plays now - but the plan is public, and your properties '
+                  'charge no rent until it runs out.',
                   style: TextStyle(fontSize: 12)),
               Wrap(
                 spacing: 6,

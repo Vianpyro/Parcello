@@ -46,10 +46,36 @@ List<Map<String, dynamic>> chanceChain() => [
 
 void main() {
   group('budget (ADR-0030)', () {
-    test('the chance -> teleport chain that used to blow the 6s cap now fits',
-        () {
+    test('an ordinary chain fits the P3 budget', () {
       final plan = compile(chanceChain(), ctx());
-      expect(plan.cost, lessThanOrEqualTo(Motion.budget));
+      expect(plan.cost, lessThanOrEqualTo(Motion.budgetFor(Tier.consequence)));
+    });
+
+    test('the budget is set by the loudest beat in the Update', () {
+      // A bankruptcy is the moment the table stops for; it may take eight
+      // seconds. The same chain without one may not.
+      final routine = compile(chanceChain(), ctx());
+      final grave = compile([
+        ...chanceChain(),
+        {'type': 'player_bankrupt', 'player': 1, 'creditor': 0},
+      ], ctx());
+
+      expect(routine.cost, lessThanOrEqualTo(Motion.budgetFor(Tier.consequence)));
+      expect(grave.cost, lessThanOrEqualTo(Motion.budgetFor(Tier.arrest)));
+      expect(grave.cost, greaterThan(routine.cost));
+    });
+
+    test('no plan may ever exceed what the server cap allows', () {
+      // The contract with `ANIM_ACK_CAP` (10s server-side): a client that
+      // outruns the cap is not slow, it is behind the game.
+      for (final events in [
+        chanceChain(),
+        [...chanceChain(), {'type': 'player_bankrupt', 'player': 1, 'creditor': 0}],
+        [...chanceChain(), {'type': 'won_by_points', 'player': 0, 'points': 20}],
+      ]) {
+        expect(compile(events, ctx()).cost,
+            lessThanOrEqualTo(Motion.maxBudget));
+      }
     });
 
     test('a 4-deep card chain - the engine\'s worst case - still fits', () {
@@ -74,7 +100,7 @@ void main() {
         at = to;
       }
       final plan = compile(events, ctx());
-      expect(plan.cost, lessThanOrEqualTo(Motion.budget));
+      expect(plan.cost, lessThanOrEqualTo(Motion.budgetFor(Tier.consequence)));
     });
 
     test('every beat still applies when the plan is truncated', () {

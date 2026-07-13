@@ -62,10 +62,16 @@ const VOTE_WINDOW: Duration = Duration::from_secs(5);
 /// acks (bug, malice, a throttled background tab) can delay an
 /// animation-gated timer by at most this much, ever - the same
 /// wait-but-never-indefinitely doctrine as `DISCONNECTED_GRACE` and the
-/// window auto-abstains. Sized for the longest realistic client chain (a
-/// 12-hop move + a card reveal + a relocation is about 5s). The absolute
-/// `game_deadline` (ADR-0010) is deliberately NOT gated at all.
-const ANIM_ACK_CAP: Duration = Duration::from_secs(6);
+/// window auto-abstains. The absolute `game_deadline` (ADR-0010) is
+/// deliberately NOT gated at all.
+///
+/// This is the ceiling the client's own `ANIM_BUDGET` sits under (ADR-0030,
+/// tiered 8s/6s/4s by the loudest beat in the Update, plus a 2s margin for
+/// frame-rate slop). The two constants are coupled BY CONTRACT: raising the
+/// client budget without raising this reopens the exact desync ADR-0028
+/// exists to prevent - the server un-gates and the client is left animating a
+/// turn the table has already moved past.
+const ANIM_ACK_CAP: Duration = Duration::from_secs(10);
 
 pub type Rooms = Arc<RwLock<HashMap<String, mpsc::Sender<RoomCmd>>>>;
 pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;

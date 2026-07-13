@@ -102,6 +102,59 @@ fn legal_route_rejects_a_non_permutation_order_without_mutating() {
 }
 
 #[test]
+fn legal_route_is_the_full_fresh_hand_even_when_jailed_mid_hand() {
+    // ADR-0024: the route is a permutation of the full FRESH hand (every
+    // velocity value); the hand the player was holding is discarded. You reach
+    // Go To Jail by *playing* cards, so a jailed player almost never holds a
+    // full hand - and a client that offers the route chips from the residual
+    // hand can only ever build a command the engine rejects (2026-07 playtest:
+    // the Legal Route was unusable for exactly this reason). This test pins the
+    // contract from the engine side so the next client cannot get it wrong
+    // quietly.
+    let engine = engine_with(plain_board());
+    let mut st = two_players(&engine);
+    st.players[0].position = 5; // jail tile
+    st.players[0].jailed = true;
+    st.players[0].hand = vec![3, 4, 5]; // 1 and 2 already spent
+
+    // The residual hand is NOT a legal route, however complete it looks.
+    assert_eq!(
+        engine
+            .apply(
+                &st,
+                &cmd(
+                    "p0",
+                    CommandKind::ChooseLegalRoute {
+                        order: vec![3, 4, 5]
+                    }
+                )
+            )
+            .unwrap_err(),
+        CommandError::InvalidRoute
+    );
+    assert!(st.players[0].jailed, "rejection must not mutate");
+
+    // The full velocity range is, and it replaces the hand outright - which is
+    // what the rent freeze for the whole route is the price of.
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd(
+            "p0",
+            CommandKind::ChooseLegalRoute {
+                order: vec![1, 2, 3, 4, 5],
+            },
+        ),
+    );
+    assert!(!st.players[0].jailed);
+    assert_eq!(
+        st.players[0].jail_route,
+        Some(vec![2, 3, 4, 5]),
+        "five fresh values, the front one already played"
+    );
+}
+
+#[test]
 fn legal_route_freezes_rent_and_freeze_ends_when_route_completes() {
     let engine = engine_with(plain_board());
     let mut st = two_players(&engine);

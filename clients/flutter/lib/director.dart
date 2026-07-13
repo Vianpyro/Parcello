@@ -766,7 +766,7 @@ List<Beat> _beatsFor(
 
 // -- the budget --------------------------------------------------------------
 
-/// Fit a plan into `ANIM_BUDGET` (ADR-0030), compressing in a fixed order.
+/// Fit a plan into its budget (ADR-0030), compressing in a fixed order.
 /// P1 beats are exempt at every stage.
 Plan _fit(List<Beat> raw, double profileScale) {
   // The instant profile is a first-class path, not a degraded one: every beat's
@@ -778,15 +778,20 @@ Plan _fit(List<Beat> raw, double profileScale) {
   final scaled =
       profileScale == 1 ? raw : [for (final b in raw) b.scaled(profileScale)];
 
+  // The budget is set by the loudest beat in the Update: an Update carrying a
+  // bankruptcy is a moment the table stops for and may take eight seconds; one
+  // carrying only a move may not, because it happens every twelve.
+  final budget = Motion.budgetFor(_loudest(scaled));
+
   var plan = Plan(scaled);
-  if (plan.cost <= Motion.budget) return plan;
+  if (plan.cost <= budget) return plan;
 
   // 1. Compress the non-P1 beats.
   for (final f in const [0.75, 0.55, 0.4]) {
     plan = Plan([
       for (final b in scaled) b.tier == Tier.arrest ? b : b.scaled(f)
     ]);
-    if (plan.cost <= Motion.budget) return plan;
+    if (plan.cost <= budget) return plan;
   }
 
   // 2. Still over: truncate the middle of the chain. The first beat says where
@@ -802,10 +807,17 @@ Plan _fit(List<Beat> raw, double profileScale) {
   ];
   for (final i in _middleOut(droppable)) {
     out[i] = out[i].scaled(0);
-    if (Plan(out).cost <= Motion.budget) break;
+    if (Plan(out).cost <= budget) break;
   }
   return Plan(out);
 }
+
+/// The highest-priority tier present. `Tier`'s declaration order is the
+/// priority order (arrest first), so the loudest beat is the smallest index.
+Tier _loudest(List<Beat> beats) => beats.fold(
+      Tier.ambient,
+      (worst, b) => b.tier.index < worst.index ? b.tier : worst,
+    );
 
 /// Indices ordered from the middle outward: the middle of a chain is the least
 /// informative part of it, so it is the first thing to go. The first and last
