@@ -13,9 +13,9 @@ use sha2::Sha256;
 
 use parcello_protocol::AuthPayload;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
-    /// Stable global id ("hs256:<sub>" or "guest:<name>").
+    /// Stable global id (`hs256:<sub>` or `guest:<name>`).
     pub player_id: String,
     pub name: String,
     /// True when nothing cryptographic backs this identity (guests). The
@@ -24,11 +24,15 @@ pub struct Identity {
 }
 
 pub trait IdentityVerifier: Send + Sync {
+    /// # Errors
+    /// Returns a human-readable reason when the payload carries no usable
+    /// credentials or the token fails verification; the transport forwards
+    /// it to the client verbatim.
     fn verify(&self, auth: &AuthPayload) -> Result<Identity, String>;
 }
 
 /// Tries a JWT first (if configured), then guest fallback (if enabled).
-/// Tokens are dispatched by their header `alg`: EdDSA is the supported
+/// Tokens are dispatched by their header `alg`: `EdDSA` is the supported
 /// path (ADR-0009), HS256 the deprecated stopgap (ADR-0003).
 pub struct CompositeVerifier {
     eddsa: Option<crate::eddsa::EdDsaVerifier>,
@@ -126,7 +130,8 @@ struct Claims {
 }
 
 impl Hs256Verifier {
-    pub fn new(secret: String) -> Self {
+    #[must_use]
+    pub const fn new(secret: String) -> Self {
         Self {
             secret: secret.into_bytes(),
         }
@@ -134,9 +139,10 @@ impl Hs256Verifier {
 
     fn verify(&self, token: &str) -> Result<Identity, String> {
         let mut parts = token.split('.');
-        let (h, p, s) = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-            (Some(h), Some(p), Some(s), None) => (h, p, s),
-            _ => return Err("malformed token".into()),
+        let (Some(h), Some(p), Some(s), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err("malformed token".into());
         };
 
         let header: Header = decode_json(h)?;
@@ -170,7 +176,9 @@ impl Hs256Verifier {
     }
 }
 
-pub(crate) fn decode_json<T: serde::de::DeserializeOwned>(part: &str) -> Result<T, String> {
+/// # Errors
+/// When `part` is not base64url or not the expected JSON shape.
+pub fn decode_json<T: serde::de::DeserializeOwned>(part: &str) -> Result<T, String> {
     let bytes = URL_SAFE_NO_PAD
         .decode(part)
         .map_err(|_| "malformed token encoding")?;

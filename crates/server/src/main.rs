@@ -3,27 +3,18 @@
 //! Boot sequence: parse args -> resolve the server-wide mod set (ADR-0004)
 //! -> bind -> serve `/ws`. Rooms are created on demand by client connections.
 
-mod auth;
-mod eddsa;
-mod history;
-mod lan;
-mod room;
-mod ws;
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::Router;
-use axum::routing::get;
 use clap::Parser;
-use parcello_mods::ResolvedContent;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use auth::{CompositeVerifier, IdentityVerifier};
-use history::{GameHistory, MemoryHistory, SqliteHistory};
-use room::Rooms;
+use parcello_server::auth::CompositeVerifier;
+use parcello_server::history::{GameHistory, MemoryHistory, SqliteHistory};
+use parcello_server::room::Rooms;
+use parcello_server::{AppState, eddsa, game_router, lan};
 
 #[derive(Parser, Debug)]
 #[command(name = "parcello-server", about = "Parcello authoritative game server")]
@@ -54,7 +45,7 @@ struct Args {
     #[arg(long, env = "PARCELLO_INSECURE_GUEST")]
     insecure_guest: bool,
 
-    /// JWKS URL of an EdDSA identity provider (ADR-0009); repeatable for
+    /// JWKS URL of an `EdDSA` identity provider (ADR-0009); repeatable for
     /// redundant issuer instances. Enables `id:` token logins.
     #[arg(
         long = "identity-url",
@@ -67,7 +58,7 @@ struct Args {
     #[arg(long, env = "PARCELLO_IDENTITY_AUDIENCE")]
     identity_audience: Option<String>,
 
-    /// SQLite file for game history (seeds + accepted-command replay logs).
+    /// `SQLite` file for game history (seeds + accepted-command replay logs).
     /// Omit for in-memory history.
     #[arg(long, env = "PARCELLO_HISTORY")]
     history: Option<PathBuf>,
@@ -112,25 +103,8 @@ struct Args {
     lan_broadcast_fallback: bool,
 }
 
-#[derive(Clone)]
-pub struct AppState {
-    pub rooms: Rooms,
-    /// Default content (boot-time `--mod` list); rooms may override at
-    /// creation with their own mod list (ADR-0006).
-    pub content: Arc<ResolvedContent>,
-    pub mods_dir: Arc<PathBuf>,
-    pub verifier: Arc<dyn IdentityVerifier>,
-    pub history: Arc<dyn GameHistory>,
-    /// Default timers for new rooms; the host overrides them per room in the
-    /// lobby (ADR-0015). `None` = disabled by default.
-    pub turn_timeout: Option<std::time::Duration>,
-    /// Default personal time bank for new rooms (ADR-0023). `None` = off.
-    pub time_bank: Option<std::time::Duration>,
-    pub game_timeout: Option<std::time::Duration>,
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -139,6 +113,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
 
+    let web_index = args.web_dir.join("index.html");
+    anyhow::ensure!(
+        web_index.is_file(),
+        "web dir {} has no index.html (run `flutter build web --release` \
+         in clients/flutter and point --web-dir/PARCELLO_WEB_DIR at the output)",
+        args.web_dir.display()
+    );
+    info!(dir = %args.web_dir.display(), "serving flutter web build");
+
+    let state = build_state(&args)?;
+
+    if args.lan {
+        lan::spawn_broadcaster(
+            args.lan_maddr.clone(),
+            args.lan_port,
+            args.lan_broadcast_fallback,
+            args.bind.clone(),
+        );
+    }
+
+    // Flutter Web build, served from disk (mirrors --mods-dir, ADR-0025):
+    // resolved once at boot, not compiled in, so an operator can update the
+    // web client without rebuilding the server binary.
+    let serve_web = ServeDir::new(&args.web_dir).not_found_service(ServeFile::new(web_index));
+
+    let app = game_router(state).fallback_service(serve_web);
+
+    let listener = tokio::net::TcpListener::bind(&args.bind).await?;
+    info!(bind = %args.bind, "listening");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+            info!("shutting down");
+        })
+        .await?;
+    Ok(())
+}
+
+/// Boot-time wiring: resolve the default mod set, choose the identity
+/// verifier and history backend from the flags, and translate the numeric
+/// timeout flags (`0` = off) into optional durations.
+fn build_state(args: &Args) -> anyhow::Result<AppState> {
     let resolved = parcello_mods::resolve(&args.mods_dir, &args.mods)?;
     info!(
         mods = ?args.mods,
@@ -147,17 +163,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         community = resolved.content.community.len(),
         "content resolved"
     );
-
-    let web_index = args.web_dir.join("index.html");
-    if !web_index.is_file() {
-        return Err(format!(
-            "web dir {} has no index.html (run `flutter build web --release` \
-             in clients/flutter and point --web-dir/PARCELLO_WEB_DIR at the output)",
-            args.web_dir.display()
-        )
-        .into());
-    }
-    info!(dir = %args.web_dir.display(), "serving flutter web build");
 
     let jwt_secret = std::env::var("PARCELLO_JWT_SECRET").ok();
     let eddsa = if args.identity_urls.is_empty() {
@@ -193,65 +198,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => Arc::new(MemoryHistory::new()),
     };
-    let turn_timeout = match args.turn_timeout {
-        0 => None,
-        secs => {
-            info!(seconds = secs, "per-turn AFK timeout enabled");
-            Some(std::time::Duration::from_secs(secs))
-        }
+
+    // `0` = feature off, anything else enables it with that many seconds.
+    let timeout = |secs: u64, label: &str| {
+        (secs != 0).then(|| {
+            info!(seconds = secs, "{label} enabled");
+            std::time::Duration::from_secs(secs)
+        })
     };
-    let time_bank = match args.time_bank_seconds {
-        0 => None,
-        secs => {
-            info!(seconds = secs, "personal time bank enabled");
-            Some(std::time::Duration::from_secs(secs))
-        }
-    };
-    let game_timeout = match args.game_timeout {
-        0 => None,
-        secs => {
-            info!(seconds = secs, "time-boxed games enabled (richest wins)");
-            Some(std::time::Duration::from_secs(secs))
-        }
-    };
-    let state = AppState {
+    Ok(AppState {
         rooms: Rooms::default(),
         content: Arc::new(resolved),
-        mods_dir: Arc::new(args.mods_dir),
+        mods_dir: Arc::new(args.mods_dir.clone()),
         verifier,
         history,
-        turn_timeout,
-        time_bank,
-        game_timeout,
-    };
-
-    if args.lan {
-        lan::spawn_broadcaster(
-            args.lan_maddr.clone(),
-            args.lan_port,
-            args.lan_broadcast_fallback,
-            args.bind.clone(),
-        );
-    }
-
-    // Flutter Web build, served from disk (mirrors --mods-dir, ADR-0025):
-    // resolved once at boot, not compiled in, so an operator can update the
-    // web client without rebuilding the server binary.
-    let serve_web = ServeDir::new(&args.web_dir).not_found_service(ServeFile::new(web_index));
-
-    let app = Router::new()
-        .route("/healthz", get(|| async { "ok" }))
-        .route("/ws", get(ws::ws_handler))
-        .fallback_service(serve_web)
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind(&args.bind).await?;
-    info!(bind = %args.bind, "listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            info!("shutting down");
-        })
-        .await?;
-    Ok(())
+        turn_timeout: timeout(args.turn_timeout, "per-turn AFK timeout"),
+        time_bank: timeout(args.time_bank_seconds, "personal time bank"),
+        game_timeout: timeout(args.game_timeout, "time-boxed games (richest wins)"),
+    })
 }

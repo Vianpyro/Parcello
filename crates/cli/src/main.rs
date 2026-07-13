@@ -1,14 +1,19 @@
 //! Terminal test client. Not a product surface: exists to exercise the
 //! server end-to-end until the Flutter client lands.
 //!
-//! Commands (stdin): start | addbot | rmbot | set <field> <value>
-//! | play <n> (movement card from the hand) | route <n,n,...> (Legal Route,
-//! a full permutation of the hand) | bribe <amount> | vote yes|no
-//! (5s window, ADR-0024) | card (jail card) | bid <amount> (0 abstains;
-//! landing on an unowned tile opens a 5s sealed-bid window for every living
-//! seat, ADR-0018) | build <tile_id> | mortgage <tile_id> | redeem <tile_id>
-//! | offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
-//! | accept <id> | refuse <id> | cancel <id> | end | resign | quit.
+//! Stdin commands (`<n>` values, `|` alternatives):
+//!
+//! ```text
+//! start | addbot | rmbot | set <field> <value>
+//! play <n> (movement card) | route <n,n,...> (Legal Route, a full
+//!   permutation of the hand) | bribe <amount> | vote yes|no (5s window,
+//!   ADR-0024) | card (jail card) | bid <amount> (0 abstains; landing on
+//!   an unowned tile opens a sealed-bid window for every living seat,
+//!   ADR-0018)
+//! build <tile_id> | mortgage <tile_id> | redeem <tile_id>
+//! offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
+//! accept <id> | refuse <id> | cancel <id> | end | resign | quit
+//! ```
 
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
@@ -32,7 +37,7 @@ struct Args {
     #[arg(long, required_unless_present = "token")]
     name: Option<String>,
 
-    /// Identity token (EdDSA JWT from the identity provider, ADR-0009).
+    /// Identity token (`EdDSA` JWT from the identity provider, ADR-0009).
     #[arg(long)]
     token: Option<String>,
 
@@ -61,11 +66,12 @@ struct Args {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    if !args.create && args.join.is_none() {
-        return Err("pass --create or --join CODE".into());
-    }
+    anyhow::ensure!(
+        args.create || args.join.is_some(),
+        "pass --create or --join CODE"
+    );
 
     let (socket, _) = tokio_tungstenite::connect_async(&args.url).await?;
     let (mut sink, mut stream) = socket.split();
@@ -140,8 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // nanos are plenty for a test client (no new dep).
                         let noise = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.subsec_nanos() as u64 ^ d.as_secs())
-                            .unwrap_or(0);
+                            .map_or(0, |d| u64::from(d.subsec_nanos()) ^ d.as_secs());
                         if args.bot && fresh_view
                             && let (Some(content), Some(view), Some(me)) =
                                 (&ctx.content, &ctx.view, ctx.my_seat)

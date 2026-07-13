@@ -2,18 +2,20 @@
 //!
 //! Shared by the server and any Rust client (the test CLI today; the Flutter
 //! client mirrors these shapes in Dart). Externally tagged with `type` in
-//! snake_case, matching the engine's command/event wire format.
+//! `snake_case`, matching the engine's command/event wire format.
 
 use parcello_engine::{ClientView, CommandError, CommandKind, Event, RuleParams};
 use parcello_mods::ResolvedContent;
 use serde::{Deserialize, Serialize};
 
 /// Per-room game settings the host edits in the lobby (ADR-0015): the two
-/// time limits plus the full effective rule set. Initialised from the room's
+/// time limits plus the full effective rule set.
+///
+/// Initialised from the room's
 /// mod content and the server's default timers, then overridden live. The
 /// server clamps every field before applying it - the wire values are
 /// untrusted host input.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RoomSettings {
     /// Total game length in seconds; `None` = untimed (no game clock).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -35,7 +37,7 @@ pub struct RoomSettings {
 
 /// Identity presented on connect. MVP (ADR-0003): guest names only unless
 /// the server is started with a JWT secret.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthPayload {
     /// Global player JWT issued by the Identity Service (future work).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,7 +51,7 @@ pub struct AuthPayload {
     pub reconnect: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     /// Create a room and join it as host (seat 0). `mods` selects the
@@ -111,7 +113,7 @@ pub enum ClientMessage {
 }
 
 /// Public lobby info for one seat.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SeatInfo {
     pub seat: usize,
     pub player_id: String,
@@ -123,7 +125,7 @@ pub struct SeatInfo {
     pub is_bot: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     RoomCreated {

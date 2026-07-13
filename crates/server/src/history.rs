@@ -27,11 +27,15 @@ pub struct MemoryHistory {
 }
 
 impl MemoryHistory {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// # Panics
+    /// If the history mutex was poisoned by a panicking writer.
     #[allow(dead_code)] // Debug/test introspection; the SQLx adapter will query instead.
+    #[must_use]
     pub fn dump(&self, room: &str) -> Vec<String> {
         self.logs
             .lock()
@@ -73,7 +77,7 @@ impl GameHistory for MemoryHistory {
     }
 }
 
-/// SQLite adapter (ADR-0005): a dedicated writer thread owns the connection;
+/// `SQLite` adapter (ADR-0005): a dedicated writer thread owns the connection;
 /// the trait methods enqueue and never block on I/O. Best-effort: write
 /// failures are logged, the game continues.
 ///
@@ -112,6 +116,13 @@ enum Rec {
 }
 
 impl SqliteHistory {
+    /// # Errors
+    /// When the database file cannot be opened/created or the schema
+    /// migration fails.
+    ///
+    /// # Panics
+    /// If the OS refuses to spawn the writer thread (boot-time allocation
+    /// failure - not a recoverable state).
     pub fn open(path: &Path) -> Result<Self, rusqlite::Error> {
         let conn = rusqlite::Connection::open(path)?;
         conn.execute_batch(
@@ -143,7 +154,7 @@ impl SqliteHistory {
         let (tx, rx) = mpsc::channel();
         let handle = std::thread::Builder::new()
             .name("parcello-history".into())
-            .spawn(move || writer_loop(conn, rx))
+            .spawn(move || writer_loop(&conn, &rx))
             .expect("history thread spawns");
         Ok(Self {
             tx: Some(tx),
@@ -170,7 +181,9 @@ impl Drop for SqliteHistory {
     }
 }
 
-fn writer_loop(conn: rusqlite::Connection, rx: mpsc::Receiver<Rec>) {
+// The spawned closure owns the connection and receiver (ADR-0005: a
+// dedicated writer thread); the loop itself only ever borrows them.
+fn writer_loop(conn: &rusqlite::Connection, rx: &mpsc::Receiver<Rec>) {
     // Room codes can repeat across restarts, so rooms map to rowids per run.
     let mut games: HashMap<String, (i64, i64)> = HashMap::new(); // room -> (game_id, next_seq)
     while let Ok(rec) = rx.recv() {
@@ -188,20 +201,19 @@ fn writer_loop(conn: rusqlite::Connection, rx: mpsc::Receiver<Rec>) {
                 .map(|_| {
                     games.insert(room, (conn.last_insert_rowid(), 0));
                 }),
-            Rec::Cmd { room, json, at } => match games.get_mut(&room) {
-                Some((game_id, seq)) => {
+            Rec::Cmd { room, json, at } => {
+                if let Some((game_id, seq)) = games.get_mut(&room) {
                     *seq += 1;
                     conn.execute(
                         "INSERT INTO command (game_id, seq, at, json) VALUES (?1, ?2, ?3, ?4)",
                         rusqlite::params![*game_id, *seq, at, json],
                     )
                     .map(|_| ())
-                }
-                None => {
+                } else {
                     warn!(room, "command for unknown game; dropped");
                     Ok(())
                 }
-            },
+            }
             // The entry stays in the map after End: post-game feedback
             // still needs the game id (a later Start on a recycled room
             // code overwrites it).
@@ -220,19 +232,19 @@ fn writer_loop(conn: rusqlite::Connection, rx: mpsc::Receiver<Rec>) {
                 rating,
                 comment,
                 at,
-            } => match games.get(&room) {
-                Some((game_id, _)) => conn
-                    .execute(
+            } => {
+                if let Some((game_id, _)) = games.get(&room) {
+                    conn.execute(
                         "INSERT INTO feedback (game_id, player, rating, comment, at)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                         rusqlite::params![*game_id, player, rating, comment, at],
                     )
-                    .map(|_| ()),
-                None => {
+                    .map(|_| ())
+                } else {
                     warn!(room, "feedback for unknown game; dropped");
                     Ok(())
                 }
-            },
+            }
         };
         if let Err(e) = result {
             warn!(error = %e, "history write failed");
@@ -243,8 +255,7 @@ fn writer_loop(conn: rusqlite::Connection, rx: mpsc::Receiver<Rec>) {
 fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 impl GameHistory for SqliteHistory {

@@ -30,8 +30,11 @@ Authoritative documents, in order of precedence:
   `rust-version` in step when bumping. Consequences:
   - Build/test with `--locked` (reproducibility); `cargo update` is
     allowed but run `cargo test --workspace` and `cargo audit` after.
-  - `cargo audit` is part of the release hygiene: the tree was clean at
-    the refresh; keep it that way.
+  - Dependency hygiene is CI-enforced by `cargo deny check` (deny.toml:
+    RustSec advisories, permissive-only license allowlist - commercial
+    distribution is planned - duplicate visibility, crates.io-only
+    sources) plus `cargo machete`; `cargo audit` remains fine as a local
+    habit but the gate is deny.
 - **Engine purity** (crate `parcello-engine`): no I/O, no async, no rand,
   no clock. Randomness comes only from the SplitMix64 state inside
   `GameState.rng` (ADR-0002). Deps: serde + thiserror only.
@@ -55,12 +58,18 @@ Authoritative documents, in order of precedence:
 - **Even-build/even-sell** applies everywhere houses move: `Build`,
   `SellHouse`, AND `StandardLiquidation`. If you touch one, keep the three
   consistent.
+- **Lint baseline** (2026-07): `[workspace.lints]` in the root Cargo.toml
+  enforces clippy `pedantic` + `nursery` (CI's `-D warnings` makes them
+  hard) and `unsafe_code = "forbid"`. The short allow-list there is the
+  only sanctioned escape hatch - justify new entries in that file, don't
+  sprinkle `#[allow]` in code (site-level allows are reserved for
+  data-shaped literals/translation tables, each with a reason).
 
 ## Commands
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 145 tests, all must pass
+cargo test  --workspace --locked          # 162 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -73,9 +82,22 @@ pinned 1.96 for MSRV checks, Flutter + Linux desktop, docker CLI against
 the host daemon, cargo-audit/cargo-license, typst). Windows/macOS client
 artifacts and Steam packaging remain CI's job (release.yml).
 
-CI (`.github/workflows/ci.yml`): stable job runs `fmt --check`,
-`clippy --all-targets --locked -- -D warnings`, tests; msrv job builds on
-1.96 with `--locked`.
+CI (`.github/workflows/ci.yml`, redesigned 2026-07): five parallel jobs
+- lint (fmt + typos + clippy `-D warnings` over the workspace pedantic
+baseline; typos config in `_typos.toml`),
+test+coverage (one instrumented `cargo llvm-cov` run; line coverage must
+stay >= `COVERAGE_MIN_LINES` = 88% (ratchet: keep 2-3 pts under measured) after the documented exclusions -
+cli/, server main.rs, lan.rs - and lcov+HTML upload as artifacts), msrv
+(1.96 `cargo check --all-targets --locked`), rustdoc (`-D warnings`),
+deps (`cargo machete` + `cargo deny check`, see deny.toml) - all
+aggregated by
+the single `CI OK` job (the only check branch protection needs). Docs-only
+paths skip CI; PR pushes cancel outdated runs; a weekly cron re-runs on
+main as a bit-rot/advisory canary. `flutter.yml` gates the client
+(analyze + test + web build) only when `clients/flutter/**` changes;
+`codeql.yml` handles security static analysis. No cargo features and no
+benches exist in the workspace - revisit the matrix/bench story if either
+appears.
 
 Releases (`.github/workflows/release.yml`): bumping the workspace version
 in `Cargo.toml` on main tags `vX.Y.Z` and publishes a GitHub release with
@@ -111,11 +133,15 @@ architecture doc section 5; dependencies point downward only):
   (VP weights, mortgage/refund percents, the 90% contested-win discount
   - promote to `RuleParams` with an ADR before making one moddable);
   `state.rs` (GameState, TurnPhase incl. `BlindAuction` and
-  `BribeVote` variants, TradeOffer), `content.rs` (GameContent, RentModel),
+  `BribeVote` variants, TradeOffer; the public market layer - forecast +
+  spotlight types - lives in `state/market.rs`, re-exported so paths
+  never changed), `content.rs` (GameContent, RentModel; `group_tiles` is
+  a lazy iterator - rent/VP checks walk groups on every landing, no Vec),
   `view.rs`. `bot.rs`
   is the shared autopilot heuristic (`bot::decide(content, view, seat,
   noise) -> Option<CommandKind>`): pure like everything here, used by both
-  the server's bot seats and the CLI `--bot` (ADR-0014).
+  the server's bot seats and the CLI `--bot` (ADR-0014); its unit tests
+  live in `bot/tests.rs` (same split-for-size pattern as `room/tests.rs`).
 - `crates/mods` - TOML mod bundles. `RegistryBuilder` merges
   last-loaded-wins per key (tiles/cards replace in place by id, rule
   scalars override; conflicts logged WARN). Base game content is itself a
@@ -125,9 +151,14 @@ architecture doc section 5; dependencies point downward only):
   Commands/events on the wire ARE the engine's serde types (externally
   tagged, snake_case) - the wire format is the replay format. Wire-format
   tests exist; changing serde shapes is a protocol break.
-- `crates/server` - axum. `ws.rs` (transport: parse, authenticate once at
-  create/join, relay; identity is bound to the connection and never
-  re-trusted from the wire), `room.rs` (one Tokio task per room; state
+- `crates/server` - axum, split lib + thin binary (2026-07): `lib.rs`
+  exposes the modules, `AppState`, and `game_router` so the WebSocket
+  integration tests in `tests/ws.rs` boot the real router on an ephemeral
+  port; `main.rs` only parses flags and wires (`build_state`, anyhow at
+  the app boundary). `ws.rs` (transport: parse, authenticate once at
+  create/join, relay - the room-scoped messages funnel through one
+  exhaustive `relay` fn, so a new `ClientMessage` variant fails
+  compilation there), `room.rs` (one Tokio task per room; state
   machine Lobby -> Active -> Finished; `PlayAgain` restarts a Finished room
   for the still-connected seats via the shared `start_game`; `Leave` drops
   the room but keeps the socket open (ws.rs clears the session so the same
@@ -174,7 +205,10 @@ architecture doc section 5; dependencies point downward only):
   survey `feedback` message:
   Finished phase only, once per seat, rating 1-5 + comment capped at 500
   chars, stored via `GameHistory::record_feedback` - the client UI must
-  stay non-blocking, side card not modal), `auth.rs` + `eddsa.rs`
+  stay non-blocking, side card not modal; the room's clocks live in
+  `room/clock.rs` and the play-for-absent-humans logic - AFK canonical
+  action, silent-bid/vote injection, bot turns - in `room/autoplay.rs`),
+  `auth.rs` + `eddsa.rs`
   (`IdentityVerifier` trait: insecure guests, EdDSA identity tokens
   verified against JWKS from any OIDC provider - Rauthy is the reference,
   ADR-0009 - and the deprecated HS256 stopgap, ADR-0003; tokens dispatch

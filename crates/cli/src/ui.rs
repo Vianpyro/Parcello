@@ -9,7 +9,7 @@ use parcello_protocol::{RoomSettings, SeatInfo, ServerMessage};
 /// Everything needed to print human-readable output: resolved content for
 /// tile names, latest seat list for player names, our own seat index.
 #[derive(Default)]
-pub(crate) struct Ctx {
+pub struct Ctx {
     pub(crate) content: Option<ResolvedContent>,
     names: Vec<String>,
     /// Stable player ids by seat, for addressing trade offers.
@@ -137,7 +137,7 @@ impl Ctx {
     fn print_settings(&self) {
         let Some(s) = &self.settings else { return };
         let r = &s.rules;
-        let secs = |v: Option<u64>| v.map_or("off".to_string(), |n| format!("{n}s"));
+        let secs = |v: Option<u64>| v.map_or_else(|| "off".to_string(), |n| format!("{n}s"));
         println!(
             "* settings: game={} turn={} bank={} | starting_balance={} go_salary={} \
              velocity_min={} velocity_max={} \
@@ -164,6 +164,12 @@ impl Ctx {
     fn print_view(&mut self, view: &ClientView) {
         self.names = view.players.iter().map(|p| p.name.clone()).collect();
         self.ids = view.players.iter().map(|p| p.id.clone()).collect();
+        self.print_players(view);
+        self.print_table(view);
+        self.print_prompt(view);
+    }
+
+    fn print_players(&self, view: &ClientView) {
         // Victory-point race (ADR-0020): "the race IS the game" when on,
         // so show progress toward the target next to every player.
         let vp_target = self
@@ -192,8 +198,13 @@ impl Ctx {
                 self.tile_name(p.position),
             );
         }
+    }
+
+    /// Table-wide context lines: shared pools, market, forecast, trades.
+    fn print_table(&self, view: &ClientView) {
         if view.subsidiaries_available.is_some() || view.conglomerates_available.is_some() {
-            let pool = |p: Option<u64>| p.map_or("unlimited".to_string(), |n| n.to_string());
+            let pool =
+                |p: Option<u64>| p.map_or_else(|| "unlimited".to_string(), |n| n.to_string());
             println!(
                 "  pools: subsidiaries={} conglomerates={}",
                 pool(view.subsidiaries_available),
@@ -234,6 +245,10 @@ impl Ctx {
                 id = t.id,
             );
         }
+    }
+
+    /// The action prompt: who must act and which stdin commands apply.
+    fn print_prompt(&self, view: &ClientView) {
         match view.phase {
             GamePhase::Finished { winner } => {
                 println!("=== game over, winner: {} ===", self.player(winner));
@@ -271,7 +286,7 @@ impl Ctx {
                         .map(|(i, _)| self.player(i))
                         .collect();
                     let waiting_on_me = self.my_seat.is_some_and(|seat| {
-                        seat != *briber && votes.get(seat).is_some_and(|v| v.is_none())
+                        seat != *briber && votes.get(seat).is_some_and(std::option::Option::is_none)
                     });
                     let hint = if waiting_on_me { ": vote yes|no" } else { "" };
                     println!(
@@ -296,9 +311,9 @@ impl Ctx {
                         .filter(|(_, b)| b.is_none())
                         .map(|(i, _)| self.player(i))
                         .collect();
-                    let waiting_on_me = self
-                        .my_seat
-                        .is_some_and(|seat| bids.get(seat).is_some_and(|b| b.is_none()));
+                    let waiting_on_me = self.my_seat.is_some_and(|seat| {
+                        bids.get(seat).is_some_and(std::option::Option::is_none)
+                    });
                     let hint = if waiting_on_me {
                         ": bid <n> (0 abstains)"
                     } else {
@@ -314,6 +329,10 @@ impl Ctx {
         }
     }
 
+    // One flat, exhaustive translation table on purpose: a new `Event`
+    // variant must fail compilation here (the cheapest protocol check the
+    // CLI provides), and one-line arms read better unsplit.
+    #[allow(clippy::too_many_lines)]
     fn describe(&self, event: &Event) -> String {
         match event {
             Event::TurnStarted { player } => format!("--- {}'s turn ---", self.player(*player)),

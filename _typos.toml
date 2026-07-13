@@ -1,0 +1,14 @@
+# typos-cli config (CI `lint` job). Only generated/third-party trees are
+# excluded - hand-written code and docs are all checked.
+[files]
+extend-exclude = [
+    # Flutter platform runners are generated boilerplate (pbxproj/xib
+    # identifiers trip the dictionary).
+    "clients/flutter/macos/",
+    "clients/flutter/linux/",
+    "clients/flutter/windows/",
+    "clients/flutter/web/",
+    "clients/flutter/build/",
+    "Cargo.lock",
+    "clients/flutter/pubspec.lock",
+]

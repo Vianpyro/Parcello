@@ -127,7 +127,7 @@ ADR-0025); only the CLI accepts a pasted token instead.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 145 tests, formatting, and lints (all must pass before a PR)
+# Rust: 162 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -144,8 +144,23 @@ Always pass `--locked` so builds are reproducible against the committed
 `crates/engine/tests/` (scripted movement via `PlayMovementCard`, shared
 fixtures in `tests/common/mod.rs`); session behaviour (rooms, reconnect
 tokens, private trades, feedback) has async tests in
-`crates/server/src/room/tests.rs`; the wire format is pinned by tests in
-`parcello-protocol`.
+`crates/server/src/room/tests.rs`; the transport (create/join/relay,
+reconnect tokens, leave-then-rejoin) has real-WebSocket integration tests
+in `crates/server/tests/ws.rs`; the wire format is pinned by tests in
+`parcello-protocol`. Lints: clippy pedantic+nursery are enforced
+workspace-wide (curated allows live in the root `Cargo.toml`), and
+`unsafe_code` is forbidden. Coverage is measured in CI with
+`cargo llvm-cov` and gated at 88% line coverage (currently ~91%; the CLI
+harness, `lan.rs` multicast, and binary boot code are deliberately out of
+scope - the threshold lives in `COVERAGE_MIN_LINES` in ci.yml, with a
+ratchet policy documented there). The LCOV report is also uploaded to
+Codecov for per-PR diff coverage - non-blocking; to enable it, activate
+the repo on codecov.io and add a `CODECOV_TOKEN` repository secret. CI
+also runs `cargo deny check` (advisories + permissive-only license
+allowlist + sources, see deny.toml), `cargo machete`, `typos`
+(`_typos.toml`), and a `-D warnings` rustdoc build; the Flutter client
+has its own path-filtered workflow (`flutter.yml`: analyze, test, web
+build). Branch protection only needs the aggregate `CI OK` check.
 
 Flutter client (needs the Flutter SDK):
 

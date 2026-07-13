@@ -1,5 +1,7 @@
 //! Strategy pattern: rule fragments the mod layer can substitute at room
-//! creation (V2: via WASM export binding). All traits are object-safe and
+//! creation (V2: via WASM export binding).
+//!
+//! All traits are object-safe and
 //! `Send + Sync` so a boxed instance can live inside a room task.
 //!
 //! Implementations must stay deterministic: any randomness must come from
@@ -15,7 +17,9 @@ pub trait RentCalculator: Send + Sync {
     fn rent(&self, content: &GameContent, state: &GameState, tile: usize) -> i64;
 }
 
-/// Called when a player cannot cover a debt from cash. May sell assets back
+/// Called when a player cannot cover a debt from cash.
+///
+/// May sell assets back
 /// to the bank (mutating `state`) and must report what it did via events.
 /// The engine bankrupts the player if cash remains below the debt.
 pub trait BankruptcyResolver: Send + Sync {
@@ -33,7 +37,7 @@ pub trait BankruptcyResolver: Send + Sync {
 
 /// Classic rules, dispatched on the tile's `RentModel`:
 /// - Houses: rent by house level; unimproved rent doubles on a full group;
-/// - GroupScaled: rent table indexed by tiles of the group owned (stations).
+/// - `GroupScaled`: rent table indexed by tiles of the group owned (stations).
 pub struct StandardRent;
 
 impl RentCalculator for StandardRent {
@@ -69,14 +73,14 @@ fn group_rent_index(
 ) -> usize {
     let owned = content
         .group_tiles(&prop.group)
-        .iter()
-        .filter(|&&t| state.tiles[t].owner == Some(owner))
+        .filter(|&t| state.tiles[t].owner == Some(owner))
         .count();
     owned.saturating_sub(1).min(5)
 }
 
-/// Default liquidation: sells the debtor's houses back to the bank at half
-/// cost (most expensive first), then mortgages house-free properties
+/// Default liquidation: sells houses back to the bank, then mortgages.
+///
+/// Houses go at half cost (most expensive first), then house-free properties
 /// (highest value first), until the debt is covered or assets run out.
 pub struct StandardLiquidation;
 
@@ -100,16 +104,15 @@ impl BankruptcyResolver for StandardLiquidation {
                         && content.property(t).is_some_and(|p| {
                             let group_max = content
                                 .group_tiles(&p.group)
-                                .iter()
-                                .map(|&g| state.tiles[g].houses)
+                                .map(|g| state.tiles[g].houses)
                                 .max()
                                 .unwrap_or(0);
                             state.tiles[t].houses == group_max
                         })
                 })
-                .max_by_key(|&t| content.property(t).map(|p| p.house_cost).unwrap_or(0));
+                .max_by_key(|&t| content.property(t).map_or(0, |p| p.house_cost));
             let Some(tile) = candidate else { break };
-            let house_cost = content.property(tile).map(|p| p.house_cost).unwrap_or(0);
+            let house_cost = content.property(tile).map_or(0, |p| p.house_cost);
             let cap = content.rules.max_houses_per_property.min(5);
             let houses = state.tiles[tile].houses;
             // Shared building pools (ADR-0019): a plain subsidiary-level
@@ -120,12 +123,12 @@ impl BankruptcyResolver for StandardLiquidation {
             // zero in one motion instead (still a pure release, no
             // consumption, so it can never fail either).
             if houses == cap {
-                if state.subsidiaries_free((cap - 1) as u64) {
+                if state.subsidiaries_free(u64::from(cap - 1)) {
                     let refund = house_cost / 2;
                     state.tiles[tile].houses -= 1;
                     state.players[debtor].cash += refund;
                     state.return_conglomerate();
-                    state.consume_subsidiaries((cap - 1) as u64);
+                    state.consume_subsidiaries(u64::from(cap - 1));
                     events.push(Event::HouseSold {
                         player: debtor,
                         tile,
@@ -133,7 +136,7 @@ impl BankruptcyResolver for StandardLiquidation {
                         refund,
                     });
                 } else {
-                    let refund = (house_cost / 2) * houses as i64;
+                    let refund = (house_cost / 2) * i64::from(houses);
                     state.tiles[tile].houses = 0;
                     state.players[debtor].cash += refund;
                     state.return_conglomerate();
@@ -171,18 +174,17 @@ impl BankruptcyResolver for StandardLiquidation {
                     && content.property(t).is_some_and(|p| {
                         content
                             .group_tiles(&p.group)
-                            .iter()
-                            .all(|&g| state.tiles[g].houses == 0)
+                            .all(|g| state.tiles[g].houses == 0)
                     })
             })
             .collect();
         mortgageable
-            .sort_by_key(|&t| std::cmp::Reverse(content.property(t).map(|p| p.price).unwrap_or(0)));
+            .sort_by_key(|&t| std::cmp::Reverse(content.property(t).map_or(0, |p| p.price)));
         for tile in mortgageable {
             if state.players[debtor].cash >= needed {
                 break;
             }
-            let value = content.property(tile).map(|p| p.price / 2).unwrap_or(0);
+            let value = content.property(tile).map_or(0, |p| p.price / 2);
             state.tiles[tile].mortgaged = true;
             state.players[debtor].cash += value;
             events.push(Event::PropertyMortgaged {

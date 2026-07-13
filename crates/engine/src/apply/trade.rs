@@ -5,9 +5,9 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{CommandError, Event, Exec, MAX_OPEN_TRADES_PER_PLAYER, TradeOffer, TurnPhase};
 
-impl<'e> Exec<'e> {
+impl Exec<'_> {
     pub(super) fn propose_trade(
         &mut self,
         p: usize,
@@ -145,7 +145,7 @@ impl<'e> Exec<'e> {
             .ok_or(CommandError::TradeNotFound)
     }
 
-    pub(super) fn reject_during_auction(&self) -> Result<(), CommandError> {
+    pub(super) const fn reject_during_auction(&self) -> Result<(), CommandError> {
         match self.st.turn {
             TurnPhase::BlindAuction { .. } | TurnPhase::BribeVote { .. } => {
                 Err(CommandError::WrongPhase)
@@ -186,8 +186,7 @@ impl<'e> Exec<'e> {
                 if self
                     .content
                     .group_tiles(&prop.group)
-                    .iter()
-                    .any(|&t| self.st.tiles[t].houses > 0)
+                    .any(|t| self.st.tiles[t].houses > 0)
                 {
                     return Err(CommandError::HousesInGroup);
                 }

@@ -331,8 +331,8 @@ async fn trade_offers_are_invisible_to_third_parties() {
         loop {
             match rx.try_recv() {
                 Ok(ServerMessage::Update { events, view, .. }) => break (events, view),
-                Ok(_) => continue,
-                Err(_) => panic!("seat {seat} never received an Update"),
+                Ok(_) => {}
+                Err(e) => panic!("seat {seat} never received an Update: {e}"),
             }
         }
     };
@@ -418,7 +418,7 @@ async fn disconnected_player_is_skipped_after_grace() {
 
     // With no turn timeout, the grace alone must auto-play their move;
     // the other seat sees it without sending anything.
-    let auto_played = tokio::time::timeout(Duration::from_secs(300), async {
+    let auto_played = tokio::time::timeout(Duration::from_mins(5), async {
         while let Some(msg) = client_rxs[1 - start].recv().await {
             if let ServerMessage::Update { events, .. } = msg
                 && events
@@ -458,7 +458,7 @@ async fn game_clock_finishes_by_net_worth() {
         history,
         None,
         None,
-        Some(Duration::from_secs(60)),
+        Some(Duration::from_mins(1)),
     )
     .await
     .expect("room created");
@@ -490,7 +490,7 @@ async fn game_clock_finishes_by_net_worth() {
     .await
     .expect("room task alive");
 
-    let outcome = tokio::time::timeout(Duration::from_secs(600), async {
+    let outcome = tokio::time::timeout(Duration::from_mins(10), async {
         let mut saw_countdown = false;
         while let Some(msg) = client_rxs[1].recv().await {
             match msg {
@@ -524,7 +524,7 @@ async fn game_clock_finishes_by_net_worth() {
     })
     .await
     .expect("room task alive");
-    let rejected = tokio::time::timeout(Duration::from_secs(60), async {
+    let rejected = tokio::time::timeout(Duration::from_mins(1), async {
         while let Some(msg) = client_rxs[0].recv().await {
             if matches!(msg, ServerMessage::Rejected { .. }) {
                 return true;
@@ -538,7 +538,7 @@ async fn game_clock_finishes_by_net_worth() {
 }
 
 /// `--turn-timeout` is surfaced to clients as `turn_seconds` on
-/// GameStarted so they can show a per-turn countdown; off by default.
+/// `GameStarted` so they can show a per-turn countdown; off by default.
 #[tokio::test(start_paused = true)]
 async fn game_started_carries_turn_seconds() {
     let content = Arc::new(
@@ -587,7 +587,7 @@ async fn game_started_carries_turn_seconds() {
     .await
     .expect("room task alive");
 
-    let started = tokio::time::timeout(Duration::from_secs(60), async {
+    let started = tokio::time::timeout(Duration::from_mins(1), async {
         while let Some(msg) = client_rxs[1].recv().await {
             if let ServerMessage::GameStarted {
                 turn_seconds,
@@ -708,7 +708,7 @@ fn bots_yield_their_seat_to_a_joining_human() {
             spoofable: true,
         },
         None,
-        tx,
+        &tx,
     )
     .expect("a human must displace a bot in a full room");
 
@@ -852,7 +852,7 @@ async fn afk_timer_plays_canonical_actions() {
     .await
     .expect("room task alive");
 
-    let auto_played = tokio::time::timeout(Duration::from_secs(300), async {
+    let auto_played = tokio::time::timeout(Duration::from_mins(5), async {
         while let Some(msg) = client_rxs[1].recv().await {
             if let ServerMessage::Update { events, .. } = msg
                 && events
@@ -942,7 +942,7 @@ async fn time_bank_absorbs_overrun_without_auto_play() {
     .await
     .expect("room task alive");
 
-    let (played_herself, banks) = tokio::time::timeout(Duration::from_secs(60), async {
+    let (played_herself, banks) = tokio::time::timeout(Duration::from_mins(1), async {
         while let Some(msg) = client_rxs[other].recv().await {
             if let ServerMessage::Update { events, banks, .. } = msg {
                 let played = events
@@ -975,7 +975,7 @@ async fn time_bank_hard_stops_when_exhausted() {
         started_room_with_bank(Some(Duration::from_secs(5)), Some(Duration::from_secs(3))).await;
     let other = 1 - start;
 
-    let (auto_played, banks) = tokio::time::timeout(Duration::from_secs(300), async {
+    let (auto_played, banks) = tokio::time::timeout(Duration::from_mins(5), async {
         while let Some(msg) = client_rxs[other].recv().await {
             if let ServerMessage::Update { events, banks, .. } = msg
                 && events
@@ -1013,7 +1013,7 @@ async fn disconnected_seat_ignores_the_time_bank() {
     .await
     .expect("room task alive");
 
-    let auto_played = tokio::time::timeout(Duration::from_secs(120), async {
+    let auto_played = tokio::time::timeout(Duration::from_mins(2), async {
         while let Some(msg) = client_rxs[other].recv().await {
             if let ServerMessage::Update { events, .. } = msg
                 && events
@@ -1034,7 +1034,7 @@ async fn disconnected_seat_ignores_the_time_bank() {
 /// seed-drawn starting seat (2026-07: no longer always the host) -
 /// fixtures can no longer assume seat 0 opens the game.
 async fn starting_seat(rx: &mut mpsc::UnboundedReceiver<ServerMessage>) -> usize {
-    tokio::time::timeout(Duration::from_secs(60), async {
+    tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::GameStarted { view, .. } =
                 rx.recv().await.expect("room task alive")
@@ -1051,9 +1051,8 @@ async fn starting_seat(rx: &mut mpsc::UnboundedReceiver<ServerMessage>) -> usize
 /// message type (e.g. a stray `Rejected`).
 async fn next_view(rx: &mut mpsc::UnboundedReceiver<ServerMessage>) -> Box<ClientView> {
     loop {
-        match rx.recv().await.expect("room task alive") {
-            ServerMessage::Update { view, .. } => return view,
-            _ => continue,
+        if let ServerMessage::Update { view, .. } = rx.recv().await.expect("room task alive") {
+            return view;
         }
     }
 }
@@ -1071,7 +1070,7 @@ async fn roll_until_blind_auction_opens(
     ids: [&str; 2],
     mut current: usize,
 ) -> usize {
-    tokio::time::timeout(Duration::from_secs(300), async {
+    tokio::time::timeout(Duration::from_mins(5), async {
         // A fresh game deals every seat the full hand; the base mod's
         // velocity_min (currently 2, mods/base/data/rules.toml) is
         // always available for the very first move - keep these two
@@ -1136,7 +1135,7 @@ async fn sealed_bid_window_auto_abstains_a_silent_seat() {
     .await
     .expect("room task alive");
 
-    let resolved = tokio::time::timeout(Duration::from_secs(60), async {
+    let resolved = tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::Update { events, .. } =
                 client_rxs[1].recv().await.expect("room task alive")
@@ -1223,7 +1222,7 @@ async fn bid_window_waits_for_animation_acks_before_its_clock_starts() {
     roll_until_blind_auction_opens(&room, &mut client_rxs[1], ids, start).await;
     let opened_at = tokio::time::Instant::now();
 
-    let resolved_at = tokio::time::timeout(Duration::from_secs(60), async {
+    let resolved_at = tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::Update { events, .. } =
                 client_rxs[1].recv().await.expect("room task alive")
@@ -1239,7 +1238,10 @@ async fn bid_window_waits_for_animation_acks_before_its_clock_starts() {
     .expect("must resolve within the mock-clock timeout");
     let elapsed = resolved_at - opened_at;
     assert!(
-        elapsed >= ANIM_ACK_CAP + BID_WINDOW - Duration::from_millis(200),
+        elapsed
+            >= (ANIM_ACK_CAP + BID_WINDOW)
+                .checked_sub(Duration::from_millis(200))
+                .unwrap(),
         "window clock must wait for the ack cap, resolved after {elapsed:?}"
     );
 }
@@ -1256,7 +1258,7 @@ async fn bid_window_clock_starts_early_once_everyone_acks() {
     ack(&room, "guest:alice").await;
     ack(&room, "guest:bob").await;
 
-    let resolved_at = tokio::time::timeout(Duration::from_secs(60), async {
+    let resolved_at = tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::Update { events, .. } =
                 client_rxs[1].recv().await.expect("room task alive")
@@ -1272,7 +1274,10 @@ async fn bid_window_clock_starts_early_once_everyone_acks() {
     .expect("must resolve within the mock-clock timeout");
     let elapsed = resolved_at - opened_at;
     assert!(
-        elapsed < ANIM_ACK_CAP + BID_WINDOW - Duration::from_secs(1),
+        elapsed
+            < (ANIM_ACK_CAP + BID_WINDOW)
+                .checked_sub(Duration::from_secs(1))
+                .unwrap(),
         "acks must release the window early, resolved after {elapsed:?}"
     );
 }
@@ -1298,7 +1303,7 @@ async fn turn_clock_waits_for_the_acting_seats_ack() {
         .await
         .expect("room task alive");
     }
-    let resolved_at = tokio::time::timeout(Duration::from_secs(60), async {
+    let resolved_at = tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::Update { events, .. } =
                 client_rxs[1].recv().await.expect("room task alive")
@@ -1313,7 +1318,7 @@ async fn turn_clock_waits_for_the_acting_seats_ack() {
     .await
     .expect("window resolves once everyone has bid");
 
-    let advanced_at = tokio::time::timeout(Duration::from_secs(60), async {
+    let advanced_at = tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::Update { events, .. } =
                 client_rxs[1].recv().await.expect("room task alive")
@@ -1329,7 +1334,10 @@ async fn turn_clock_waits_for_the_acting_seats_ack() {
     .expect("the canonical EndTurn must eventually auto-play");
     let elapsed = advanced_at - resolved_at;
     assert!(
-        elapsed >= ANIM_ACK_CAP + Duration::from_secs(5) - Duration::from_millis(200),
+        elapsed
+            >= (ANIM_ACK_CAP + Duration::from_secs(5))
+                .checked_sub(Duration::from_millis(200))
+                .unwrap(),
         "turn clock must wait for the acting seat's ack cap, fired after {elapsed:?}"
     );
 }
@@ -1338,7 +1346,7 @@ async fn turn_clock_waits_for_the_acting_seats_ack() {
 /// Legal Route/Corruption are deterministic player choices, not RNG
 /// outcomes worth re-deriving through a gameplay crawl (unlike
 /// `roll_until_blind_auction_opens`), so the state is seeded directly.
-async fn jailed_room() -> (
+fn jailed_room() -> (
     mpsc::Sender<RoomCmd>,
     Vec<mpsc::UnboundedReceiver<ServerMessage>>,
 ) {
@@ -1396,7 +1404,7 @@ async fn jailed_room() -> (
 /// Same setup as `jailed_room`, but with a plain turn limit shorter
 /// than `JAIL_DECISION_SECS` - to prove the floor actually overrides
 /// the room's own setting rather than merely being the default.
-async fn jailed_room_with_short_turn_limit() -> (
+fn jailed_room_with_short_turn_limit() -> (
     mpsc::Sender<RoomCmd>,
     Vec<mpsc::UnboundedReceiver<ServerMessage>>,
 ) {
@@ -1458,7 +1466,7 @@ async fn jailed_room_with_short_turn_limit() -> (
 /// feedback - the ordinary blitz turn was too short for this decision).
 #[tokio::test(start_paused = true)]
 async fn jail_decision_gets_the_extended_floor_not_the_room_turn_limit() {
-    let (_room, mut client_rxs) = jailed_room_with_short_turn_limit().await;
+    let (_room, mut client_rxs) = jailed_room_with_short_turn_limit();
 
     // Nothing must auto-play within the room's plain 5s limit.
     let early = tokio::time::timeout(Duration::from_secs(5), async {
@@ -1480,7 +1488,7 @@ async fn jail_decision_gets_the_extended_floor_not_the_room_turn_limit() {
     );
 
     // It does fire once the extended floor passes.
-    let resolved = tokio::time::timeout(Duration::from_secs(60), async {
+    let resolved = tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::Update { events, .. } =
                 client_rxs[1].recv().await.expect("room task alive")
@@ -1502,7 +1510,7 @@ async fn jail_decision_gets_the_extended_floor_not_the_room_turn_limit() {
 /// sealed-bid window tests above.
 #[tokio::test(start_paused = true)]
 async fn bribe_vote_window_auto_rejects_a_silent_seat() {
-    let (room, mut client_rxs) = jailed_room().await;
+    let (room, mut client_rxs) = jailed_room();
 
     room.send(RoomCmd::Game {
         player_id: "guest:alice".into(),
@@ -1511,7 +1519,7 @@ async fn bribe_vote_window_auto_rejects_a_silent_seat() {
     .await
     .expect("room task alive");
 
-    let resolved = tokio::time::timeout(Duration::from_secs(60), async {
+    let resolved = tokio::time::timeout(Duration::from_mins(1), async {
         loop {
             if let ServerMessage::Update { events, .. } =
                 client_rxs[1].recv().await.expect("room task alive")
@@ -1536,7 +1544,7 @@ async fn bribe_vote_window_auto_rejects_a_silent_seat() {
 /// is a fallback, not a wait (mirrors the sealed-bid equivalent).
 #[tokio::test(start_paused = true)]
 async fn bribe_vote_window_resolves_early_once_everyone_has_voted() {
-    let (room, mut client_rxs) = jailed_room().await;
+    let (room, mut client_rxs) = jailed_room();
 
     room.send(RoomCmd::Game {
         player_id: "guest:alice".into(),

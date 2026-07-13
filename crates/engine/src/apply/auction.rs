@@ -5,9 +5,9 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{CONTESTED_WIN_PAY_PCT, CommandError, Event, Exec, MarketEffect, TurnPhase};
 
-impl<'e> Exec<'e> {
+impl Exec<'_> {
     pub(super) fn submit_blind_bid(&mut self, p: usize, amount: i64) -> Result<(), CommandError> {
         let TurnPhase::BlindAuction { tile, ref bids } = self.st.turn else {
             return Err(CommandError::WrongPhase);

@@ -7,18 +7,21 @@
 use serde::{Deserialize, Serialize};
 
 use crate::content::GameContent;
-use crate::content::{MarketEffect, RentModel, RuleParams};
+use crate::content::{RentModel, RuleParams};
 use crate::rng;
 use crate::tuning::{
     FORECAST_QUEUE_LEN, MORTGAGE_VALUE_PCT, VP_PER_CONGLOMERATE, VP_PER_FULL_GROUP,
     VP_PER_GROUP_SCALED,
 };
 
+mod market;
+pub use market::{ActiveMarketEvent, MarketForecast, ScheduledEvent, Spotlight};
+
 /// Global player identity issued by the identity service ("provider:sub")
 /// or a guest id in insecure mode.
 pub type PlayerId = String;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GameState {
     pub phase: GamePhase,
     /// Seating order, fixed at game start. Bankrupt players stay in the
@@ -31,7 +34,7 @@ pub struct GameState {
     pub tiles: Vec<TileState>,
     pub chance_deck: DeckState,
     pub community_deck: DeckState,
-    /// SplitMix64 PRNG state. Part of the state on purpose: replay-safe.
+    /// `SplitMix64` PRNG state. Part of the state on purpose: replay-safe.
     /// Never expose to clients (dice would become predictable).
     pub rng: u64,
     /// Completed turn transitions; used for stats/history.
@@ -110,7 +113,7 @@ pub enum TurnPhase {
     AwaitEnd,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Player {
     pub id: PlayerId,
     pub name: String,
@@ -192,67 +195,6 @@ impl DeckState {
     }
 }
 
-/// A drawn-but-not-yet-active market event (ADR-0021): public the moment
-/// it's scheduled, so players can plan around it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ScheduledEvent {
-    pub event_id: String,
-    pub starts_at_turn: u32,
-    pub duration: u32,
-}
-
-/// The market event currently in effect, if any (ADR-0021). Only
-/// `RentMultiplier`/`AcquisitionMultiplier` ever occupy this - `WealthTax`
-/// resolves instantly the moment it activates and never lingers here.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ActiveMarketEvent {
-    pub event_id: String,
-    pub effect: MarketEffect,
-    pub magnitude_pct: i64,
-    pub ends_at_turn: u32,
-}
-
-/// Public market forecast queue (ADR-0021): the next scheduled events plus
-/// whichever one is currently in effect. Empty and permanently inert when
-/// the content's `market_events` pool is empty.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct MarketForecast {
-    /// Upcoming events, oldest (soonest) first, kept at 3 entries.
-    pub queue: Vec<ScheduledEvent>,
-    pub active: Option<ActiveMarketEvent>,
-}
-
-/// The property currently in the Exposition corner's spotlight (ADR-0026):
-/// its rent is boosted until `expires_at_turn`. Public in `ClientView`
-/// unconditionally - the whole point is that the table sees the hot tile.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Spotlight {
-    pub tile: usize,
-    pub expires_at_turn: u32,
-}
-
-impl MarketForecast {
-    /// Draws one event from `content.market_events` and schedules it after
-    /// whatever is already queued (or after `now` if the queue is empty),
-    /// `content.forecast_gap_turns` later. A complete no-op - no RNG draw -
-    /// when the pool is empty, so mods without `events.toml` never perturb
-    /// the seeded RNG stream. Used both to seed the initial 3 events and to
-    /// refill the queue each time one activates.
-    pub(crate) fn draw_next(&mut self, content: &GameContent, rng: &mut u64, now: u32) {
-        if content.market_events.is_empty() {
-            return;
-        }
-        let idx = rng::below(rng, content.market_events.len() as u64) as usize;
-        let def = &content.market_events[idx];
-        let after = self.queue.last().map_or(now, |s| s.starts_at_turn);
-        self.queue.push(ScheduledEvent {
-            event_id: def.id.clone(),
-            starts_at_turn: after + content.forecast_gap_turns,
-            duration: def.duration_turns,
-        });
-    }
-}
-
 impl GameState {
     pub(crate) fn new(
         content: &GameContent,
@@ -321,7 +263,7 @@ impl GameState {
     /// of `p` is `max_pct - p + 1`; e.g. for 5..=25, 5% is 21x more
     /// likely than 25%). Validated content guarantees `min <= max`.
     pub(crate) fn draw_networth_tax_pct(&mut self, min_pct: u8, max_pct: u8) -> u8 {
-        let (min, max) = (min_pct as u64, max_pct as u64);
+        let (min, max) = (u64::from(min_pct), u64::from(max_pct));
         // Total weight of the descending triangle min..=max.
         let n = max - min + 1;
         let total: u64 = (1..=n).sum();
@@ -357,14 +299,32 @@ impl GameState {
             .map(|(i, _)| i)
     }
 
+    /// Owned snapshot of `alive_players` - for loops whose body mutates
+    /// state (payouts, win checks) and therefore cannot hold the borrow
+    /// the iterator form would keep alive.
+    #[must_use]
+    pub(crate) fn alive_seats(&self) -> Vec<usize> {
+        self.alive_players().collect()
+    }
+
     /// True when `player` owns every tile of `group` (monopoly).
+    #[must_use]
     pub fn owns_full_group(&self, content: &GameContent, player: usize, group: &str) -> bool {
-        let tiles = content.group_tiles(group);
-        !tiles.is_empty() && tiles.iter().all(|&t| self.tiles[t].owner == Some(player))
+        // Single lazy pass: every tile of the group must be this player's,
+        // and an unknown/empty group is never a monopoly.
+        let mut any = false;
+        for t in content.group_tiles(group) {
+            if self.tiles[t].owner != Some(player) {
+                return false;
+            }
+            any = true;
+        }
+        any
     }
 
     /// Number of distinct colour groups `player` owns completely (ADR-0013).
     /// Mortgaged tiles still count for ownership.
+    #[must_use]
     pub fn full_groups_owned(&self, content: &GameContent, player: usize) -> usize {
         let mut groups: Vec<&str> = content
             .board
@@ -387,6 +347,7 @@ impl GameState {
     /// group-scaled ("utility") tile owned, plus the stored round bonus.
     /// Fully reversible except the round bonus - lose the group/tile, lose
     /// the points.
+    #[must_use]
     pub fn victory_points(&self, content: &GameContent, player: usize) -> i64 {
         let cap = content.rules.max_houses_per_property.min(5);
         let mut points = VP_PER_FULL_GROUP * self.full_groups_owned(content, player) as i64;
@@ -413,6 +374,7 @@ impl GameState {
     /// neutral); each house counts its build cost. Clients mirror this to
     /// rank players in timed games - keep the two in step. See
     /// `docs/business-tour-direction.md`.
+    #[must_use]
     pub fn net_worth(&self, content: &GameContent, player: usize) -> i64 {
         let mut worth = self.players[player].cash;
         for (i, tile) in self.tiles.iter().enumerate() {
@@ -425,7 +387,7 @@ impl GameState {
                 } else {
                     prop.price
                 };
-                worth += tile.houses as i64 * prop.house_cost;
+                worth += i64::from(tile.houses) * prop.house_cost;
             }
         }
         worth
@@ -446,7 +408,7 @@ impl GameState {
 
     /// Takes one subsidiary from the pool; `Err(())` only when the pool is
     /// enabled and empty.
-    pub(crate) fn take_subsidiary(&mut self) -> Result<(), ()> {
+    pub(crate) const fn take_subsidiary(&mut self) -> Result<(), ()> {
         match &mut self.subsidiaries_available {
             Some(0) => Err(()),
             Some(n) => {
@@ -459,7 +421,7 @@ impl GameState {
 
     /// Takes one conglomerate from the pool; `Err(())` only when the pool
     /// is enabled and empty.
-    pub(crate) fn take_conglomerate(&mut self) -> Result<(), ()> {
+    pub(crate) const fn take_conglomerate(&mut self) -> Result<(), ()> {
         match &mut self.conglomerates_available {
             Some(0) => Err(()),
             Some(n) => {
@@ -472,14 +434,14 @@ impl GameState {
 
     /// Returns `n` subsidiaries to the pool; always succeeds (a pool return
     /// can never fail, only a take can).
-    pub(crate) fn return_subsidiaries(&mut self, n: u64) {
+    pub(crate) const fn return_subsidiaries(&mut self, n: u64) {
         if let Some(avail) = &mut self.subsidiaries_available {
             *avail += n;
         }
     }
 
     /// Returns one conglomerate to the pool; always succeeds.
-    pub(crate) fn return_conglomerate(&mut self) {
+    pub(crate) const fn return_conglomerate(&mut self) {
         if let Some(avail) = &mut self.conglomerates_available {
             *avail += 1;
         }
@@ -490,7 +452,7 @@ impl GameState {
     /// the top level. Never call this without checking first: unlike
     /// `take_subsidiary`, it has no failure path and will saturate rather
     /// than reject an unchecked over-consumption.
-    pub(crate) fn consume_subsidiaries(&mut self, n: u64) {
+    pub(crate) const fn consume_subsidiaries(&mut self, n: u64) {
         if let Some(avail) = &mut self.subsidiaries_available {
             *avail = avail.saturating_sub(n);
         }
@@ -509,7 +471,7 @@ impl GameState {
         if houses == cap {
             self.return_conglomerate();
         } else {
-            self.return_subsidiaries(houses as u64);
+            self.return_subsidiaries(u64::from(houses));
         }
     }
 }

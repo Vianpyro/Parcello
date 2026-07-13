@@ -49,7 +49,10 @@ pub struct Engine {
 
 impl Engine {
     /// Builds an engine with the default strategy implementations.
-    /// Fails if the content violates board invariants (see `GameContent::validate`).
+    ///
+    /// # Errors
+    /// Fails if the content violates board invariants (see
+    /// [`GameContent::validate`]).
     pub fn new(content: Arc<GameContent>) -> Result<Self, ContentError> {
         content.validate()?;
         Ok(Self {
@@ -60,17 +63,20 @@ impl Engine {
     }
 
     /// Injection point for an alternative strategy (mods, tests).
+    #[must_use]
     pub fn with_rent(mut self, rent: Box<dyn RentCalculator>) -> Self {
         self.rent = rent;
         self
     }
 
+    #[must_use]
     pub fn with_bankruptcy(mut self, resolver: Box<dyn BankruptcyResolver>) -> Self {
         self.bankruptcy = resolver;
         self
     }
 
-    pub fn content(&self) -> &Arc<GameContent> {
+    #[must_use]
+    pub const fn content(&self) -> &Arc<GameContent> {
         &self.content
     }
 
@@ -78,16 +84,20 @@ impl Engine {
     ///
     /// `seed` drives every future random draw (deck order, market events).
     /// Two games with identical players, content, and seed are identical.
+    #[must_use]
     pub fn new_game(&self, players: Vec<(PlayerId, String)>, seed: u64) -> GameState {
         GameState::new(&self.content, players, seed, &self.content.rules)
     }
 
     /// The single command pipeline: validate -> apply -> emit events.
     ///
-    /// Invalid commands return `Err` and leave the caller's state untouched;
-    /// the caller decides whether to log or forward the rejection. Accepted
-    /// commands return the successor state plus the events describing what
-    /// happened, in order.
+    /// Accepted commands return the successor state plus the events
+    /// describing what happened, in order.
+    ///
+    /// # Errors
+    /// Invalid commands return `Err` and leave the caller's state untouched
+    /// (ADR-0001); the caller decides whether to log or forward the
+    /// rejection.
     pub fn apply(
         &self,
         state: &GameState,
@@ -101,6 +111,7 @@ impl Engine {
     /// session layer calls it when the game clock expires. Pure and
     /// deterministic from the state, so a replay reconstructs it from the
     /// final Active state (ADR-0010). A no-op on an already-finished game.
+    #[must_use]
     pub fn finish_on_time(&self, state: &GameState) -> (GameState, Vec<Event>) {
         if !matches!(state.phase, GamePhase::Active) {
             return (state.clone(), Vec::new());

@@ -5,9 +5,9 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{CommandError, Event, Exec, TurnPhase};
 
-impl<'e> Exec<'e> {
+impl Exec<'_> {
     pub(super) fn play_movement_card(&mut self, p: usize, value: u8) -> Result<(), CommandError> {
         if self.st.turn != TurnPhase::AwaitMove {
             return Err(CommandError::WrongPhase);

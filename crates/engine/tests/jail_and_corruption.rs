@@ -363,12 +363,7 @@ fn a_route_landing_on_go_to_jail_revokes_parole_and_refills_the_hand() {
     let (st, ev) = step(
         &engine,
         &st,
-        cmd(
-            "p0",
-            CommandKind::ChooseLegalRoute {
-                order: order.clone(),
-            },
-        ),
+        cmd("p0", CommandKind::ChooseLegalRoute { order }),
     );
     assert!(
         ev.iter()
@@ -414,12 +409,7 @@ fn bankruptcy_during_a_route_purges_the_freeze_state_cleanly() {
     let (st, ev) = step(
         &engine,
         &st,
-        cmd(
-            "p0",
-            CommandKind::ChooseLegalRoute {
-                order: order.clone(),
-            },
-        ),
+        cmd("p0", CommandKind::ChooseLegalRoute { order }),
     );
     assert!(ev.iter().any(|e| matches!(
         e,

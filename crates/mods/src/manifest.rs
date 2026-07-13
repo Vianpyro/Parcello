@@ -8,7 +8,7 @@ pub struct ModManifest {
     pub version: String,
     #[serde(default)]
     pub author: Option<String>,
-    /// Minimum game version, "x.y.z". Checked leniently: unparseable
+    /// Minimum game version, "x.y.z". Checked leniently: unparsable
     /// versions log a warning instead of failing the load.
     #[serde(default)]
     pub min_game_version: Option<String>,
@@ -16,7 +16,7 @@ pub struct ModManifest {
 
 /// Subset of the manifest serialized to joining clients (mod distribution
 /// MVP: host pushes the resolved bundle over the WebSocket).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModInfo {
     pub id: String,
     pub version: String,
@@ -35,7 +35,7 @@ impl From<&ModManifest> for ModInfo {
 }
 
 /// Parse "x.y.z" (missing parts default to 0). Returns `None` on garbage.
-pub(crate) fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+pub fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     let mut parts = v.trim().split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next().map_or(Some(0), |p| p.parse().ok())?;

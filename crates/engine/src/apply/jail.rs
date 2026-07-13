@@ -5,9 +5,9 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{CommandError, Event, Exec, TurnPhase};
 
-impl<'e> Exec<'e> {
+impl Exec<'_> {
     pub(super) fn choose_legal_route(
         &mut self,
         p: usize,

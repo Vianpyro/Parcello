@@ -1,4 +1,5 @@
 //! Typed events emitted after each state transition (Observer pattern).
+//!
 //! This is the primary mod hook surface (V1 passive, V2 reactive) and the
 //! animation feed for clients. Player fields are seating indices; clients
 //! resolve names through the view.
@@ -12,7 +13,7 @@ pub enum DeckKind {
     Community,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     TurnStarted {

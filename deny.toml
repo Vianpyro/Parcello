@@ -1,0 +1,46 @@
+# cargo-deny policy (checked in CI, `deps` job). Four gates:
+#   advisories - RustSec vulnerabilities and unmaintained/unsound crates
+#   licenses   - commercial distribution is planned (CLAUDE.md), so the
+#                dependency tree must stay permissive-only; this automates
+#                the manual release-time cargo-license check
+#   bans       - duplicate-version creep (warn only: transitive dupes are
+#                a fact of life, but the report keeps them visible)
+#   sources    - crates.io only, no git/alternate registries
+
+[graph]
+all-features = true
+
+[advisories]
+# Anything RustSec knows about fails the job, same bar as the previous
+# `cargo audit -D warnings` step.
+unmaintained = "workspace"
+yanked = "deny"
+
+[licenses]
+# Every license the current tree actually uses (2026-07 inventory via
+# cargo-license). For OR-licensed crates, cargo-deny picks any allowed
+# alternative, so copyleft options in an OR never trip this. Adding a new
+# license here is a deliberate, reviewed act - exactly the point.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+# Real `version = "*"` requirements are banned; the workspace's internal
+# path dependencies (no version field until crates.io publication) are not.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -7,7 +7,7 @@ use parcello_protocol::{ClientMessage, RoomSettings};
 
 use crate::ui::Ctx;
 
-pub(crate) fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
+pub fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
     let mut parts = line.split_whitespace();
     let cmd = match (parts.next()?, parts.next()) {
         ("start", None) => return Some(ClientMessage::Start),
@@ -107,7 +107,7 @@ fn parse_tile_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// Comma-separated card values for `route <n,n,...>` (ADR-0024); unparseable
+/// Comma-separated card values for `route <n,n,...>` (ADR-0024); unparsable
 /// entries are dropped rather than rejecting the whole line - the server
 /// validates the permutation and rejects it cleanly if it's wrong.
 fn parse_u8_list(raw: &str) -> Vec<u8> {
@@ -115,7 +115,7 @@ fn parse_u8_list(raw: &str) -> Vec<u8> {
 }
 
 /// Applies one `set <field> <value>` edit to a settings copy (ADR-0015).
-/// `None` on an unknown field or unparseable value. The server clamps.
+/// `None` on an unknown field or unparsable value. The server clamps.
 fn apply_setting(s: &mut RoomSettings, field: &str, value: &str) -> Option<()> {
     // `off`/`none` disables a timer; anything else is a seconds count.
     let opt_secs = |v: &str| -> Option<Option<u64>> {

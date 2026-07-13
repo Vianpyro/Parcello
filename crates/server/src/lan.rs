@@ -15,7 +15,9 @@ struct Announce<'a> {
 }
 
 /// Spawn a best-effort background task that announces `bind_addr` to the
-/// `maddr:port` multicast group every 2s. With `broadcast_fallback` it also
+/// `maddr:port` multicast group every 2s.
+///
+/// With `broadcast_fallback` it also
 /// sends the same payload to 255.255.255.255:port for networks that block
 /// multicast. Detached; failures are logged, never fatal.
 pub fn spawn_broadcaster(maddr: String, port: u16, broadcast_fallback: bool, bind_addr: String) {

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ContentError;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GameContent {
     /// Board tiles in play order. Invariant: `board[0]` is the Go tile.
     pub board: Vec<TileDef>,
@@ -25,7 +25,7 @@ pub struct GameContent {
     pub forecast_gap_turns: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TileDef {
     /// Stable string key. Mods replace tiles by id (last-loaded-wins).
     pub id: String,
@@ -33,7 +33,7 @@ pub struct TileDef {
     pub kind: TileKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TileKind {
     Go,
@@ -58,17 +58,17 @@ pub enum TileKind {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PropertyDef {
     /// Color group key. Owning a full group doubles unimproved rent and
-    /// unlocks building (StandardRent / build rules).
+    /// unlocks building (`StandardRent` / build rules).
     pub group: String,
     pub price: i64,
     /// Ignored (and building rejected) unless `rent_model` is `Houses`.
     pub house_cost: i64,
     /// Meaning depends on `rent_model`:
-    /// - Houses: rent by house count, `rents[0]` unimproved .. `rents[5]` hotel;
-    /// - GroupScaled: `rents[n-1]` where n = tiles of the group owned.
+    /// - `Houses`: rent by house count, `rents[0]` unimproved .. `rents[5]` hotel;
+    /// - `GroupScaled`: `rents[n-1]` where n = tiles of the group owned.
     pub rents: [i64; 6],
     #[serde(default)]
     pub rent_model: RentModel,
@@ -83,14 +83,14 @@ pub enum RentModel {
     GroupScaled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CardDef {
     pub id: String,
     pub text: String,
     pub effect: CardEffect,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CardEffect {
     /// Positive: bank pays the player. Negative: player pays the bank.
@@ -120,7 +120,7 @@ pub enum CardEffect {
 /// A scheduled market event definition (ADR-0021). Calibration
 /// (`magnitude_pct`, `duration_turns`) is data-only - mods edit TOML, never
 /// the engine.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MarketEventDef {
     /// Stable string key. Mods replace events by id (last-loaded-wins).
     pub id: String,
@@ -134,7 +134,9 @@ pub struct MarketEventDef {
     pub duration_turns: u32,
 }
 
-/// What a market event does while active (ADR-0021). Unit variants only -
+/// What a market event does while active (ADR-0021).
+///
+/// Unit variants only -
 /// unlike `CardEffect`, none carry per-variant data (the shared
 /// `magnitude_pct`/`duration_turns` on `MarketEventDef` cover all three),
 /// so this serializes as a bare string (`effect = "rent_multiplier"`),
@@ -153,7 +155,7 @@ pub enum MarketEffect {
 }
 
 /// Named rule parameters, resolved from `RuleRegistry` keys (V1 hook points).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuleParams {
     pub starting_balance: i64,
     pub go_salary: i64,
@@ -212,11 +214,11 @@ pub struct RuleParams {
     pub velocity_max: u8,
 }
 
-fn default_velocity_min() -> u8 {
+const fn default_velocity_min() -> u8 {
     1
 }
 
-fn default_velocity_max() -> u8 {
+const fn default_velocity_max() -> u8 {
     5
 }
 
@@ -244,6 +246,10 @@ impl Default for RuleParams {
 impl GameContent {
     /// Structural invariants required by `Engine::apply`. Checked once at
     /// room creation so the hot path can index without re-validating.
+    ///
+    /// # Errors
+    /// Returns the first violated invariant (empty board, missing/duplicate
+    /// tiles, invalid property or velocity numbers, dangling card targets).
     pub fn validate(&self) -> Result<(), ContentError> {
         if self.board.is_empty() {
             return Err(ContentError::EmptyBoard);
@@ -320,11 +326,17 @@ impl GameContent {
         Ok(())
     }
 
+    #[must_use]
     pub fn tile_index(&self, id: &str) -> Option<usize> {
         self.board.iter().position(|t| t.id == id)
     }
 
     /// Position of the (unique, validated) jail tile.
+    ///
+    /// # Panics
+    /// If called on content that never passed [`GameContent::validate`]
+    /// (which guarantees exactly one jail tile).
+    #[must_use]
     pub fn jail_position(&self) -> usize {
         self.board
             .iter()
@@ -332,6 +344,7 @@ impl GameContent {
             .expect("validated content has exactly one jail tile")
     }
 
+    #[must_use]
     pub fn property(&self, tile: usize) -> Option<&PropertyDef> {
         match &self.board.get(tile)?.kind {
             TileKind::Property(p) => Some(p),
@@ -339,25 +352,31 @@ impl GameContent {
         }
     }
 
-    /// Indices of every property belonging to `group`.
-    pub fn group_tiles(&self, group: &str) -> Vec<usize> {
+    /// Indices of every property belonging to `group`. Lazy on purpose:
+    /// rent, build, and VP checks walk groups on every landing, and most
+    /// callers only need `all`/`any`/`filter` - no Vec required.
+    pub fn group_tiles<'content>(
+        &'content self,
+        group: &'content str,
+    ) -> impl Iterator<Item = usize> + 'content {
         self.board
             .iter()
             .enumerate()
-            .filter_map(|(i, t)| match &t.kind {
+            .filter_map(move |(i, t)| match &t.kind {
                 TileKind::Property(p) if p.group == group => Some(i),
                 _ => None,
             })
-            .collect()
     }
 
     /// Looks up a market event definition by id (ADR-0021).
+    #[must_use]
     pub fn market_event(&self, id: &str) -> Option<&MarketEventDef> {
         self.market_events.iter().find(|e| e.id == id)
     }
 
     /// Indices of every property tile, any group - the Exposition corner's
     /// random draw (ADR-0026).
+    #[must_use]
     pub fn property_tiles(&self) -> Vec<usize> {
         self.board
             .iter()

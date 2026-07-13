@@ -14,11 +14,11 @@ const STEPS_PER_GAME: usize = 250;
 struct FuzzRng(u64);
 
 impl FuzzRng {
-    fn new(seed: u64) -> Self {
+    const fn new(seed: u64) -> Self {
         Self(seed)
     }
 
-    fn next(&mut self) -> u64 {
+    const fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -253,7 +253,7 @@ fn random_asset_command(
                 let pool_ok = !steps_off_top
                     || state
                         .subsidiaries_available
-                        .is_none_or(|n| n >= (cap - 1) as u64);
+                        .is_none_or(|n| n >= u64::from(cap - 1));
                 if pool_ok {
                     choices.push(CommandKind::SellHouse {
                         tile: def.id.clone(),
@@ -294,6 +294,9 @@ fn random_asset_command(
     }
 }
 
+// One linear checklist on purpose: every invariant reads top to bottom in
+// a single scan; splitting it would scatter what is conceptually one audit.
+#[allow(clippy::too_many_lines)]
 fn assert_invariants(
     content: &GameContent,
     state: &GameState,
@@ -450,7 +453,7 @@ fn assert_invariants(
             .tiles
             .iter()
             .filter(|t| t.houses > 0 && t.houses < cap)
-            .map(|t| t.houses as u64)
+            .map(|t| u64::from(t.houses))
             .sum();
         if state.subsidiaries_available.unwrap_or(0) + in_use != total {
             fail("subsidiary pool is not conserved");
@@ -519,7 +522,9 @@ fn assert_money_delta(
                     (*delta, *delta)
                 }
             }
-            Event::HouseBuilt { cost, .. } => (-*cost, -*cost),
+            Event::HouseBuilt { cost, .. }
+            | Event::RentBoosted { cost, .. }
+            | Event::PropertyUnmortgaged { cost, .. } => (-*cost, -*cost),
             Event::HouseSold { refund, .. } => (*refund, *refund),
             Event::Expropriated {
                 tile,
@@ -531,9 +536,7 @@ fn assert_money_delta(
                 let delta = compensation + liquidation_refund - cost;
                 (delta, delta)
             }
-            Event::RentBoosted { cost, .. } => (-*cost, -*cost),
             Event::PropertyMortgaged { value, .. } => (*value, *value),
-            Event::PropertyUnmortgaged { cost, .. } => (-*cost, -*cost),
             _ => (0, 0),
         };
         min_expected += lo;
@@ -554,22 +557,19 @@ fn total_cash(state: &GameState) -> i64 {
 fn group_has_no_houses(content: &GameContent, state: &GameState, group: &str) -> bool {
     content
         .group_tiles(group)
-        .iter()
-        .all(|&tile| state.tiles[tile].houses == 0)
+        .all(|tile| state.tiles[tile].houses == 0)
 }
 
 fn group_has_no_mortgages(content: &GameContent, state: &GameState, group: &str) -> bool {
     content
         .group_tiles(group)
-        .iter()
-        .all(|&tile| !state.tiles[tile].mortgaged)
+        .all(|tile| !state.tiles[tile].mortgaged)
 }
 
 fn can_build_evenly(content: &GameContent, state: &GameState, tile: usize, group: &str) -> bool {
     let group_min = content
         .group_tiles(group)
-        .iter()
-        .map(|&t| state.tiles[t].houses)
+        .map(|t| state.tiles[t].houses)
         .min()
         .unwrap_or(0);
     state.tiles[tile].houses <= group_min
@@ -578,13 +578,14 @@ fn can_build_evenly(content: &GameContent, state: &GameState, tile: usize, group
 fn can_sell_evenly(content: &GameContent, state: &GameState, tile: usize, group: &str) -> bool {
     let group_max = content
         .group_tiles(group)
-        .iter()
-        .map(|&t| state.tiles[t].houses)
+        .map(|t| state.tiles[t].houses)
         .max()
         .unwrap_or(0);
     state.tiles[tile].houses >= group_max
 }
 
+// A board literal - data, not logic.
+#[allow(clippy::too_many_lines)]
 fn fuzz_content() -> GameContent {
     GameContent {
         board: vec![

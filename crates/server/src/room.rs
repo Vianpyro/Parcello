@@ -28,9 +28,10 @@ pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 6;
 /// A room with no connected seats for this long dissolves itself. Rejoin is
 /// impossible afterwards; the seed and command log make replays external.
-pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+pub const IDLE_TIMEOUT: Duration = Duration::from_mins(30);
 /// A disconnected player's turn is auto-played after this grace even when
 /// `--turn-timeout` is off: someone who left must never stall the table.
+///
 /// The grace lets a brief network blip recover (they keep their seat and
 /// its reconnect token, ADR-0008).
 // ponytail: fixed 30s; make it a flag only if operators ask to tune it.
@@ -119,6 +120,10 @@ pub enum RoomCmd {
 }
 
 /// Creates the room task and registers its handle. Returns the room code.
+///
+/// # Errors
+/// When the resolved content fails engine validation (a room must never
+/// start on rules the engine would reject).
 pub async fn create_room(
     rooms: &Rooms,
     content: Arc<ResolvedContent>,
@@ -176,7 +181,7 @@ pub async fn create_room(
 
 /// Trade lifecycle events are private to their two parties (ADR-0007);
 /// everything else is public.
-fn event_visible_to(event: &Event, seat: usize) -> bool {
+const fn event_visible_to(event: &Event, seat: usize) -> bool {
     match *event {
         Event::TradeProposed { from, to, .. }
         | Event::TradeAccepted { from, to, .. }
@@ -253,7 +258,7 @@ mod limits {
     /// Small multipliers (base mod uses 6/3), not percents - a much
     /// smaller ceiling is enough (ADR-0019).
     pub const POOL_FACTOR: (i64, i64) = (0, 100);
-    /// A multiplier like the forecast's magnitude_pct, not a pure cost -
+    /// A multiplier like the forecast's `magnitude_pct`, not a pure cost -
     /// the -100 floor keeps the spotlight rent calculator's `.max(0)`
     /// meaningful rather than degenerate (ADR-0026).
     pub const SPOTLIGHT_RENT_PCT: (i64, i64) = (-100, 1_000);
@@ -366,7 +371,79 @@ struct Room {
     vote_gate: bool,
 }
 
+/// What a dispatched `RoomCmd` did to the room, as seen by the run loop's
+/// clock bookkeeping.
+enum Dispatched {
+    /// The command advanced the game: reset the turn clock, keep the
+    /// speculative time-bank drain.
+    Advanced,
+    /// Rejected or non-game command: refund the speculative drain.
+    NoProgress,
+    /// The last human left an empty lobby: dissolve the room.
+    Dissolve,
+}
+
 impl Room {
+    /// Routes one client command to its handler and reports what it did.
+    fn dispatch(&mut self, cmd: RoomCmd) -> Dispatched {
+        let advanced = match cmd {
+            RoomCmd::Join {
+                identity,
+                reconnect,
+                tx,
+                reply,
+            } => {
+                let result = self.handle_join(identity, reconnect.as_deref(), &tx);
+                let _ = reply.send(result);
+                false
+            }
+            RoomCmd::Disconnect { player_id } => {
+                if self.handle_disconnect(&player_id) {
+                    return Dispatched::Dissolve;
+                }
+                false
+            }
+            RoomCmd::Start { player_id } => self.handle_start(&player_id),
+            RoomCmd::PlayAgain { player_id } => self.handle_play_again(&player_id),
+            RoomCmd::AddBot { player_id } => {
+                self.handle_add_bot(&player_id);
+                false
+            }
+            RoomCmd::RemoveBot { player_id } => {
+                self.handle_remove_bot(&player_id);
+                false
+            }
+            RoomCmd::Configure {
+                player_id,
+                settings,
+            } => {
+                self.handle_configure(&player_id, settings);
+                false
+            }
+            RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
+            RoomCmd::Feedback {
+                player_id,
+                rating,
+                comment,
+            } => {
+                self.handle_feedback(&player_id, rating, comment);
+                false
+            }
+            RoomCmd::AnimationDone {
+                player_id,
+                through_seq,
+            } => {
+                self.handle_animation_done(&player_id, through_seq);
+                false
+            }
+        };
+        if advanced {
+            Dispatched::Advanced
+        } else {
+            Dispatched::NoProgress
+        }
+    }
+
     async fn run(mut self, mut rx: mpsc::Receiver<RoomCmd>, rooms: Rooms) {
         info!(room = %self.code, "room created");
         let mut last_activity = tokio::time::Instant::now();
@@ -436,54 +513,19 @@ impl Room {
                     // the table still renders must not drain the bank.
                     let elapsed = now.saturating_duration_since(afk_anchor);
                     let drained = self.drain_bank(drain_seat, elapsed);
-                    let advanced = match cmd {
-                        RoomCmd::Join { identity, reconnect, tx, reply } => {
-                            let result = self.handle_join(identity, reconnect, tx);
-                            let _ = reply.send(result);
-                            false
+                    match self.dispatch(cmd) {
+                        // Last human left an empty lobby: the room is done.
+                        Dispatched::Dissolve => break,
+                        // Any accepted command resets the turn clock and
+                        // keeps the drain above...
+                        Dispatched::Advanced => {
+                            last_progress = tokio::time::Instant::now();
                         }
-                        RoomCmd::Disconnect { player_id } => {
-                            if self.handle_disconnect(&player_id) {
-                                break; // Empty lobby: dissolve the room.
-                            }
-                            false
-                        }
-                        RoomCmd::Start { player_id } => self.handle_start(&player_id),
-                        RoomCmd::PlayAgain { player_id } => self.handle_play_again(&player_id),
-                        RoomCmd::AddBot { player_id } => {
-                            self.handle_add_bot(&player_id);
-                            false
-                        }
-                        RoomCmd::RemoveBot { player_id } => {
-                            self.handle_remove_bot(&player_id);
-                            false
-                        }
-                        RoomCmd::Configure {
-                            player_id,
-                            settings,
-                        } => {
-                            self.handle_configure(&player_id, settings);
-                            false
-                        }
-                        RoomCmd::Game { player_id, cmd } => self.handle_game(&player_id, cmd),
-                        RoomCmd::Feedback { player_id, rating, comment } => {
-                            self.handle_feedback(&player_id, rating, comment);
-                            false
-                        }
-                        RoomCmd::AnimationDone { player_id, through_seq } => {
-                            self.handle_animation_done(&player_id, through_seq);
-                            false
-                        }
-                    };
-                    // Any accepted command resets the turn clock and keeps
-                    // the drain above; a rejected one gets it refunded.
-                    if advanced {
-                        last_progress = tokio::time::Instant::now();
-                    } else {
-                        self.refund_bank(drain_seat, drained);
+                        // ...a rejected or non-game one gets it refunded.
+                        Dispatched::NoProgress => self.refund_bank(drain_seat, drained),
                     }
                 }
-                _ = afk, if afk_armed => {
+                () = afk, if afk_armed => {
                     // The sleep target already covers turn_seconds plus the
                     // whole remaining bank, so firing means it's fully
                     // spent (ADR-0023) - zero it, but only for a connected
@@ -502,10 +544,10 @@ impl Room {
                     }
                     last_progress = tokio::time::Instant::now();
                 }
-                _ = game, if game_armed => {
+                () = game, if game_armed => {
                     self.handle_game_timeout();
                 }
-                _ = bot, if bot_armed => {
+                () = bot, if bot_armed => {
                     // Safety net: if a bot's smart move keeps getting
                     // rejected the afk timer still auto-plays a canonical
                     // action, so this never spins the game.
@@ -514,19 +556,19 @@ impl Room {
                     }
                     last_progress = tokio::time::Instant::now();
                 }
-                _ = bid, if bid_armed => {
+                () = bid, if bid_armed => {
                     self.inject_silent_bids();
                 }
-                _ = vote, if vote_armed => {
+                () = vote, if vote_armed => {
                     self.inject_silent_votes();
                 }
-                _ = gate, if gate_pending => {
+                () = gate, if gate_pending => {
                     // Nothing to do here: reaching the cap is the signal;
                     // the refresh_gates call at the top of the next
                     // iteration stamps the settle instants and arms the
                     // pending window deadline (ADR-0028).
                 }
-                _ = idle => {
+                () = idle => {
                     if self.seats.iter().all(|s| s.tx.is_none()) {
                         info!(room = %self.code, "idle timeout, dissolving");
                         break;
@@ -545,7 +587,7 @@ impl Room {
     /// single actor, so each is governed by its own parallel deadline timer
     /// instead (this is exactly what disarms the turn clock/time bank for
     /// the whole window's duration).
-    fn acting_seat(&self) -> Option<usize> {
+    const fn acting_seat(&self) -> Option<usize> {
         let Phase::Active(st) = &self.phase else {
             return None;
         };
@@ -556,306 +598,6 @@ impl Room {
     }
 
     // -- Animation gates (ADR-0028) ---------------------------------------
-
-    /// Whether `seat` has rendered the latest Update. Bot and disconnected
-    /// seats have no visual to wait for and never gate anyone - the same
-    /// "I don't animate" path the CLI takes by acking instantly.
-    fn seat_settled(&self, seat: usize) -> bool {
-        let Some(s) = self.seats.get(seat) else {
-            return true;
-        };
-        s.is_bot || s.tx.is_none() || self.acked.get(seat).copied().unwrap_or(0) >= self.seq
-    }
-
-    /// Stamps the table/acting settle instants once their condition holds -
-    /// every relevant ack arrived, or `ANIM_ACK_CAP` elapsed, whichever
-    /// comes first - then arms any window deadline that was waiting on the
-    /// table. Runs at the top of every loop iteration, so both an incoming
-    /// ack (a RoomCmd) and the cap wake-up are observed promptly.
-    fn refresh_gates(&mut self) {
-        let now = tokio::time::Instant::now();
-        let cap = self.anim_broadcast_at + ANIM_ACK_CAP;
-        let capped = now >= cap;
-        let stamp = if capped { cap } else { now };
-        if self.table_settled_at.is_none()
-            && (capped || (0..self.seats.len()).all(|s| self.seat_settled(s)))
-        {
-            self.table_settled_at = Some(stamp);
-        }
-        if self.acting_settled_at.is_none()
-            && (capped || self.acting_seat().is_none_or(|s| self.seat_settled(s)))
-        {
-            self.acting_settled_at = Some(stamp);
-        }
-        // A collection window's clock starts only once the table has
-        // visually arrived (ADR-0018/0024 windows, gated per ADR-0028).
-        if let Some(t) = self.table_settled_at {
-            if self.bid_gate {
-                self.bid_gate = false;
-                self.bid_deadline = Some(t + BID_WINDOW);
-            }
-            if self.vote_gate {
-                self.vote_gate = false;
-                self.vote_deadline = Some(t + VOTE_WINDOW);
-            }
-        }
-    }
-
-    /// Turn-clock anchor (ADR-0028): the clock starts at the later of the
-    /// last accepted command and the acting seat's own render ack (or the
-    /// cap) - rendering time never eats thinking time.
-    fn acting_anchor(&self, last_progress: tokio::time::Instant) -> tokio::time::Instant {
-        let settled = self
-            .acting_settled_at
-            .unwrap_or(self.anim_broadcast_at + ANIM_ACK_CAP);
-        last_progress.max(settled)
-    }
-
-    /// Bot pacing anchor (ADR-0028): a bot moves only once the whole table
-    /// has rendered the previous move (or the cap) - otherwise bots race
-    /// ahead of what the humans can see.
-    fn table_anchor(&self, last_progress: tokio::time::Instant) -> tokio::time::Instant {
-        let settled = self
-            .table_settled_at
-            .unwrap_or(self.anim_broadcast_at + ANIM_ACK_CAP);
-        last_progress.max(settled)
-    }
-
-    /// Records a client's "rendered through N" ack (ADR-0028). `through_seq`
-    /// is untrusted wire input: clamped to what was actually sent, and only
-    /// ever raises the seat's watermark (acking can only release timers
-    /// earlier, never delay anything).
-    fn handle_animation_done(&mut self, player_id: &str, through_seq: u64) {
-        let Some(seat) = self.seat_of(player_id) else {
-            return;
-        };
-        if self.acked.len() < self.seats.len() {
-            self.acked.resize(self.seats.len(), 0);
-        }
-        let acked = through_seq.min(self.seq);
-        if let Some(a) = self.acked.get_mut(seat) {
-            *a = (*a).max(acked);
-        }
-    }
-
-    /// Bumps the Update counter (every broadcast Update carries it) and
-    /// closes the animation gates: a fresh broadcast means fresh visuals
-    /// the table has not rendered yet (ADR-0028).
-    fn next_update_seq(&mut self) -> u64 {
-        self.seq += 1;
-        self.anim_broadcast_at = tokio::time::Instant::now();
-        self.table_settled_at = None;
-        self.acting_settled_at = None;
-        self.seq
-    }
-
-    /// Effective plain-turn limit for `seat` right now, or `None` when the
-    /// room has no turn limit at all. Normally `settings.turn_seconds`,
-    /// floored to `JAIL_DECISION_SECS` for a jailed seat still choosing its
-    /// exit (`jail_route.is_none()` - once any exit is chosen the player
-    /// either un-jails immediately or, on a failed bribe, is back at this
-    /// same decision next turn, so the floor reapplies correctly either
-    /// way). Shared by `afk_deadline` and `drain_bank` so the auto-play
-    /// trigger and the bank drain always agree on the same budget.
-    fn turn_limit_secs(&self, seat: usize) -> Option<u64> {
-        let base = self.settings.turn_seconds?;
-        let Phase::Active(state) = &self.phase else {
-            return Some(base);
-        };
-        let jailed_deciding = state
-            .players
-            .get(seat)
-            .is_some_and(|p| p.jailed && p.jail_route.is_none());
-        Some(if jailed_deciding {
-            base.max(JAIL_DECISION_SECS)
-        } else {
-            base
-        })
-    }
-
-    /// How long the acting seat may stall before its canonical action is
-    /// auto-played, or `None` for no limit. A disconnected seat (truly AFK)
-    /// is skipped after `DISCONNECTED_GRACE` whether or not a turn limit is
-    /// set - the personal time bank does not apply to them (ADR-0023,
-    /// pulling the plug earns no extra time). A connected but slow player
-    /// gets the room's turn limit extended by whatever bank they have left.
-    fn afk_deadline(&self) -> Option<Duration> {
-        let seat = self.acting_seat()?;
-        let turn_limit = self.turn_limit_secs(seat).map(Duration::from_secs);
-        let connected = self.seats.get(seat).is_some_and(|s| s.tx.is_some());
-        if connected {
-            let bank = Duration::from_secs(self.banks.get(seat).copied().unwrap_or(0));
-            turn_limit.map(|t| t + bank)
-        } else {
-            Some(turn_limit.map_or(DISCONNECTED_GRACE, |t| t.min(DISCONNECTED_GRACE)))
-        }
-    }
-
-    /// Drains `seat`'s personal time bank by however long it overran the
-    /// plain turn window (ADR-0023) and returns the amount actually taken,
-    /// for a caller that may need to `refund_bank` it back. A no-op (returns
-    /// 0) with no turn limit, no bank, no overage, or a disconnected seat
-    /// (whose timeout is governed by `DISCONNECTED_GRACE` alone).
-    fn drain_bank(&mut self, seat: Option<usize>, elapsed: Duration) -> u64 {
-        let Some(seat) = seat else { return 0 };
-        if self.seats.get(seat).is_none_or(|s| s.tx.is_none()) {
-            return 0;
-        }
-        let Some(turn_limit) = self.turn_limit_secs(seat).map(Duration::from_secs) else {
-            return 0;
-        };
-        let overage = elapsed.saturating_sub(turn_limit).as_secs();
-        let Some(remaining) = self.banks.get_mut(seat) else {
-            return 0;
-        };
-        let drained = overage.min(*remaining);
-        *remaining -= drained;
-        drained
-    }
-
-    /// Undoes a `drain_bank` call whose command turned out rejected -
-    /// rejections never mutate (the codebase-wide invariant), and that
-    /// includes this session-layer side effect too.
-    fn refund_bank(&mut self, seat: Option<usize>, amount: u64) {
-        if amount == 0 {
-            return;
-        }
-        if let Some(seat) = seat
-            && let Some(remaining) = self.banks.get_mut(seat)
-        {
-            *remaining += amount;
-        }
-    }
-
-    /// The action the game is waiting for, per `TurnPhase`. Never invalid
-    /// for the returned player, so applying it always advances a stalled
-    /// game. A plain move is chosen by the bot heuristic (2026-07) so a
-    /// timed-out seat moves smartly, not just with its lowest card; a
-    /// jailed seat's action is the Legal Route in ascending order
-    /// (ADR-0024); end of turn is `EndTurn`. Movement/route/end only - an
-    /// AFK auto-play never spends the player's cash.
-    fn afk_command(&self) -> Option<(PlayerId, CommandKind)> {
-        let Phase::Active(st) = &self.phase else {
-            return None;
-        };
-        let seat = self.acting_seat()?;
-        let player = &st.players[seat];
-        let kind = match st.turn {
-            TurnPhase::AwaitMove => {
-                if let Some(route) = &player.jail_route {
-                    CommandKind::PlayMovementCard { value: route[0] }
-                } else if player.jailed {
-                    let rules = &self.engine.content().rules;
-                    let order: Vec<u8> = (rules.velocity_min..=rules.velocity_max).collect();
-                    CommandKind::ChooseLegalRoute { order }
-                } else {
-                    // Auto-play the *movement* with bot smarts (2026-07):
-                    // a timed-out seat gets its best-scoring card, not the
-                    // dumb lowest one - it should feel like the bot stepped
-                    // in, not like a forfeit. Movement only: no auto-spend
-                    // of their cash. Falls back to the lowest card if the
-                    // heuristic declines (it never should in AwaitMove).
-                    let view = ClientView::for_seat(st, self.engine.content(), seat);
-                    let value =
-                        parcello_engine::bot::movement_card(self.engine.content(), &view, seat)
-                            .unwrap_or_else(|| {
-                                *player
-                                    .hand
-                                    .iter()
-                                    .min()
-                                    .expect("hand never empty in AwaitMove")
-                            });
-                    CommandKind::PlayMovementCard { value }
-                }
-            }
-            TurnPhase::AwaitEnd => CommandKind::EndTurn,
-            // acting_seat() already excludes these phases (no single
-            // actor); kept for exhaustiveness.
-            TurnPhase::BlindAuction { .. } | TurnPhase::BribeVote { .. } => return None,
-        };
-        Some((st.players[seat].id.clone(), kind))
-    }
-
-    /// Auto-abstains every seat that hasn't bid by the sealed-bid window's
-    /// deadline (ADR-0018) - the multi-seat equivalent of `afk_command`'s
-    /// single-actor auto-play. Submitting through the normal `handle_game`
-    /// path means the last injection's own resolution naturally clears
-    /// `bid_deadline` via the transition detection there; cleared again
-    /// here regardless, defensively, so the timer can never spin.
-    fn inject_silent_bids(&mut self) {
-        let Phase::Active(state) = &self.phase else {
-            self.bid_deadline = None;
-            return;
-        };
-        let TurnPhase::BlindAuction { bids, .. } = &state.turn else {
-            self.bid_deadline = None;
-            return;
-        };
-        let silent: Vec<PlayerId> = state
-            .alive_players()
-            .filter(|&p| bids[p].is_none())
-            .map(|p| state.players[p].id.clone())
-            .collect();
-        for player_id in silent {
-            info!(room = %self.code, player = %player_id,
-                  "sealed-bid window closed, abstaining");
-            self.handle_game(&player_id, CommandKind::SubmitBlindBid { amount: 0 });
-        }
-        self.bid_deadline = None;
-    }
-
-    /// Auto-rejects every living opponent who hasn't voted by the Corruption
-    /// bribe vote's deadline (ADR-0024) - `inject_silent_bids`'s structural
-    /// twin for the other simultaneous multi-seat phase.
-    fn inject_silent_votes(&mut self) {
-        let Phase::Active(state) = &self.phase else {
-            self.vote_deadline = None;
-            return;
-        };
-        let TurnPhase::BribeVote { briber, votes, .. } = &state.turn else {
-            self.vote_deadline = None;
-            return;
-        };
-        let briber = *briber;
-        let silent: Vec<PlayerId> = state
-            .alive_players()
-            .filter(|&p| p != briber && votes[p].is_none())
-            .map(|p| state.players[p].id.clone())
-            .collect();
-        for player_id in silent {
-            info!(room = %self.code, player = %player_id,
-                  "bribe vote window closed, rejecting");
-            self.handle_game(&player_id, CommandKind::VoteOnBribe { accept: false });
-        }
-        self.vote_deadline = None;
-    }
-
-    /// The first bot seat with something to do right now and the command it
-    /// wants, using the shared engine heuristic over that seat's own view
-    /// (ADR-0014). `None` when no bot is waiting - covers turns, auctions,
-    /// and declining trades offered to a bot.
-    fn next_bot_action(&self) -> Option<(PlayerId, CommandKind)> {
-        let Phase::Active(st) = &self.phase else {
-            return None;
-        };
-        for (i, seat) in self.seats.iter().enumerate() {
-            if !seat.is_bot {
-                continue;
-            }
-            let view = ClientView::for_seat(st, self.engine.content(), i);
-            // The engine's content carries the effective rules after
-            // start_game rebuilds it (ADR-0015), so the bot plays by the
-            // room's actual settings.
-            // Fresh noise per decision (bid jitter): randomness lives in
-            // the session layer; the engine heuristic stays pure given it.
-            if let Some(kind) =
-                parcello_engine::bot::decide(self.engine.content(), &view, i, rand::random())
-            {
-                return Some((st.players[i].id.clone(), kind));
-            }
-        }
-        None
-    }
 
     fn is_host(&self, player_id: &str) -> bool {
         self.seats
@@ -925,49 +667,44 @@ impl Room {
     fn handle_join(
         &mut self,
         identity: Identity,
-        reconnect: Option<String>,
-        tx: ClientTx,
+        reconnect: Option<&str>,
+        tx: &ClientTx,
     ) -> Result<(), String> {
-        let seat_index = match self.seat_of(&identity.player_id) {
-            Some(i) => {
-                // Rejoin: last connection wins, but a spoofable (guest)
-                // identity must prove seat ownership with the reconnect
-                // token issued at first join (ADR-0008). JWT identities
-                // are cryptographically bound and need no token.
-                let proven = !self.seats[i].identity.spoofable
-                    || reconnect
-                        .as_deref()
-                        .is_some_and(|t| token_eq(t, &self.seats[i].reconnect));
-                if !proven {
-                    return Err("seat is protected: rejoin with its reconnect token".into());
-                }
-                self.seats[i].tx = Some(tx.clone());
-                info!(room = %self.code, player = %identity.player_id, seat = i, "rejoined");
-                i
+        let seat_index = if let Some(i) = self.seat_of(&identity.player_id) {
+            // Rejoin: last connection wins, but a spoofable (guest)
+            // identity must prove seat ownership with the reconnect
+            // token issued at first join (ADR-0008). JWT identities
+            // are cryptographically bound and need no token.
+            let proven = !self.seats[i].identity.spoofable
+                || reconnect.is_some_and(|t| token_eq(t, &self.seats[i].reconnect));
+            if !proven {
+                return Err("seat is protected: rejoin with its reconnect token".into());
             }
-            None => {
-                if !matches!(self.phase, Phase::Lobby) {
-                    return Err("game already started".into());
-                }
-                if self.seats.len() >= MAX_PLAYERS {
-                    // Bots yield to humans (ADR-0014): drop one to seat the
-                    // newcomer; only genuinely full-of-humans rooms reject.
-                    match self.seats.iter().rposition(|s| s.is_bot) {
-                        Some(bot_i) => {
-                            self.seats.remove(bot_i);
-                        }
-                        None => return Err("room is full".into()),
+            self.seats[i].tx = Some(tx.clone());
+            info!(room = %self.code, player = %identity.player_id, seat = i, "rejoined");
+            i
+        } else {
+            if !matches!(self.phase, Phase::Lobby) {
+                return Err("game already started".into());
+            }
+            if self.seats.len() >= MAX_PLAYERS {
+                // Bots yield to humans (ADR-0014): drop one to seat the
+                // newcomer; only genuinely full-of-humans rooms reject.
+                match self.seats.iter().rposition(|s| s.is_bot) {
+                    Some(bot_i) => {
+                        self.seats.remove(bot_i);
                     }
+                    None => return Err("room is full".into()),
                 }
-                self.seats.push(Seat {
-                    identity,
-                    tx: Some(tx.clone()),
-                    reconnect: new_reconnect_token(),
-                    feedback_given: false,
-                    is_bot: false,
-                });
-                self.seats.len() - 1
             }
+            self.seats.push(Seat {
+                identity,
+                tx: Some(tx.clone()),
+                reconnect: new_reconnect_token(),
+                feedback_given: false,
+                is_bot: false,
+            });
+            self.seats.len() - 1
         };
 
         let view =
@@ -1058,7 +795,7 @@ impl Room {
     }
 
     /// Deals a fresh game to the current seats and broadcasts it. Shared by
-    /// the first Start and every PlayAgain. Returns true when the game
+    /// the first Start and every `PlayAgain`. Returns true when the game
     /// actually started (turn clock should reset). Rebuilds the engine with
     /// the host's chosen rules (ADR-0015), which is why it can fail.
     fn start_game(&mut self, host: &str) -> bool {
@@ -1120,27 +857,6 @@ impl Room {
         self.phase = Phase::Active(state);
         self.send_per_seat(msgs);
         true
-    }
-
-    /// Seconds left before the game clock ends the game, if time-boxed.
-    fn time_remaining_secs(&self) -> Option<u64> {
-        self.game_deadline.map(|d| {
-            d.saturating_duration_since(tokio::time::Instant::now())
-                .as_secs()
-        })
-    }
-
-    /// The configured time bank, normalized so `Some(0)` (host explicitly
-    /// set it to zero via `Configure`) and `None` both read as "disabled"
-    /// everywhere this rides the wire (ADR-0023).
-    fn configured_time_bank(&self) -> Option<u64> {
-        self.settings.time_bank_seconds.filter(|&s| s > 0)
-    }
-
-    /// Live per-seat remaining bank for `Update.banks`; `None` when the
-    /// room has no time bank configured.
-    fn banks_field(&self) -> Option<Vec<u64>> {
-        self.configured_time_bank().map(|_| self.banks.clone())
     }
 
     /// Game clock expired: the richest player wins by net worth (ADR-0010).
@@ -1310,10 +1026,10 @@ impl Room {
     fn broadcast_lobby(&mut self) {
         let players = self.seat_infos();
         let settings = self.settings.clone();
-        self.broadcast(ServerMessage::Lobby { players, settings });
+        self.broadcast(&ServerMessage::Lobby { players, settings });
     }
 
-    fn broadcast(&mut self, msg: ServerMessage) {
+    fn broadcast(&mut self, msg: &ServerMessage) {
         for seat in &mut self.seats {
             if let Some(tx) = &seat.tx
                 && tx.send(msg.clone()).is_err()
@@ -1361,6 +1077,9 @@ impl Room {
         self.send_to(player_id, ServerMessage::Rejected { error });
     }
 }
+
+mod autoplay;
+mod clock;
 
 #[cfg(test)]
 mod tests;

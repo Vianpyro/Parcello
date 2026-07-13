@@ -6,13 +6,16 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{
+    CardEffect, DeckKind, Event, Exec, GamePhase, MAX_CARD_CHAIN_DEPTH, MarketEffect,
+    RENT_BOOST_STEP_PCT, SPOTLIGHT_NO_EXPIRY, Spotlight, TileKind, TurnPhase,
+};
 
-impl<'e> Exec<'e> {
+impl Exec<'_> {
     /// Applies a tile's rent-boost level to a base rent (ADR-0012):
     /// `+RENT_BOOST_STEP_PCT%` per boost.
     pub(super) fn boosted_rent(base: i64, boosts: u8) -> i64 {
-        base * (100 + RENT_BOOST_STEP_PCT * boosts as i64) / 100
+        base * (100 + RENT_BOOST_STEP_PCT * i64::from(boosts)) / 100
     }
 
     /// Applies the active market event's magnitude to `base` if it matches
@@ -122,7 +125,7 @@ impl<'e> Exec<'e> {
                 // brackets rare.
                 let (min_pct, max_pct) = (*min_pct, *max_pct);
                 let pct = self.st.draw_networth_tax_pct(min_pct, max_pct);
-                let amount = self.st.net_worth(self.content, p) * pct as i64 / 100;
+                let amount = self.st.net_worth(self.content, p) * i64::from(pct) / 100;
                 self.ev.push(Event::TaxPaid {
                     player: p,
                     tile,
@@ -155,7 +158,7 @@ impl<'e> Exec<'e> {
                     self.st.turn = TurnPhase::AwaitEnd;
                 }
                 Some(owner) => {
-                    let base = self.strat.rent.rent(self.content, &self.st, tile);
+                    let base = self.strategies.rent.rent(self.content, &self.st, tile);
                     let rent = Self::boosted_rent(base, self.st.tiles[tile].boosts);
                     let rent = self.apply_market_multiplier(MarketEffect::RentMultiplier, rent);
                     let rent = self.apply_spotlight_multiplier(tile, rent);
@@ -247,7 +250,7 @@ impl<'e> Exec<'e> {
                 } else {
                     let len = self.content.board.len() as i64;
                     let from = self.st.players[p].position as i64;
-                    let to = (from + *steps as i64).rem_euclid(len) as usize;
+                    let to = (from + i64::from(*steps)).rem_euclid(len) as usize;
                     self.teleport(p, to, false);
                 }
                 self.resolve_landing(p, depth + 1);

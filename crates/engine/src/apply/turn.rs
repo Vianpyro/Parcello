@@ -6,9 +6,12 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{
+    ActiveMarketEvent, CommandError, Event, Exec, GamePhase, MarketEffect, ROUND_BONUS_VP,
+    TurnPhase,
+};
 
-impl<'e> Exec<'e> {
+impl Exec<'_> {
     pub(super) fn end_turn(&mut self) -> Result<(), CommandError> {
         if self.st.turn != TurnPhase::AwaitEnd {
             return Err(CommandError::WrongPhase);
@@ -17,7 +20,8 @@ impl<'e> Exec<'e> {
         Ok(())
     }
 
-    pub(super) fn resign(&mut self, p: usize) -> Result<(), CommandError> {
+    /// Infallible by design: resigning is the always-valid escape hatch.
+    pub(super) fn resign(&mut self, p: usize) {
         self.ev.push(Event::PlayerResigned { player: p });
         self.bankrupt(p, None);
         // Bankruptcy already excluded `p` from `alive_players()`, so this
@@ -28,7 +32,6 @@ impl<'e> Exec<'e> {
         {
             self.maybe_resolve_blind_auction();
         }
-        Ok(())
     }
 
     pub(super) fn advance_turn(&mut self) {
@@ -140,7 +143,7 @@ impl<'e> Exec<'e> {
     /// pct / 100` through the normal charge/bankruptcy machinery, mirroring
     /// `CardEffect::CollectFromEach`/`PayEach`.
     pub(super) fn apply_wealth_tax(&mut self, pct: i64, event_id: &str) {
-        for p in self.st.alive_players().collect::<Vec<_>>() {
+        for p in self.st.alive_seats() {
             let amount = (self.st.net_worth(self.content, p) * pct / 100).max(0);
             self.ev.push(Event::CashAdjusted {
                 player: p,
@@ -178,7 +181,7 @@ impl<'e> Exec<'e> {
         if need <= 0 {
             return;
         }
-        for p in self.st.alive_players().collect::<Vec<_>>() {
+        for p in self.st.alive_seats() {
             let owned = self.st.full_groups_owned(self.content, p);
             if owned as i64 >= need {
                 self.st.phase = GamePhase::Finished { winner: p };
@@ -200,7 +203,7 @@ impl<'e> Exec<'e> {
         if target <= 0 {
             return;
         }
-        for p in self.st.alive_players().collect::<Vec<_>>() {
+        for p in self.st.alive_seats() {
             let points = self.st.victory_points(self.content, p);
             if points >= target {
                 self.st.phase = GamePhase::Finished { winner: p };

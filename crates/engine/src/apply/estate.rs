@@ -6,8 +6,15 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{
+    CommandError, Event, Exec, GameContent, HOUSE_REFUND_PCT, MAX_RENT_BOOSTS,
+    MORTGAGE_INTEREST_PCT, MORTGAGE_VALUE_PCT, MarketEffect, PropertyDef, RentModel, TurnPhase,
+};
 
+// The named lifetime is load-bearing here (unlike the sibling modules):
+// `owned_property` hands back a `&'e PropertyDef` borrowed from `content`,
+// NOT from `&self`, so callers can keep the def across later `self`
+// mutations. Eliding it would tie the return to the `&self` borrow.
 impl<'e> Exec<'e> {
     pub(super) fn build(&mut self, p: usize, tile_id: &str) -> Result<(), CommandError> {
         if !matches!(self.st.turn, TurnPhase::AwaitMove | TurnPhase::AwaitEnd) {
@@ -35,8 +42,7 @@ impl<'e> Exec<'e> {
         if self
             .content
             .group_tiles(&prop.group)
-            .iter()
-            .any(|&t| self.st.tiles[t].mortgaged)
+            .any(|t| self.st.tiles[t].mortgaged)
         {
             return Err(CommandError::MortgagedInGroup);
         }
@@ -47,8 +53,7 @@ impl<'e> Exec<'e> {
         let group_min = self
             .content
             .group_tiles(&prop.group)
-            .iter()
-            .map(|&t| self.st.tiles[t].houses)
+            .map(|t| self.st.tiles[t].houses)
             .min()
             .unwrap_or(0);
         if self.st.tiles[tile].houses > group_min {
@@ -74,7 +79,7 @@ impl<'e> Exec<'e> {
         self.st.players[p].cash -= prop.house_cost;
         self.st.tiles[tile].houses += 1;
         if becomes_top {
-            self.st.return_subsidiaries((cap - 1) as u64);
+            self.st.return_subsidiaries(u64::from(cap - 1));
         }
         self.ev.push(Event::HouseBuilt {
             player: p,
@@ -96,8 +101,7 @@ impl<'e> Exec<'e> {
         let group_max = self
             .content
             .group_tiles(&prop.group)
-            .iter()
-            .map(|&t| self.st.tiles[t].houses)
+            .map(|t| self.st.tiles[t].houses)
             .max()
             .unwrap_or(0);
         if self.st.tiles[tile].houses < group_max {
@@ -111,7 +115,7 @@ impl<'e> Exec<'e> {
         let cap = self.content.rules.max_houses_per_property.min(5);
         let steps_off_top = self.st.tiles[tile].houses == cap;
         if steps_off_top {
-            let subsidiaries_needed = (cap - 1) as u64;
+            let subsidiaries_needed = u64::from(cap - 1);
             if !self.st.subsidiaries_free(subsidiaries_needed) {
                 return Err(CommandError::PoolExhausted);
             }
@@ -121,7 +125,7 @@ impl<'e> Exec<'e> {
         self.st.players[p].cash += refund;
         if steps_off_top {
             self.st.return_conglomerate();
-            self.st.consume_subsidiaries((cap - 1) as u64);
+            self.st.consume_subsidiaries(u64::from(cap - 1));
         } else {
             self.st.return_subsidiaries(1);
         }
@@ -204,7 +208,7 @@ impl<'e> Exec<'e> {
         let compensation = prop.price.min(cost);
         let cap = self.content.rules.max_houses_per_property.min(5);
         let liquidated = ts.houses;
-        let liquidation_refund = (prop.house_cost * HOUSE_REFUND_PCT / 100) * liquidated as i64;
+        let liquidation_refund = (prop.house_cost * HOUSE_REFUND_PCT / 100) * i64::from(liquidated);
         self.st.players[p].cash -= cost;
         self.st.players[from].cash += compensation + liquidation_refund;
         self.st.tiles[tile].owner = Some(p);
@@ -260,8 +264,7 @@ impl<'e> Exec<'e> {
         if self
             .content
             .group_tiles(&prop.group)
-            .iter()
-            .any(|&t| self.st.tiles[t].houses > 0)
+            .any(|t| self.st.tiles[t].houses > 0)
         {
             return Err(CommandError::HousesInGroup);
         }

@@ -24,6 +24,7 @@ pub struct RegistryBuilder {
 }
 
 impl RegistryBuilder {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -89,6 +90,9 @@ impl RegistryBuilder {
 
     /// Freeze into validated content. Unknown rule keys are ignored with a
     /// WARN so future keys do not hard-break older game versions.
+    ///
+    /// # Errors
+    /// Fails when the merged content violates `GameContent::validate`.
     pub fn build(self) -> Result<GameContent, ModError> {
         let mut rules = RuleParams::default();
         for (key, value) in &self.rules {
@@ -98,7 +102,7 @@ impl RegistryBuilder {
                 "velocity_min" => rules.velocity_min = (*value).clamp(1, 254) as u8,
                 "velocity_max" => rules.velocity_max = (*value).clamp(2, 255) as u8,
                 "max_houses_per_property" => {
-                    rules.max_houses_per_property = (*value).clamp(0, u8::MAX as i64) as u8;
+                    rules.max_houses_per_property = (*value).clamp(0, i64::from(u8::MAX)) as u8;
                 }
                 "bankruptcy_threshold" => rules.bankruptcy_threshold = *value,
                 "expropriation" => rules.expropriation = *value,

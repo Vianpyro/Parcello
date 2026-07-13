@@ -13,13 +13,17 @@ use crate::plugin::{ModPlugin, TomlModPlugin};
 use crate::{ModError, ModInfo, RegistryBuilder};
 
 /// Content plus the mod metadata pushed to joining clients.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedContent {
     pub content: GameContent,
     pub mods: Vec<ModInfo>,
 }
 
 /// Load `mod_ids` from `mods_dir/<id>` in order and merge them.
+///
+/// # Errors
+/// Fails when a mod directory or its manifest cannot be read, its TOML is
+/// invalid, or the merged content fails `GameContent::validate`.
 pub fn resolve(mods_dir: &Path, mod_ids: &[String]) -> Result<ResolvedContent, ModError> {
     let mut registries = RegistryBuilder::new();
     let mut mods = Vec::with_capacity(mod_ids.len());

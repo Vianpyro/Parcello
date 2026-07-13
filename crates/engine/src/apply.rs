@@ -12,9 +12,13 @@ use crate::event::{DeckKind, Event};
 use crate::state::{ActiveMarketEvent, GamePhase, GameState, Spotlight, TradeOffer, TurnPhase};
 use crate::{Engine, Strategies};
 
-use crate::tuning::*;
+use crate::tuning::{
+    CONTESTED_WIN_PAY_PCT, HOUSE_REFUND_PCT, MAX_CARD_CHAIN_DEPTH, MAX_OPEN_TRADES_PER_PLAYER,
+    MAX_RENT_BOOSTS, MORTGAGE_INTEREST_PCT, MORTGAGE_VALUE_PCT, RENT_BOOST_STEP_PCT,
+    ROUND_BONUS_VP, SPOTLIGHT_NO_EXPIRY,
+};
 
-pub(crate) fn apply(
+pub fn apply(
     engine: &Engine,
     state: &GameState,
     cmd: &PlayerCommand,
@@ -51,7 +55,7 @@ pub(crate) fn apply(
 
     let mut exec = Exec {
         content: engine.content(),
-        strat: engine.strategies(),
+        strategies: engine.strategies(),
         st: state.clone(),
         ev: Vec::new(),
     };
@@ -83,13 +87,13 @@ pub(crate) fn apply(
         CommandKind::Mortgage { tile } => exec.mortgage(player, tile)?,
         CommandKind::Unmortgage { tile } => exec.unmortgage(player, tile)?,
         CommandKind::ChooseLegalRoute { order } => {
-            exec.choose_legal_route(player, order.clone())?
+            exec.choose_legal_route(player, order.clone())?;
         }
         CommandKind::OfferBribe { amount } => exec.offer_bribe(player, *amount)?,
         CommandKind::VoteOnBribe { accept } => exec.vote_on_bribe(player, *accept)?,
         CommandKind::UseJailCard => exec.use_jail_card(player)?,
         CommandKind::EndTurn => exec.end_turn()?,
-        CommandKind::Resign => exec.resign(player)?,
+        CommandKind::Resign => exec.resign(player),
     }
 
     // A player can go bankrupt during their own turn (jail fine, card debt).
@@ -122,7 +126,7 @@ pub(crate) fn apply(
 
 struct Exec<'e> {
     content: &'e GameContent,
-    strat: Strategies<'e>,
+    strategies: Strategies<'e>,
     st: GameState,
     ev: Vec<Event>,
 }

@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+# Not crates.io-ready (path deps, no metadata); flip deliberately when publishing.
+publish = false
 
 [[bin]]
 name = "parcello-cli"
@@ -15,9 +17,13 @@ parcello-engine = { path = "../engine" }
 parcello-mods = { path = "../mods" }
 parcello-protocol = { path = "../protocol" }
 
+anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde_json = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = "0.29"
+
+[lints]
+workspace = true

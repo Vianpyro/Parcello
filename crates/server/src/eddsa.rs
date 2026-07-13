@@ -1,4 +1,4 @@
-//! EdDSA (Ed25519) identity-token verification against a JWKS (ADR-0009).
+//! `EdDSA` (Ed25519) identity-token verification against a JWKS (ADR-0009).
 //!
 //! The issuer is any OIDC provider that signs with Ed25519 (Rauthy is the
 //! reference deployment); Parcello only verifies. Verification is
@@ -19,7 +19,7 @@ use tracing::{info, warn};
 use crate::auth::{Identity, decode_json};
 
 /// Key-rotation pickup cadence when no unknown-kid poke arrives sooner.
-const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const REFRESH_INTERVAL: Duration = Duration::from_mins(15);
 
 type Keys = Arc<RwLock<HashMap<String, VerifyingKey>>>;
 
@@ -60,8 +60,8 @@ enum Aud {
 impl Aud {
     fn contains(&self, expected: &str) -> bool {
         match self {
-            Aud::One(a) => a == expected,
-            Aud::Many(list) => list.iter().any(|a| a == expected),
+            Self::One(a) => a == expected,
+            Self::Many(list) => list.iter().any(|a| a == expected),
         }
     }
 }
@@ -119,6 +119,11 @@ impl EdDsaVerifier {
     /// failures retry on the next cycle, so a down issuer delays token
     /// logins but never blocks the server (guests are unaffected, and
     /// already-issued tokens verify against the cached keys).
+    ///
+    /// # Panics
+    /// If the OS refuses to spawn the refresher thread (allocation failure
+    /// at boot - not a recoverable state for the server).
+    #[must_use]
     pub fn spawn(urls: Vec<String>, audience: Option<String>) -> Self {
         let keys: Keys = Arc::default();
         let (poke, rx) = mpsc::channel::<()>();
@@ -140,8 +145,8 @@ impl EdDsaVerifier {
                         info!(keys = fresh.len(), "JWKS refreshed");
                         *cache.write().expect("jwks lock poisoned") = fresh;
                     }
-                    if let Err(mpsc::RecvTimeoutError::Disconnected) =
-                        rx.recv_timeout(REFRESH_INTERVAL)
+                    if rx.recv_timeout(REFRESH_INTERVAL)
+                        == Err(mpsc::RecvTimeoutError::Disconnected)
                     {
                         break; // Verifier dropped; stop refreshing.
                     }
@@ -155,11 +160,18 @@ impl EdDsaVerifier {
         }
     }
 
+    /// # Errors
+    /// Malformed/expired tokens, unknown key ids, wrong audience, or a
+    /// signature that does not verify - all as client-facing text.
+    ///
+    /// # Panics
+    /// If the JWKS cache lock was poisoned (a refresher-thread panic).
     pub fn verify(&self, token: &str) -> Result<Identity, String> {
         let mut parts = token.split('.');
-        let (h, p, s) = match (parts.next(), parts.next(), parts.next(), parts.next()) {
-            (Some(h), Some(p), Some(s), None) => (h, p, s),
-            _ => return Err("malformed token".into()),
+        let (Some(h), Some(p), Some(s), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err("malformed token".into());
         };
         let header: Header = decode_json(h)?;
         if header.alg != "EdDSA" {
@@ -294,7 +306,7 @@ mod tests {
             r#"{"alg":"EdDSA","kid":"k1"}"#,
             &format!(r#"{{"sub":"a","exp":{}}}"#, far_future()),
         );
-        assert!(v.verify(&(good.clone() + "x")).is_err(), "tampered sig");
+        assert!(v.verify(&(good + "x")).is_err(), "tampered sig");
 
         let expired = sign(
             &test_key(),

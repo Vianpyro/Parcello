@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::PlayerId;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlayerCommand {
     pub player: PlayerId,
     #[serde(flatten)]
     pub kind: CommandKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandKind {
     /// Play one card from the hand (ADR-0017), moving that many tiles and

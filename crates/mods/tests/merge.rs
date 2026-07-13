@@ -354,3 +354,183 @@ fn forecast_gap_turns_last_loaded_wins() {
     let resolved = resolve(tmp.path(), &["base".into(), "faster".into()]).unwrap();
     assert_eq!(resolved.content.forecast_gap_turns, 10);
 }
+
+// --- Error paths: a community mod that fails must fail loudly and precisely -
+
+#[test]
+fn unknown_tile_type_is_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_mod(
+        tmp.path(),
+        "bad",
+        &[(
+            "properties.toml",
+            "[[tile]]\nid = \"w\"\nname = \"Warp\"\ntype = \"warp\"\n",
+        )],
+    );
+    let err = resolve(tmp.path(), &["bad".into()]).unwrap_err();
+    assert!(matches!(err, ModError::InvalidTile { ref tile, .. } if tile == "w"));
+}
+
+#[test]
+fn property_missing_required_fields_is_rejected_per_field() {
+    // One resolve per missing field, so each error branch is exercised.
+    let cases = [
+        // (omitted field, body)
+        (
+            "house_cost",
+            "group = \"brown\"\nprice = 60\nrents = [1, 2, 3, 4, 5, 6]\n",
+        ),
+        (
+            "group",
+            "price = 60\nhouse_cost = 50\nrents = [1, 2, 3, 4, 5, 6]\n",
+        ),
+        (
+            "price",
+            "group = \"brown\"\nhouse_cost = 50\nrents = [1, 2, 3, 4, 5, 6]\n",
+        ),
+        ("rents", "group = \"brown\"\nprice = 60\nhouse_cost = 50\n"),
+    ];
+    for (missing, body) in cases {
+        let tmp = tempfile::tempdir().unwrap();
+        write_mod(
+            tmp.path(),
+            "bad",
+            &[(
+                "properties.toml",
+                &format!("[[tile]]\nid = \"p\"\nname = \"P\"\ntype = \"property\"\n{body}"),
+            )],
+        );
+        let err = resolve(tmp.path(), &["bad".into()]).unwrap_err();
+        assert!(
+            matches!(err, ModError::InvalidTile { .. }),
+            "missing `{missing}` must reject as InvalidTile, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn group_scaled_property_needs_no_house_cost() {
+    let tmp = tempfile::tempdir().unwrap();
+    let station = r#"
+[[tile]]
+id = "go"
+name = "Go"
+type = "go"
+
+[[tile]]
+id = "st"
+name = "Station"
+type = "property"
+group = "transit"
+price = 200
+rents = [25, 50, 100, 200, 0, 0]
+rent_model = "group_scaled"
+
+[[tile]]
+id = "jail"
+name = "Jail"
+type = "jail"
+"#;
+    write_mod(tmp.path(), "st", &[("properties.toml", station)]);
+    let resolved = resolve(tmp.path(), &["st".into()]).unwrap();
+    let TileKind::Property(p) = &resolved.content.board[1].kind else {
+        panic!("expected a property");
+    };
+    assert_eq!(p.house_cost, 0);
+    assert_eq!(p.rent_model, RentModel::GroupScaled);
+}
+
+#[test]
+fn tax_tiles_require_their_amount_fields() {
+    for (kind, body) in [
+        ("tax", ""),
+        ("net_worth_tax", ""),
+        ("net_worth_tax", "min_pct = 5\n"), // max_pct still missing
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        write_mod(
+            tmp.path(),
+            "bad",
+            &[(
+                "properties.toml",
+                &format!("[[tile]]\nid = \"t\"\nname = \"T\"\ntype = \"{kind}\"\n{body}"),
+            )],
+        );
+        let err = resolve(tmp.path(), &["bad".into()]).unwrap_err();
+        assert!(matches!(err, ModError::InvalidTile { .. }), "{kind}: {err}");
+    }
+}
+
+#[test]
+fn missing_mod_directory_is_an_io_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let err = resolve(tmp.path(), &["ghost".into()]).unwrap_err();
+    assert!(matches!(err, ModError::NotFound(_)), "got: {err}");
+}
+
+#[test]
+fn broken_manifest_is_a_parse_error_with_the_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("bad");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("manifest.toml"), "id = [not toml").unwrap();
+    let err = resolve(tmp.path(), &["bad".into()]).unwrap_err();
+    assert!(
+        matches!(err, ModError::Parse { ref path, .. } if path.contains("manifest.toml")),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn mod_requiring_a_newer_game_is_rejected_but_garbage_versions_only_warn() {
+    // Too new: hard error.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("future");
+    fs::create_dir_all(dir.join("data")).unwrap();
+    fs::write(
+        dir.join("manifest.toml"),
+        "id = \"future\"\nversion = \"1.0.0\"\nmin_game_version = \"999.0.0\"\n",
+    )
+    .unwrap();
+    let err = resolve(tmp.path(), &["future".into()]).unwrap_err();
+    assert!(matches!(err, ModError::IncompatibleVersion { .. }), "{err}");
+
+    // Unparsable requirement: ignored with a WARN, mod still loads.
+    let tmp = tempfile::tempdir().unwrap();
+    write_mod(
+        tmp.path(),
+        "base",
+        &[
+            ("properties.toml", BASE_PROPERTIES),
+            ("cards.toml", BASE_CARDS),
+        ],
+    );
+    let dir = tmp.path().join("odd");
+    fs::create_dir_all(dir.join("data")).unwrap();
+    fs::write(
+        dir.join("manifest.toml"),
+        "id = \"odd\"\nversion = \"1.0.0\"\nmin_game_version = \"tomorrow\"\n",
+    )
+    .unwrap();
+    resolve(tmp.path(), &["base".into(), "odd".into()])
+        .expect("unparsable min_game_version must not block loading");
+}
+
+#[test]
+fn a_mod_with_no_data_files_layers_as_a_no_op() {
+    // Exercises every read_data missing-file branch in one resolve.
+    let tmp = tempfile::tempdir().unwrap();
+    write_mod(
+        tmp.path(),
+        "base",
+        &[
+            ("properties.toml", BASE_PROPERTIES),
+            ("cards.toml", BASE_CARDS),
+        ],
+    );
+    write_mod(tmp.path(), "empty", &[]);
+    let resolved = resolve(tmp.path(), &["base".into(), "empty".into()]).unwrap();
+    assert_eq!(resolved.content.board.len(), 4);
+    assert_eq!(resolved.mods.len(), 2, "the empty mod still registers");
+}

@@ -1,13 +1,15 @@
 //! Autopilot heuristics for playtesting and server-side bot seats: simple,
-//! safe decisions over the public `ClientView`. Pure and synchronous like
+//! safe decisions over the public `ClientView`.
+//!
+//! Pure and synchronous like
 //! the rest of the engine (no I/O, no rand, no clock) - it only reads a view
 //! and the content and returns a command, so the server stays authoritative
 //! and a buggy bot can at worst get its commands rejected. See ADR-0014 for
 //! why this lives in the engine rather than a client.
 //!
 //! Unpredictability comes from the caller: `decide` takes a `noise` word
-//! (any u64 - the session layer/CLI pass a random one) that seeds a local
-//! SplitMix64 stream for the bid jitter. Same inputs, same output - the
+//! (any `u64` - the session layer/CLI pass a random one) that seeds a local
+//! `SplitMix64` stream for the bid jitter. Same inputs, same output - the
 //! engine itself still never draws ambient randomness.
 
 use crate::rng;
@@ -45,6 +47,7 @@ const PRIORITY_PRICE_PCT: i64 = 10;
 /// What the bot wants to do right now, if anything. Pure given its inputs
 /// (`noise` included) and idempotent: called after every server update,
 /// returns `None` whenever it is not this seat's move.
+#[must_use]
 pub fn decide(
     content: &GameContent,
     view: &ClientView,
@@ -75,7 +78,7 @@ pub fn decide(
         _ if view.current != me => None,
         TurnPhase::AwaitMove => {
             if view.players[me].in_jail {
-                bot.jail_action()
+                Some(bot.jail_action())
             } else if let Some(route) = &view.players[me].jail_route
                 && let Some(&value) = route.first()
             {
@@ -90,11 +93,14 @@ pub fn decide(
 
 /// Just the movement-card choice for `seat` (the tile-scoring heuristic
 /// `decide` uses in `AwaitMove`), or `None` when it is not a plain move
-/// (jailed, mid-route, empty hand, or not this seat's turn). The session
+/// (jailed, mid-route, empty hand, or not this seat's turn).
+///
+/// The session
 /// layer uses this to auto-play a timed-out seat's *movement* with bot
 /// smarts instead of the dumb lowest-card canonical action (2026-07) -
 /// deliberately scoped to movement, so an AFK auto-play never spends the
 /// player's money (building, bribing, boosting) behind their back.
+#[must_use]
 pub fn movement_card(content: &GameContent, view: &ClientView, seat: usize) -> Option<u8> {
     if view.current != seat || !matches!(view.turn, TurnPhase::AwaitMove) {
         return None;
@@ -225,17 +231,17 @@ impl Bot<'_> {
     /// freeze, no vote); a bribe when comfortably richer than twice the
     /// reserve it risks; otherwise the safe default, Legal Route in
     /// ascending order.
-    fn jail_action(&self) -> Option<CommandKind> {
+    fn jail_action(&self) -> CommandKind {
         if self.view.players[self.me].jail_cards > 0 {
-            return Some(CommandKind::UseJailCard);
+            return CommandKind::UseJailCard;
         }
         let bribe = RESERVE * 2;
         if self.cash_after(bribe) >= RESERVE * 2 {
-            return Some(CommandKind::OfferBribe { amount: bribe });
+            return CommandKind::OfferBribe { amount: bribe };
         }
         let order: Vec<u8> =
             (self.content.rules.velocity_min..=self.content.rules.velocity_max).collect();
-        Some(CommandKind::ChooseLegalRoute { order })
+        CommandKind::ChooseLegalRoute { order }
     }
 
     /// Accepts a bribe when the per-head payout is material (at least half
@@ -410,7 +416,7 @@ impl Bot<'_> {
         } else {
             prop.price
         };
-        let improvement_value = self.view.tiles[tile].houses as i64 * prop.house_cost;
+        let improvement_value = i64::from(self.view.tiles[tile].houses) * prop.house_cost;
         let strategic = if self.completes_group(tile) {
             prop.price * GROUP_PREMIUM_PCT / 100
         } else {
@@ -441,8 +447,7 @@ impl Bot<'_> {
                 let owned = self
                     .content
                     .group_tiles(&prop.group)
-                    .iter()
-                    .filter(|&&t| self.view.tiles[t].owner == Some(self.me))
+                    .filter(|&t| self.view.tiles[t].owner == Some(self.me))
                     .count();
                 prop.rents[owned.saturating_sub(1).min(5)]
             }
@@ -455,37 +460,32 @@ impl Bot<'_> {
         };
         self.content
             .group_tiles(&prop.group)
-            .iter()
-            .all(|&t| t == tile || self.view.tiles[t].owner == Some(self.me))
+            .all(|t| t == tile || self.view.tiles[t].owner == Some(self.me))
     }
 
     fn owns_full_group(&self, group: &str) -> bool {
         self.content
             .group_tiles(group)
-            .iter()
-            .all(|&t| self.view.tiles[t].owner == Some(self.me))
+            .all(|t| self.view.tiles[t].owner == Some(self.me))
     }
 
     fn owns_full_clean_group(&self, group: &str) -> bool {
         self.content
             .group_tiles(group)
-            .iter()
-            .all(|&t| self.view.tiles[t].owner == Some(self.me) && !self.view.tiles[t].mortgaged)
+            .all(|t| self.view.tiles[t].owner == Some(self.me) && !self.view.tiles[t].mortgaged)
     }
 
     fn group_has_no_houses(&self, group: &str) -> bool {
         self.content
             .group_tiles(group)
-            .iter()
-            .all(|&t| self.view.tiles[t].houses == 0)
+            .all(|t| self.view.tiles[t].houses == 0)
     }
 
     fn can_build_evenly(&self, tile: usize, group: &str) -> bool {
         let min = self
             .content
             .group_tiles(group)
-            .iter()
-            .map(|&t| self.view.tiles[t].houses)
+            .map(|t| self.view.tiles[t].houses)
             .min()
             .unwrap_or(0);
         self.view.tiles[tile].houses == min
@@ -495,444 +495,17 @@ impl Bot<'_> {
         let max = self
             .content
             .group_tiles(group)
-            .iter()
-            .map(|&t| self.view.tiles[t].houses)
+            .map(|t| self.view.tiles[t].houses)
             .max()
             .unwrap_or(0);
         self.view.tiles[tile].houses == max
     }
 }
 
-fn mortgage_redeem_cost(price: i64) -> i64 {
+const fn mortgage_redeem_cost(price: i64) -> i64 {
     let principal = price * MORTGAGE_VALUE_PCT / 100;
     principal + principal * MORTGAGE_INTEREST_PCT / 100
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{GameContent, PlayerView, PropertyDef, RentModel, RuleParams, TileDef, TileState};
-
-    fn content() -> GameContent {
-        let prop = |group: &str| {
-            TileKind::Property(PropertyDef {
-                group: group.into(),
-                price: 100,
-                house_cost: 50,
-                rents: [5, 10, 20, 40, 80, 160],
-                rent_model: RentModel::Houses,
-            })
-        };
-        GameContent {
-            board: vec![
-                TileDef {
-                    id: "go".into(),
-                    name: "Go".into(),
-                    kind: TileKind::Go,
-                },
-                TileDef {
-                    id: "a".into(),
-                    name: "A".into(),
-                    kind: prop("brown"),
-                },
-                TileDef {
-                    id: "b".into(),
-                    name: "B".into(),
-                    kind: prop("brown"),
-                },
-            ],
-            chance: vec![],
-            community: vec![],
-            rules: RuleParams::default(),
-            market_events: vec![],
-            forecast_gap_turns: 0,
-        }
-    }
-
-    fn advanced_content() -> GameContent {
-        let prop = |group: &str, price, house_cost| {
-            TileKind::Property(PropertyDef {
-                group: group.into(),
-                price,
-                house_cost,
-                rents: [10, 50, 150, 450, 625, 750],
-                rent_model: RentModel::Houses,
-            })
-        };
-        GameContent {
-            board: vec![
-                TileDef {
-                    id: "go".into(),
-                    name: "Go".into(),
-                    kind: TileKind::Go,
-                },
-                TileDef {
-                    id: "a".into(),
-                    name: "A".into(),
-                    kind: prop("brown", 100, 50),
-                },
-                TileDef {
-                    id: "b".into(),
-                    name: "B".into(),
-                    kind: prop("brown", 100, 50),
-                },
-                TileDef {
-                    id: "c".into(),
-                    name: "C".into(),
-                    kind: prop("green", 300, 100),
-                },
-            ],
-            chance: vec![],
-            community: vec![],
-            rules: RuleParams {
-                expropriation: 200,
-                rent_boost: 25,
-                ..RuleParams::default()
-            },
-            market_events: vec![],
-            forecast_gap_turns: 0,
-        }
-    }
-
-    fn player(cash: i64) -> PlayerView {
-        PlayerView {
-            id: "p0".into(),
-            name: "P0".into(),
-            cash,
-            position: 0,
-            in_jail: false,
-            jail_cards: 0,
-            bankrupt: false,
-            victory_points: 0,
-            hand: vec![1, 2, 3, 4, 5],
-            jail_route: None,
-            hands_cycled: 0,
-        }
-    }
-
-    fn view(cash: i64, turn: TurnPhase) -> ClientView {
-        ClientView {
-            phase: GamePhase::Active,
-            players: vec![player(cash), player(1500)],
-            current: 0,
-            turn,
-            tiles: vec![TileState::default(); 3],
-            turn_count: 0,
-            pending_trades: vec![],
-            subsidiaries_available: None,
-            conglomerates_available: None,
-            forecast: Default::default(),
-            spotlight: None,
-        }
-    }
-
-    fn advanced_view(cash: i64, turn: TurnPhase) -> ClientView {
-        let mut v = view(cash, turn);
-        v.tiles = vec![TileState::default(); 4];
-        v
-    }
-
-    #[test]
-    fn discoverer_bids_at_least_the_floor_when_affordable_else_abstains() {
-        let c = content();
-        let auction = |bids| TurnPhase::BlindAuction { tile: 1, bids };
-        // Property-based across many noise words: the jittered bid always
-        // sits in [floor, cash] for a solvent discoverer (price 100).
-        for noise in 0..64u64 {
-            let rich = view(1000, auction(vec![None, None]));
-            match decide(&c, &rich, 0, noise) {
-                Some(CommandKind::SubmitBlindBid { amount }) => {
-                    assert!(
-                        (100..=1000).contains(&amount),
-                        "discoverer bid {amount} outside [floor, cash] for noise {noise}"
-                    );
-                }
-                other => panic!("expected a bid, got {other:?}"),
-            }
-        }
-        let broke = view(50, auction(vec![None, None]));
-        assert!(matches!(
-            decide(&c, &broke, 0, 7),
-            Some(CommandKind::SubmitBlindBid { amount: 0 })
-        ));
-    }
-
-    #[test]
-    fn non_discoverer_bids_jittered_or_abstains_then_stays_quiet_once_bid() {
-        let c = content();
-        // The jittered bid stays in [price/2, cash - RESERVE] (price 100),
-        // whatever the noise word.
-        for noise in 0..64u64 {
-            let mut v = view(
-                1000,
-                TurnPhase::BlindAuction {
-                    tile: 1,
-                    bids: vec![None, None],
-                },
-            );
-            v.current = 1; // someone else discovered it; seat 0 is a bidder
-            match decide(&c, &v, 0, noise) {
-                Some(CommandKind::SubmitBlindBid { amount }) => {
-                    assert!(
-                        (50..=900).contains(&amount),
-                        "bid {amount} outside [price/2, cash - reserve] for noise {noise}"
-                    );
-                }
-                other => panic!("expected a bid, got {other:?}"),
-            }
-        }
-
-        let mut v = view(
-            120,
-            TurnPhase::BlindAuction {
-                tile: 1,
-                bids: vec![None, None],
-            },
-        );
-        v.current = 1;
-        // cash - RESERVE = 20 < price/2 = 50: abstain regardless of noise.
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::SubmitBlindBid { amount: 0 })
-        ));
-
-        v.players[0].cash = 1000;
-        v.turn = TurnPhase::BlindAuction {
-            tile: 1,
-            bids: vec![Some(60), None],
-        };
-        assert!(decide(&c, &v, 0, 7).is_none());
-    }
-
-    #[test]
-    fn builds_evenly_on_a_full_group_then_ends_turn() {
-        let c = content();
-        let mut v = view(1000, TurnPhase::AwaitEnd);
-        v.tiles[1] = TileState {
-            owner: Some(0),
-            houses: 1,
-            ..Default::default()
-        };
-        v.tiles[2] = TileState {
-            owner: Some(0),
-            houses: 0,
-            ..Default::default()
-        };
-        // Even rule: the 0-house tile of the group must come first.
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::Build { tile }) if tile == "b"
-        ));
-        // Without the full group, no building: just end the turn.
-        v.tiles[2].owner = Some(1);
-        assert!(matches!(decide(&c, &v, 0, 7), Some(CommandKind::EndTurn)));
-    }
-
-    #[test]
-    fn jail_triage_prefers_card_then_bribe_then_route() {
-        let c = content();
-        let mut v = view(1000, TurnPhase::AwaitMove);
-        v.players[0].in_jail = true;
-
-        // Rich and no card: bribe.
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::OfferBribe { amount: 200 })
-        ));
-
-        // Holding a card takes priority over everything else.
-        v.players[0].jail_cards = 1;
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::UseJailCard)
-        ));
-
-        // Too poor to comfortably bribe and no card: the safe default, an
-        // ascending Legal Route.
-        v.players[0].jail_cards = 0;
-        v.players[0].cash = 150;
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::ChooseLegalRoute { order }) if order == vec![1, 2, 3, 4, 5]
-        ));
-    }
-
-    #[test]
-    fn accepts_only_profitable_incoming_trades() {
-        let c = advanced_content();
-        let mut v = advanced_view(1000, TurnPhase::AwaitMove);
-        v.current = 1;
-        v.pending_trades.push(crate::TradeOffer {
-            id: 1,
-            from: 1,
-            to: 0,
-            give_cash: 100,
-            give_tiles: vec![],
-            receive_cash: 10,
-            receive_tiles: vec![],
-        });
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::AcceptTrade { trade: 1 })
-        ));
-
-        v.pending_trades[0].id = 2;
-        v.pending_trades[0].give_cash = 10;
-        v.pending_trades[0].receive_cash = 100;
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::DeclineTrade { trade: 2 })
-        ));
-    }
-
-    #[test]
-    fn sells_houses_then_mortgages_for_liquidity() {
-        let c = advanced_content();
-        let mut v = advanced_view(50, TurnPhase::AwaitEnd);
-        v.tiles[1] = TileState {
-            owner: Some(0),
-            houses: 1,
-            ..Default::default()
-        };
-        v.tiles[2] = TileState {
-            owner: Some(0),
-            houses: 1,
-            ..Default::default()
-        };
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::SellHouse { tile }) if tile == "a" || tile == "b"
-        ));
-
-        v.tiles[1].houses = 0;
-        v.tiles[2].houses = 0;
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::Mortgage { tile }) if tile == "a" || tile == "b"
-        ));
-    }
-
-    #[test]
-    fn redeems_mortgages_before_new_investments() {
-        let c = advanced_content();
-        let mut v = advanced_view(1000, TurnPhase::AwaitEnd);
-        v.tiles[1] = TileState {
-            owner: Some(0),
-            mortgaged: true,
-            ..Default::default()
-        };
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::Unmortgage { tile }) if tile == "a"
-        ));
-    }
-
-    #[test]
-    fn boosts_owned_rent_when_no_build_is_available() {
-        let c = advanced_content();
-        let mut v = advanced_view(380, TurnPhase::AwaitEnd);
-        v.tiles[3] = TileState {
-            owner: Some(0),
-            ..Default::default()
-        };
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::BoostRent { tile }) if tile == "c"
-        ));
-    }
-
-    #[test]
-    fn seizes_only_when_it_completes_a_group() {
-        let c = advanced_content();
-        let mut v = advanced_view(1000, TurnPhase::AwaitEnd);
-        v.tiles[1].owner = Some(0);
-        v.tiles[2].owner = Some(1);
-        v.players[0].position = 2; // landed on "b", the rival tile
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::Expropriate { tile }) if tile == "b"
-        ));
-
-        v.tiles[1].owner = None;
-        assert!(matches!(decide(&c, &v, 0, 7), Some(CommandKind::EndTurn)));
-    }
-
-    #[test]
-    fn seizes_an_improved_tile_that_completes_a_group() {
-        // ADR-0022: improved tiles are legal takeover targets too.
-        let c = advanced_content();
-        let mut v = advanced_view(1000, TurnPhase::AwaitEnd);
-        v.tiles[1].owner = Some(0);
-        v.tiles[2].owner = Some(1);
-        v.tiles[2].houses = 2;
-        v.players[0].position = 2;
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::Expropriate { tile }) if tile == "b"
-        ));
-    }
-
-    #[test]
-    fn does_not_seize_off_the_landing_tile() {
-        // ADR-0022: takeover only applies to the tile just landed on, even
-        // when a rival tile elsewhere would complete a group.
-        let c = advanced_content();
-        let mut v = advanced_view(1000, TurnPhase::AwaitEnd);
-        v.tiles[1].owner = Some(0);
-        v.tiles[2].owner = Some(1);
-        v.players[0].position = 0; // landed on "go", not on "b"
-        assert!(!matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::Expropriate { .. })
-        ));
-    }
-
-    #[test]
-    fn stays_quiet_when_not_its_move_and_declines_trades() {
-        let c = content();
-        let mut v = view(1000, TurnPhase::AwaitMove);
-        v.current = 1;
-        assert!(decide(&c, &v, 0, 7).is_none());
-        v.pending_trades.push(crate::TradeOffer {
-            id: 7,
-            from: 1,
-            to: 0,
-            give_cash: 1,
-            give_tiles: vec![],
-            receive_cash: 0,
-            receive_tiles: vec![],
-        });
-        assert!(matches!(
-            decide(&c, &v, 0, 7),
-            Some(CommandKind::DeclineTrade { trade: 7 })
-        ));
-    }
-
-    #[test]
-    fn movement_card_picks_the_best_scoring_card_only_for_a_plain_move() {
-        let c = content();
-        // From Go (0), cards 1/2/4/5 all land on a buyable property (top
-        // score); the tie-break takes the lowest, so card 1.
-        let v = view(1500, TurnPhase::AwaitMove);
-        assert_eq!(movement_card(&c, &v, 0), Some(1));
-
-        // Not this seat's turn: no movement.
-        let mut other = view(1500, TurnPhase::AwaitMove);
-        other.current = 1;
-        assert_eq!(movement_card(&c, &other, 0), None);
-
-        // Jailed or mid-route: the caller must use the jail exit / route
-        // front instead, so movement_card declines.
-        let mut jailed = view(1500, TurnPhase::AwaitMove);
-        jailed.players[0].in_jail = true;
-        assert_eq!(movement_card(&c, &jailed, 0), None);
-
-        let mut routed = view(1500, TurnPhase::AwaitMove);
-        routed.players[0].jail_route = Some(vec![2, 1]);
-        assert_eq!(movement_card(&c, &routed, 0), None);
-
-        // Wrong phase (waiting to end the turn): no movement.
-        let ended = view(1500, TurnPhase::AwaitEnd);
-        assert_eq!(movement_card(&c, &ended, 0), None);
-    }
-}
+mod tests;

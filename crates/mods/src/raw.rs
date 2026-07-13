@@ -10,13 +10,13 @@ use std::collections::BTreeMap;
 use crate::ModError;
 
 #[derive(Debug, Default, Deserialize)]
-pub(crate) struct PropertiesFile {
+pub struct PropertiesFile {
     #[serde(default, rename = "tile")]
     pub tiles: Vec<TileRaw>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TileRaw {
+pub struct TileRaw {
     pub id: String,
     pub name: String,
     #[serde(rename = "type")]
@@ -69,7 +69,7 @@ impl TileRaw {
                     RentModel::Houses => self
                         .house_cost
                         .ok_or_else(|| invalid("property requires `house_cost`"))?,
-                    _ => self.house_cost.unwrap_or(0),
+                    RentModel::GroupScaled => self.house_cost.unwrap_or(0),
                 };
                 TileKind::Property(PropertyDef {
                     group: self
@@ -97,7 +97,7 @@ impl TileRaw {
 }
 
 #[derive(Debug, Default, Deserialize)]
-pub(crate) struct CardsFile {
+pub struct CardsFile {
     #[serde(default)]
     pub chance: Vec<CardDef>,
     #[serde(default)]
@@ -105,7 +105,7 @@ pub(crate) struct CardsFile {
 }
 
 #[derive(Debug, Default, Deserialize)]
-pub(crate) struct RulesFile {
+pub struct RulesFile {
     /// Flat named overrides (V1 hook points, architecture section 7.1.2).
     #[serde(default)]
     pub rules: BTreeMap<String, i64>,
@@ -116,7 +116,7 @@ pub(crate) struct RulesFile {
 /// conversion layer needed - its fields are uniform enough (unlike
 /// `TileRaw`, which has many type-conditional optional fields).
 #[derive(Debug, Default, Deserialize)]
-pub(crate) struct EventsFile {
+pub struct EventsFile {
     #[serde(default)]
     pub forecast: ForecastRaw,
     #[serde(default, rename = "event")]
@@ -124,7 +124,7 @@ pub(crate) struct EventsFile {
 }
 
 #[derive(Debug, Default, Deserialize)]
-pub(crate) struct ForecastRaw {
+pub struct ForecastRaw {
     /// `None` when the mod doesn't touch it, distinct from an explicit `0`
     /// - lets `RegistryBuilder` only WARN on a genuine multi-mod conflict.
     #[serde(default)]

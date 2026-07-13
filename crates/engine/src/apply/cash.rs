@@ -5,9 +5,9 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::*;
+use super::{Event, Exec};
 
-impl<'e> Exec<'e> {
+impl Exec<'_> {
     /// Moves `amount` from `debtor` to `creditor` (`None` = bank). Triggers
     /// liquidation, then bankruptcy, when cash cannot stay above the
     /// configured threshold. Semantic events (rent, tax, ...) are emitted by
@@ -19,7 +19,7 @@ impl<'e> Exec<'e> {
         let threshold = self.content.rules.bankruptcy_threshold;
         let needed = amount + threshold;
         if self.st.players[debtor].cash < needed {
-            self.strat.bankruptcy.liquidate(
+            self.strategies.bankruptcy.liquidate(
                 self.content,
                 &mut self.st,
                 debtor,

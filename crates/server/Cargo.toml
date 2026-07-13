@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+# Not crates.io-ready (path deps, no metadata); flip deliberately when publishing.
+publish = false
 
 [[bin]]
 name = "parcello-server"
@@ -15,6 +17,7 @@ parcello-engine = { path = "../engine" }
 parcello-mods = { path = "../mods" }
 parcello-protocol = { path = "../protocol" }
 
+anyhow = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4", features = ["derive", "env"] }
 rand = "0.10"
@@ -39,6 +42,11 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 rusqlite = { version = "0.40", features = ["bundled"] }
 
 [dev-dependencies]
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tempfile = "3"
 # Paused-clock tests for the room task's AFK timer.
 tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

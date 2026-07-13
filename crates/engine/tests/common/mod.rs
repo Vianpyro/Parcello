@@ -137,6 +137,9 @@ pub fn cmd(player: &str, kind: CommandKind) -> PlayerCommand {
     }
 }
 
+// By-value on purpose: ~100 call sites build the command inline and a
+// reference would just add `&` noise to every one.
+#[allow(clippy::needless_pass_by_value)]
 pub fn step(engine: &Engine, st: &GameState, c: PlayerCommand) -> (GameState, Vec<Event>) {
     engine.apply(st, &c).expect("command accepted")
 }
@@ -220,9 +223,15 @@ pub fn offer(
     CommandKind::ProposeTrade {
         to: to.into(),
         give_cash,
-        give_tiles: give_tiles.iter().map(|s| s.to_string()).collect(),
+        give_tiles: give_tiles
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
         receive_cash,
-        receive_tiles: receive_tiles.iter().map(|s| s.to_string()).collect(),
+        receive_tiles: receive_tiles
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
     }
 }
 

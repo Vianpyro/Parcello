@@ -36,7 +36,7 @@ fn monopoly_doubles_unimproved_rent_and_allows_building() {
     assert_eq!(st2.players[0].cash, 1500 - 50);
 
     // Group incomplete after losing a tile: build must be rejected.
-    let mut broken = st2.clone();
+    let mut broken = st2;
     broken.tiles[3].owner = Some(1);
     let err = engine
         .apply(

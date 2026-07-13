@@ -27,25 +27,9 @@ struct Session {
 }
 
 async fn handle_socket(socket: WebSocket, app: AppState) {
-    let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
-
-    // Writer task: serialize outbound messages until the channel closes.
-    let writer = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let json = match serde_json::to_string(&msg) {
-                Ok(json) => json,
-                Err(e) => {
-                    warn!(error = %e, "failed to serialize server message");
-                    continue;
-                }
-            };
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                break;
-            }
-        }
-        let _ = sink.close().await;
-    });
+    let (sink, mut stream) = socket.split();
+    let (tx, rx) = mpsc::unbounded_channel::<ServerMessage>();
+    let writer = spawn_writer(sink, rx);
 
     let mut session: Option<Session> = None;
 
@@ -68,67 +52,15 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
             }
         };
 
-        // Set when the client leaves its room but keeps the socket open; the
-        // session is cleared after the match so a new Create/Join can follow.
-        let mut leave = false;
         match (msg, &session) {
             (ClientMessage::Ping, _) => send(&tx, ServerMessage::Pong),
 
             (ClientMessage::Create { auth, mods }, None) => {
-                let Some(identity) = authenticate(&app, &auth, &tx) else {
-                    continue;
-                };
-                let reconnect = auth.reconnect;
-                let content = match resolve_room_mods(&app, mods).await {
-                    Ok(content) => content,
-                    Err(message) => {
-                        send(&tx, ServerMessage::Error { message });
-                        continue;
-                    }
-                };
-                let code = match create_room(
-                    &app.rooms,
-                    content,
-                    app.history.clone(),
-                    app.turn_timeout,
-                    app.time_bank,
-                    app.game_timeout,
-                )
-                .await
-                {
-                    Ok(code) => code,
-                    Err(message) => {
-                        send(&tx, ServerMessage::Error { message });
-                        continue;
-                    }
-                };
-                send(&tx, ServerMessage::RoomCreated { code: code.clone() });
-                let room = app
-                    .rooms
-                    .read()
-                    .await
-                    .get(&code)
-                    .cloned()
-                    .expect("room registered by create_room");
-                session = try_join(room, identity, reconnect, &tx).await;
+                session = handle_create(&app, auth, mods, &tx).await;
             }
 
             (ClientMessage::Join { code, auth }, None) => {
-                let Some(identity) = authenticate(&app, &auth, &tx) else {
-                    continue;
-                };
-                let reconnect = auth.reconnect;
-                let room = app.rooms.read().await.get(&code.to_uppercase()).cloned();
-                let Some(room) = room else {
-                    send(
-                        &tx,
-                        ServerMessage::Error {
-                            message: format!("no room with code {code}"),
-                        },
-                    );
-                    continue;
-                };
-                session = try_join(room, identity, reconnect, &tx).await;
+                session = handle_join(&app, &code, auth, &tx).await;
             }
 
             (ClientMessage::Create { .. } | ClientMessage::Join { .. }, Some(_)) => {
@@ -140,52 +72,8 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 );
             }
 
-            (ClientMessage::Start, Some(s)) => {
-                let cmd = RoomCmd::Start {
-                    player_id: s.player_id.clone(),
-                };
-                if s.room.send(cmd).await.is_err() {
-                    break;
-                }
-            }
-
-            (ClientMessage::PlayAgain, Some(s)) => {
-                let cmd = RoomCmd::PlayAgain {
-                    player_id: s.player_id.clone(),
-                };
-                if s.room.send(cmd).await.is_err() {
-                    break;
-                }
-            }
-
-            (ClientMessage::AddBot, Some(s)) => {
-                let cmd = RoomCmd::AddBot {
-                    player_id: s.player_id.clone(),
-                };
-                if s.room.send(cmd).await.is_err() {
-                    break;
-                }
-            }
-
-            (ClientMessage::RemoveBot, Some(s)) => {
-                let cmd = RoomCmd::RemoveBot {
-                    player_id: s.player_id.clone(),
-                };
-                if s.room.send(cmd).await.is_err() {
-                    break;
-                }
-            }
-
-            (ClientMessage::Configure { settings }, Some(s)) => {
-                let cmd = RoomCmd::Configure {
-                    player_id: s.player_id.clone(),
-                    settings,
-                };
-                if s.room.send(cmd).await.is_err() {
-                    break;
-                }
-            }
-
+            // Leaving keeps the socket open: the session is cleared so a
+            // new Create/Join can follow on the same connection.
             (ClientMessage::Leave, Some(s)) => {
                 let _ = s
                     .room
@@ -193,54 +81,21 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                         player_id: s.player_id.clone(),
                     })
                     .await;
-                leave = true;
+                session = None;
             }
-            (ClientMessage::Leave, None) => {} // already roomless
 
-            (ClientMessage::Cmd { cmd }, Some(s)) => {
-                let cmd = RoomCmd::Game {
-                    player_id: s.player_id.clone(),
-                    cmd,
-                };
-                if s.room.send(cmd).await.is_err() {
+            // Roomless no-ops: Leave with nothing to leave, and a stray
+            // animation ack (harmless - acks release timers, never gate).
+            (ClientMessage::Leave | ClientMessage::AnimationDone { .. }, None) => {}
+
+            // Everything else is a room-scoped request: relay it verbatim.
+            (msg, Some(s)) => {
+                if s.room.send(relay(msg, &s.player_id)).await.is_err() {
                     break;
                 }
             }
 
-            (ClientMessage::Feedback { rating, comment }, Some(s)) => {
-                let cmd = RoomCmd::Feedback {
-                    player_id: s.player_id.clone(),
-                    rating,
-                    comment,
-                };
-                if s.room.send(cmd).await.is_err() {
-                    break;
-                }
-            }
-
-            (ClientMessage::AnimationDone { through_seq }, Some(s)) => {
-                let cmd = RoomCmd::AnimationDone {
-                    player_id: s.player_id.clone(),
-                    through_seq,
-                };
-                if s.room.send(cmd).await.is_err() {
-                    break;
-                }
-            }
-            // A stray ack with no room is harmless - drop it silently
-            // rather than erroring (it releases timers, never gates them).
-            (ClientMessage::AnimationDone { .. }, None) => {}
-
-            (
-                ClientMessage::Start
-                | ClientMessage::PlayAgain
-                | ClientMessage::AddBot
-                | ClientMessage::RemoveBot
-                | ClientMessage::Configure { .. }
-                | ClientMessage::Cmd { .. }
-                | ClientMessage::Feedback { .. },
-                None,
-            ) => {
+            (_, None) => {
                 send(
                     &tx,
                     ServerMessage::Error {
@@ -248,9 +103,6 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                     },
                 );
             }
-        }
-        if leave {
-            session = None;
         }
     }
 
@@ -265,6 +117,126 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     drop(tx); // Closes the writer task's channel.
     let _ = writer.await;
     debug!("connection closed");
+}
+
+/// Writer task: serialize outbound messages until the channel closes.
+fn spawn_writer(
+    mut sink: futures_util::stream::SplitSink<WebSocket, Message>,
+    mut rx: mpsc::UnboundedReceiver<ServerMessage>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            let json = match serde_json::to_string(&msg) {
+                Ok(json) => json,
+                Err(e) => {
+                    warn!(error = %e, "failed to serialize server message");
+                    continue;
+                }
+            };
+            if sink.send(Message::Text(json.into())).await.is_err() {
+                break;
+            }
+        }
+        let _ = sink.close().await;
+    })
+}
+
+/// Wraps a room-scoped client message into the `RoomCmd` that carries this
+/// connection's bound identity. Exhaustive on purpose: adding a
+/// `ClientMessage` variant must fail compilation here until it is either
+/// relayed or routed in `handle_socket`'s connection-scoped arms.
+fn relay(msg: ClientMessage, player_id: &str) -> RoomCmd {
+    let player_id = player_id.to_owned();
+    match msg {
+        ClientMessage::Start => RoomCmd::Start { player_id },
+        ClientMessage::PlayAgain => RoomCmd::PlayAgain { player_id },
+        ClientMessage::AddBot => RoomCmd::AddBot { player_id },
+        ClientMessage::RemoveBot => RoomCmd::RemoveBot { player_id },
+        ClientMessage::Configure { settings } => RoomCmd::Configure {
+            player_id,
+            settings,
+        },
+        ClientMessage::Cmd { cmd } => RoomCmd::Game { player_id, cmd },
+        ClientMessage::Feedback { rating, comment } => RoomCmd::Feedback {
+            player_id,
+            rating,
+            comment,
+        },
+        ClientMessage::AnimationDone { through_seq } => RoomCmd::AnimationDone {
+            player_id,
+            through_seq,
+        },
+        // Connection-scoped messages are consumed by `handle_socket`'s
+        // earlier arms and can never reach the relay.
+        ClientMessage::Ping
+        | ClientMessage::Create { .. }
+        | ClientMessage::Join { .. }
+        | ClientMessage::Leave => unreachable!("connection-scoped message reached relay"),
+    }
+}
+
+/// Create flow: authenticate, resolve the room's mod set, register the room,
+/// then join the creator to seat 0.
+async fn handle_create(
+    app: &AppState,
+    auth: AuthPayload,
+    mods: Option<Vec<String>>,
+    tx: &ClientTx,
+) -> Option<Session> {
+    let identity = authenticate(app, &auth, tx)?;
+    let content = match resolve_room_mods(app, mods).await {
+        Ok(content) => content,
+        Err(message) => {
+            send(tx, ServerMessage::Error { message });
+            return None;
+        }
+    };
+    let code = match create_room(
+        &app.rooms,
+        content,
+        app.history.clone(),
+        app.turn_timeout,
+        app.time_bank,
+        app.game_timeout,
+    )
+    .await
+    {
+        Ok(code) => code,
+        Err(message) => {
+            send(tx, ServerMessage::Error { message });
+            return None;
+        }
+    };
+    send(tx, ServerMessage::RoomCreated { code: code.clone() });
+    let room = app
+        .rooms
+        .read()
+        .await
+        .get(&code)
+        .cloned()
+        .expect("room registered by create_room");
+    try_join(room, identity, auth.reconnect, tx).await
+}
+
+/// Join flow: authenticate, look the room up by code, take a seat.
+async fn handle_join(
+    app: &AppState,
+    code: &str,
+    auth: AuthPayload,
+    tx: &ClientTx,
+) -> Option<Session> {
+    let identity = authenticate(app, &auth, tx)?;
+    let room = app.rooms.read().await.get(&code.to_uppercase()).cloned();
+    let Some(room) = room else {
+        send(
+            tx,
+            ServerMessage::Error {
+                message: format!("no room with code {code}"),
+            },
+        );
+        return None;
+    };
+    try_join(room, identity, auth.reconnect, tx).await
 }
 
 /// Per-room mod set (ADR-0006): `None` or `[]` selects the server default.

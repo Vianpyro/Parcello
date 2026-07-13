@@ -9,13 +9,14 @@ members = [
 ]
 
 [workspace.package]
-version = "0.15.5"
+version = "0.15.6"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Vianpyro/parcello"
 rust-version = "1.96"
 
 [workspace.dependencies]
+anyhow = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2"
@@ -23,3 +24,28 @@ toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "time", "signal"] }
+
+# Lint baseline shared by every crate (`[lints] workspace = true`). CI runs
+# clippy with `-D warnings`, so everything warned here is enforced. The
+# allows below are the deliberate exceptions - each has a reason; add new
+# ones here (with one) rather than sprinkling #[allow] in code.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Readability judgment calls where the lint's suggestion is usually worse:
+# if-let/else reads better than map_or_else chains for asymmetric branches.
+option_if_let_else = "allow"
+# Short local names near similar ones (st/s, ev/e) are idiomatic here and
+# renaming them padded no clarity in review.
+similar_names = "allow"
+# Casts between the game's index/count domains (seats <= 6, tiles <= 64,
+# u8 hand values) cannot truncate or wrap; converting each site through
+# try_into().expect() would trade real signal for ceremony. Overflow-prone
+# arithmetic is still caught - this only silences the *cast* form lints.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"

@@ -1,0 +1,46 @@
+name: Flutter
+
+# Quality gate for the one client (clients/flutter, ADR-0025). Kept as its
+# own workflow so Rust-only changes never pay the Flutter SDK setup, and
+# vice versa. `flutter analyze` and `flutter test` are the same checks the
+# devcontainer runs locally (see clients/flutter/README.md).
+
+on:
+  push:
+    branches: [main]
+    # Keep the two lists identical (no YAML anchors in GHA).
+    paths:
+      - "clients/flutter/**"
+      - ".github/workflows/flutter.yml"
+  pull_request:
+    paths:
+      - "clients/flutter/**"
+      - ".github/workflows/flutter.yml"
+
+concurrency:
+  group: flutter-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # One job: the SDK setup dominates the runtime, so splitting
+  # analyze/test across runners would only slow things down.
+  check:
+    name: analyze + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/flutter
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter analyze
+      - run: flutter test
+      # The web target is what the server ships (--web-dir); make sure it
+      # still compiles even when nobody built it locally.
+      - run: flutter build web --release

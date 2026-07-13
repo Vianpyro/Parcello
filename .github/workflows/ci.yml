@@ -1,16 +1,70 @@
 name: CI
 
+# Quality gate for the Rust workspace. Branch protection should require the
+# single `CI OK` job - it aggregates every other job, so adding a job here
+# never needs a settings change. The Flutter client has its own workflow
+# (flutter.yml); docs-only changes skip CI entirely via paths-ignore.
+#
+# The weekly cron is a bit-rot canary: fresh RustSec advisories and
+# toolchain drift surface on main without waiting for the next PR.
+
 on:
   push:
     branches: [main]
+    # Keep the two lists identical (GHA has no reliable YAML-anchor
+    # support to share them).
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "LICENSE*"
+      - ".devcontainer/**"
+      - ".claude/**"
+      - "compose*.yml"
+      - ".env.example"
+      - "clients/flutter/**"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "LICENSE*"
+      - ".devcontainer/**"
+      - ".claude/**"
+      - "compose*.yml"
+      - ".env.example"
+      - "clients/flutter/**"
+  schedule:
+    - cron: "40 4 * * 1"
+
+# One run per ref: pushing again cancels the outdated build - except on
+# main, where every commit's result is worth keeping.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  # Incremental compilation only helps local edit-rebuild loops; in CI it
+  # slows the build and bloats the cache.
+  CARGO_INCREMENTAL: "0"
+  # Coverage threshold (line coverage, after COVERAGE_IGNORE). Ratchet
+  # policy: keep 2-3 points of headroom below the measured value (90.9% at
+  # introduction, 2026-07) so one legitimately hard-to-cover module never
+  # blocks a merge; per-PR pressure on NEW code is Codecov's patch status,
+  # not this floor. Never raise it to within 1 point of current.
+  COVERAGE_MIN_LINES: "88"
+  # Out of coverage scope, as documented in README: the CLI is a manual
+  # test harness, main.rs is boot wiring, lan.rs is environment-dependent
+  # multicast I/O (its manual harness is the `discover` bin).
+  COVERAGE_IGNORE: 'crates/cli/|server/src/main\.rs|server/src/lan\.rs'
 
 jobs:
-  test:
-    name: stable / fmt + clippy + test
+  # Format + lints. The workspace [lints] table enforces clippy
+  # pedantic+nursery; -D warnings makes the whole baseline hard here.
+  lint:
+    name: fmt + typos + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -18,15 +72,74 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: typos
       - run: cargo fmt --all --check
+      - run: typos
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test workspace
-        run: cargo test --workspace --locked
+
+  # Tests and coverage in ONE instrumented run (the suite is seconds; a
+  # separate uninstrumented test job would just build everything twice).
+  # Tests are deterministic by design: all randomness flows from seeds
+  # (ADR-0002), and the fuzzer's iteration count is pinned here.
+  test:
+    name: test + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: run tests (instrumented)
+        run: cargo llvm-cov --workspace --locked --no-report
         env:
           PARCELLO_FUZZ_ITERS: 300
+      - name: coverage summary + threshold
+        run: >
+          cargo llvm-cov report --summary-only
+          --ignore-filename-regex "$COVERAGE_IGNORE"
+          --fail-under-lines "$COVERAGE_MIN_LINES"
+      - name: coverage reports (lcov + html)
+        if: always()
+        run: |
+          cargo llvm-cov report --lcov --output-path lcov.info \
+            --ignore-filename-regex "$COVERAGE_IGNORE"
+          cargo llvm-cov report --html \
+            --ignore-filename-regex "$COVERAGE_IGNORE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            lcov.info
+            target/llvm-cov/html
+          retention-days: 14
+      # Diff/patch coverage on PRs (the absolute floor above cannot see
+      # whether NEW code is tested). Non-blocking by design: an external
+      # service outage must never block a merge - the hard gate stays the
+      # local --fail-under-lines. Requires the repo to be enabled on
+      # codecov.io + a CODECOV_TOKEN repo secret (see README).
+      - uses: codecov/codecov-action@v5
+        if: always()
+        continue-on-error: true
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
 
+  # MSRV is a hard constraint (CLAUDE.md): the workspace must build on the
+  # pinned rust-version. `check --all-targets` compiles everything
+  # (tests/benches included) without codegen - the honest, fast gate.
   msrv:
-    name: msrv 1.96 / build
+    name: msrv 1.96 / check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -34,4 +147,56 @@ jobs:
         with:
           toolchain: "1.96"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace --locked
+        with:
+          cache-on-failure: true
+      - run: cargo check --workspace --all-targets --locked
+
+  # Public documentation must build clean: broken intra-doc links and
+  # malformed HTML in doc comments are hard failures.
+  docs:
+    name: rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # Dependency hygiene: no unused deps (machete reads metadata, no build)
+  # and the four cargo-deny gates (deny.toml): RustSec advisories, a
+  # permissive-only license allowlist (commercial distribution is planned
+  # - this automates the old manual release-time cargo-license check),
+  # duplicate-version visibility, and crates.io-only sources.
+  deps:
+    name: deny (advisories/licenses) + unused deps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-machete
+      - run: cargo machete
+      - run: cargo deny check
+
+  # The one required check: green iff every job above is green. Skipped
+  # jobs (docs-only pushes on main) count as success.
+  ci-ok:
+    name: CI OK
+    needs: [lint, test, msrv, docs, deps]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: verify all jobs passed
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "job results: $results"
+          for r in $results; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "a required job ended as: $r" >&2; exit 1 ;;
+            esac
+          done

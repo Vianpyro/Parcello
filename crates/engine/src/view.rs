@@ -1,4 +1,6 @@
-//! Public projection of `GameState` pushed to clients. Deliberately excludes
+//! Public projection of `GameState` pushed to clients.
+//!
+//! Deliberately excludes
 //! the PRNG seed and deck order: exposing either would make dice and card
 //! draws predictable. Cash is public, as in the reference game; trade
 //! offers are visible only to their two parties (ADR-0007), so the session
@@ -11,7 +13,7 @@ use crate::state::{
     GamePhase, GameState, MarketForecast, Spotlight, TileState, TradeOffer, TurnPhase,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClientView {
     pub phase: GamePhase,
     pub players: Vec<PlayerView>,
@@ -38,7 +40,7 @@ pub struct ClientView {
     pub spotlight: Option<Spotlight>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlayerView {
     pub id: String,
     pub name: String,
@@ -73,6 +75,7 @@ pub struct PlayerView {
 impl ClientView {
     /// Projection for one seat: everything public plus only the trade
     /// offers this seat proposed or received.
+    #[must_use]
     pub fn for_seat(state: &GameState, content: &GameContent, seat: usize) -> Self {
         let mut view = Self::of(state, content);
         view.pending_trades
@@ -101,6 +104,7 @@ impl ClientView {
 
     /// Omniscient projection (every open offer). Test/replay tooling only:
     /// the server must always send `for_seat` views.
+    #[must_use]
     pub fn of(state: &GameState, content: &GameContent) -> Self {
         Self {
             phase: state.phase,

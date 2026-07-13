@@ -16,6 +16,10 @@ pub trait ModPlugin {
     fn id(&self) -> &str;
     fn version(&self) -> &str;
     /// Populate registries. Called once at room creation, in load order.
+    ///
+    /// # Errors
+    /// A mod that cannot load its data must fail here; the room creation
+    /// aborts rather than starting with partial content.
     fn on_load(&self, registries: &mut RegistryBuilder) -> Result<(), ModError>;
     /// Called at room teardown. Data-only mods have nothing to release.
     fn on_unload(&self) {}
@@ -29,6 +33,8 @@ pub struct TomlModPlugin {
 }
 
 impl TomlModPlugin {
+    /// # Errors
+    /// Fails when `manifest.toml` is missing, unreadable, or invalid TOML.
     pub fn open(root: &Path) -> Result<Self, ModError> {
         let manifest_path = root.join("manifest.toml");
         let raw = fs::read_to_string(&manifest_path).map_err(|source| ModError::Io {
@@ -46,7 +52,8 @@ impl TomlModPlugin {
         })
     }
 
-    pub fn manifest(&self) -> &ModManifest {
+    #[must_use]
+    pub const fn manifest(&self) -> &ModManifest {
         &self.manifest
     }
 
@@ -118,7 +125,7 @@ fn check_min_version(manifest: &ModManifest) -> Result<(), ModError> {
             running: running.to_string(),
         }),
         (None, _) => {
-            warn!(mod_id = %manifest.id, min_game_version = %required, "unparseable min_game_version, ignoring");
+            warn!(mod_id = %manifest.id, min_game_version = %required, "unparsable min_game_version, ignoring");
             Ok(())
         }
         _ => Ok(()),
