@@ -43,25 +43,28 @@ impl Exec<'_> {
         self.bankrupt(debtor, creditor);
     }
 
+    /// `creditor` is only who receives the debtor's residual *cash* - nobody
+    /// inherits the estate (ADR-0031). Every tile returns to the bank, clean,
+    /// and has to be won back through a sealed-bid auction like any other.
     pub(super) fn bankrupt(&mut self, p: usize, creditor: Option<usize>) {
         self.st.pending_trades.retain(|t| t.from != p && t.to != p);
         let cap = self.content.rules.max_houses_per_property.min(5);
         for tile in 0..self.st.tiles.len() {
             if self.st.tiles[tile].owner == Some(p) {
-                // Bank refurbishes (no compensation), but the shared pools
-                // still get their units back (ADR-0019) - a pure release.
+                // The bank refurbishes (no compensation) and the shared pools
+                // get their units back (ADR-0019) - a pure release. Identical
+                // to the Resign path: a player leaving the game frees the
+                // board, they never hand it to somebody.
                 self.st.release_tile_pools(self.st.tiles[tile].houses, cap);
-                self.st.tiles[tile].owner = creditor;
+                self.st.tiles[tile].owner = None;
                 self.st.tiles[tile].houses = 0;
                 self.st.tiles[tile].boosts = 0;
-                if creditor.is_none() {
-                    // Returned to the bank: sold clean next time.
-                    self.st.tiles[tile].mortgaged = false;
-                }
+                // Sold clean next time: the mortgage dies with the owner.
+                self.st.tiles[tile].mortgaged = false;
                 self.ev.push(Event::PropertyTransferred {
                     tile,
                     from: p,
-                    to: creditor,
+                    to: None,
                 });
             }
         }

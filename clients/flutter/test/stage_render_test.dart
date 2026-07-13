@@ -132,7 +132,8 @@ void main() {
     expect(stage.anchors.resolve(const SeatAnchor(1)), isNotNull);
   });
 
-  testWidgets('a chit travels from a tile to a seat marker', (tester) async {
+  testWidgets('a chit states itself before it travels, then travels',
+      (tester) async {
     final stage = StageState();
     await tester.pumpWidget(harness(stage));
 
@@ -144,16 +145,30 @@ void main() {
     );
     await tester.pump();
     expect(find.text(r'+$120'), findsOneWidget);
+    final source = tester.getCenter(find.text(r'+$120'));
 
-    // It moves, and it is gone once its own animation runs out - the stage must
-    // not leak chits, or a long game accumulates them forever.
-    final start = tester.getCenter(find.text(r'+$120'));
+    // Phase 1 - it holds at its source for the whole hold, so the player can
+    // read how much and from where before anything moves. A chit that sets off
+    // immediately is a number you have to chase.
+    await tester.pump(Motion.chitHold - const Duration(milliseconds: 40));
+    expect(tester.getCenter(find.text(r'+$120')).dx, closeTo(source.dx, 0.5),
+        reason: 'nothing moves during the hold');
+
+    // Phase 2 - now it goes somewhere.
     await tester.pump(const Duration(milliseconds: 250));
-    expect(tester.getCenter(find.text(r'+$120')), isNot(start));
+    expect(tester.getCenter(find.text(r'+$120')).dx, isNot(closeTo(source.dx, 1)));
 
+    // And it is gone once its own animation runs out - the stage must not leak
+    // chits, or a long game accumulates them forever.
     await tester.pumpAndSettle();
     expect(stage.chits, isEmpty);
     expect(find.text(r'+$120'), findsNothing);
+  });
+
+  test('the chit beat is paid for exactly as long as the chit is rendered', () {
+    // A mismatch would let the plan finish - and the ADR-0028 ack fire,
+    // releasing the server's timers - while money is still in the air.
+    expect(Motion.chitHold + Motion.chitTravel, Motion.chit);
   });
 
   testWidgets('recede dims the board but never the subject', (tester) async {

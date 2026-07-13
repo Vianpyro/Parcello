@@ -700,9 +700,14 @@ List<Beat> _beatsFor(
       return [
         ArrestBeat(Arrest(
           title: '${ctx.playerName(p)} is bankrupt',
+          // Nobody inherits (ADR-0031): the estate goes back to the bank and
+          // the board reopens. The creditor took the cash, and only the cash -
+          // that is the whole message, and the table needs it immediately,
+          // because every one of those tiles is about to be up for auction.
           detail: creditor == null
               ? 'The estate returns to the bank.'
-              : '${ctx.playerName(creditor)} takes the estate.',
+              : 'The estate returns to the bank. '
+                  '${ctx.playerName(creditor)} takes the cash.',
           seat: p,
         )),
       ];

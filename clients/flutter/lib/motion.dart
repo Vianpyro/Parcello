@@ -98,8 +98,24 @@ abstract final class Motion {
 
   // -- beats ---------------------------------------------------------------
 
-  /// A travelling chit: money leaving a source and landing on a target.
-  static const chit = Duration(milliseconds: 500);
+  /// A travelling chit reads in two beats, and the first one is the point.
+  ///
+  /// The chit appears at its source and **holds**, long enough to answer "how
+  /// much, and from where", before anything moves. Only then does it travel.
+  /// A chit that sets off immediately is a number you have to chase; a chit
+  /// that states itself first is a number you read. (2026-07 playtest.)
+  static const chitHold = Duration(milliseconds: 500);
+  static const chitTravel = Duration(milliseconds: 500);
+
+  /// What a chit beat costs: the hold plus the journey. Must equal
+  /// `chitHold + chitTravel` - pinned by a test, because a mismatch would let
+  /// the plan finish (and the ack fire) while money is still in the air.
+  static const chit = Duration(milliseconds: 1000);
+
+  /// Where the hold ends, as a fraction of the whole chit. The overlay drives
+  /// its two phases from this, so the split lives in one place.
+  static double get chitHoldFraction =>
+      chitHold.inMilliseconds / chit.inMilliseconds;
 
   /// A card flips face-up and is held long enough to actually read.
   static const cardReveal = Duration(milliseconds: 1200);

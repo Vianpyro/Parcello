@@ -99,24 +99,39 @@ class _ChitView extends StatelessWidget {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: Motion.chit,
-      curve: Motion.arrive,
+      // Linear: the two phases below shape their own timing, and easing the
+      // whole thing would smear the hold into the journey.
+      curve: Curves.linear,
       onEnd: onDone,
       builder: (context, t, child) {
-        final at = Offset.lerp(start, target, t)!;
+        // Two beats, and the first one is the point (motion-language.md 4.2).
+        //
+        //   Phase 1 - STATE. The chit sits at its source. "$120, from that
+        //   tile." Nothing moves, so there is nothing to chase.
+        //   Phase 2 - TRAVEL. Only now does it go somewhere, and by then the
+        //   player already knows what is going where.
+        final hold = Motion.chitHoldFraction;
+        final journey = t <= hold ? 0.0 : (t - hold) / (1 - hold);
+        final moved = Motion.arrive.transform(journey);
+
+        final at = Offset.lerp(start, target, moved)!;
         // Rises as it goes, and fades only at the very end - the number must be
         // readable for most of its life, not for a flicker.
         final lift = chit.kind == ChitKind.victoryPoints ? -18.0 : -10.0;
-        final opacity = t < 0.75 ? 1.0 : (1 - (t - 0.75) / 0.25).clamp(0.0, 1.0);
-        // A boost trap sprang over this money on its way: the value grows in
-        // flight, which is the causal link between "the trap fired" and "that
-        // number is huge".
-        final scale = chit.amplified ? 1 + 0.45 * t : 1.0;
+        // Arrives (fast), holds, leaves. It never blinks in.
+        final appear = (t / 0.08).clamp(0.0, 1.0);
+        final depart = t < 0.88 ? 1.0 : (1 - (t - 0.88) / 0.12).clamp(0.0, 1.0);
+        // A boost trap sprang over this money on its way: the value grows *in
+        // flight*, not while it is being read - the growth is the causal link
+        // between "the trap fired" and "that number is huge", so it has to
+        // happen where the player can see it happening.
+        final scale = chit.amplified ? 1 + 0.45 * moved : 1.0;
         return Positioned(
           left: at.dx - 44,
-          top: at.dy - 14 + lift * t,
+          top: at.dy - 14 + lift * moved,
           width: 88,
           child: Opacity(
-            opacity: opacity,
+            opacity: appear * depart,
             child: Transform.scale(scale: scale, child: child),
           ),
         );

@@ -123,7 +123,8 @@ A window is open. The player's next 5-12 seconds are spent here.
 The substance of the game. Frequent, must be readable at a glance and in
 peripheral vision, must never block.
 
-- **Budget:** 300-700 ms, overlappable.
+- **Budget:** 300-1000 ms, overlappable. A money chit is the long end of
+  that, and deliberately so - see 4.2.
 - **Blocks:** nothing structurally. Beats in this tier may run concurrently
   with each other (section 6).
 - **Visual:** the travelling primitives of section 4. Always source -> target.
@@ -149,7 +150,7 @@ peripheral vision, must never block.
 | --- | --- | --- | --- | --- | --- |
 | P1 | Everyone | 900-2500 ms | Recede + full-board rule | After 400 ms | Exclusive |
 | P2 | The deciders | 400-900 ms | Lift + anchored input | Establish only | Exclusive |
-| P3 | Nobody | 300-700 ms | Travelling primitive | Yes | Concurrent (capped) |
+| P3 | Nobody | 300-1000 ms | Travelling primitive | Yes | Concurrent (capped) |
 | P4 | Nobody | 0-200 ms | Implicit transition | N/A | Free |
 
 ---
@@ -199,6 +200,28 @@ The chit carries its amount in Inter tabular figures. Gain-coloured
 (`pc-sage`) landing on you, loss-coloured (`pc-oxblood`) leaving you. The
 same chit is both, seen from two seats - which is correct, and is exactly
 what makes it legible.
+
+**A chit reads in two beats, and the first one is the point.**
+
+| Phase | Duration | What it is for |
+| --- | --- | --- |
+| **State** | 500 ms | The chit appears **at its source** and *holds*. Nothing moves. "$120, from that tile." |
+| **Travel** | 500 ms | Only now does it go somewhere - and by then the player already knows what is going where. |
+
+This is not padding, and it is the one place in Parcello where a P3 event is
+allowed to take a full second. The reason is that the two questions a money
+event has to answer - *how much* and *between whom* - cannot both be answered
+by a single moving object. A chit that sets off the instant it appears is a
+number you have to **chase**: you read it while it is in motion, against a
+board that is also moving, and at a six-seat table with several transfers in
+flight you read none of them. Holding first splits the questions in time:
+first *what*, then *where to*. (Raised by the owner after the first full
+playtest, 2026-07, and it is the correct call.)
+
+The amplification of a sprung boost trap (4.2, `RentBoostConsumed`) happens
+during **Travel**, never during State - the growth is the causal link between
+"the trap fired" and "that number is huge", so it has to happen where the
+player can watch it happen, not before they have even read the number.
 
 ### 4.3 Shape encodes category
 
@@ -321,11 +344,11 @@ still landing on it).
 **N same-kind events on the same subject collapse into one beat of scaled
 magnitude.** This is not an optimisation - it is a readability rule.
 
-The motivating case: a bankruptcy transfers a whole portfolio, emitting one
+The motivating case: a bankruptcy releases a whole portfolio, emitting one
 `PropertyTransferred` per tile. Eight sequential 400 ms band sweeps is 3.2 s
-of drip. One beat in which **all eight bands sweep to the creditor's colour
-at once, staggered 40 ms**, is 720 ms, and it reads as what it actually was:
-an estate changing hands in one motion. Same for forced liquidation's
+of drip. One beat in which **all eight bands sweep back to no owner at once,
+staggered 40 ms**, is 720 ms, and it reads as what it actually was: a whole
+estate falling off the board in one motion. Same for forced liquidation's
 `HouseSold` burst, and for the bribe payout's N `CashAdjusted` events (one
 chit per opponent, fired together).
 
@@ -393,7 +416,7 @@ transition). "Seat" = the player's marker in the side panel.
 | `TurnStarted` | P2 (you) / P4 | X / - | - -> your seat | seat marker lights; board rule sweeps once | 300 |
 | `MovementCardPlayed` | P3 | X | hand -> board centre | card lifts out of the hand, flips, settles | 350 |
 | `Moved` | P3 | X | tile -> tile | pawn hops tile by tile | 260/tile |
-| `SalaryPaid` | P3 | C | Go tile -> seat | chit (gain) | 450 |
+| `SalaryPaid` | P3 | C | Go tile -> seat | chit (gain) | 1000 |
 | `BlindAuctionOpened` | **P2** | X | tile | **recede + lift**; bid input anchors to tile; edge hairline drains | 700 |
 | `BlindBidSubmitted` | P4 | - | that seat | seat marker gets a sealed dot | 120 |
 | `BlindAuctionResolved` | **P3** | X | all bids -> tile | **bids flip face-up on each seat**, winner's chit travels to tile, band takes their colour | 1100 |
@@ -401,17 +424,17 @@ transition). "Seat" = the player's marker in the side panel.
 | `TradeAccepted` | P3 | C | seat <-> seat | chits + bands cross in both directions simultaneously | 600 |
 | `TradeDeclined` | P4 | - | - | offer card dissolves | 150 |
 | `TradeCancelled` | P4 | - | - | offer card dissolves | 150 |
-| `RentPaid` | **P3** | C | payer pawn -> owner seat | **chit travels** (loss at source, gain at target) | 500 |
-| `TaxPaid` | P3 | C | payer pawn -> tax tile | chit (loss); tile flashes oxblood | 500 |
+| `RentPaid` | **P3** | C | payer pawn -> owner seat | **chit states itself, then travels** (loss at source, gain at target) | 1000 |
+| `TaxPaid` | P3 | C | payer pawn -> tax tile | chit (loss); tile flashes oxblood | 1000 |
 | `CardDrawn` | P3 | X | deck tile -> centre | card flips face-up, held, then discards toward its effect | 1200 |
-| `CashAdjusted` | P3 | C | card banner -> seat | chit | 450 |
+| `CashAdjusted` | P3 | C | card banner -> seat | chit | 1000 |
 | `HouseBuilt` | P3 | C | pool counter -> tile | building icon **rises** into place; pool counter ticks down | 400 |
 | `HouseSold` | P3 | C | tile -> pool counter | building **falls** out; chit to seat; pool ticks up | 400 |
 | `Expropriated` | **P3** (threat) | X | seizer pawn -> tile | band **snaps** to seizer's colour (`easeInCubic`); compensation chit to former owner | 700 |
-| `RentBoosted` | P3 | C | seat -> tile | tile gains a boost pip; chit (loss) to bank | 400 |
+| `RentBoosted` | P3 | C | seat -> tile | tile gains a boost pip; chit (loss) to bank | 1000 |
 | `RentBoostConsumed` | **P3** (threat) | C | tile | **the trap springs**: pips shatter outward, tile flashes oxblood once | 350 |
-| `PropertyMortgaged` | P3 | C | tile -> seat | band **desaturates to hatching**; chit (gain) | 400 |
-| `PropertyUnmortgaged` | P3 | C | seat -> tile | hatching clears; chit (loss) | 400 |
+| `PropertyMortgaged` | P3 | C | tile -> seat | band **desaturates to hatching**; chit (gain) | 1000 |
+| `PropertyUnmortgaged` | P3 | C | seat -> tile | hatching clears; chit (loss) | 1000 |
 | `WentToJail` | P3 | X | `from` -> jail tile | pawn slides straight (never hops); jail bars wipe across the tile | 800 |
 | `JailCardReceived` | P4 | - | seat | a card pip appears on the seat marker | 150 |
 | `JailCardUsed` | P3 | C | seat -> jail tile | card pip flies to the tile and dissolves the bars | 450 |
@@ -421,7 +444,7 @@ transition). "Seat" = the player's marker in the side panel.
 | `BribeVoteCast` | P4 | - | that seat | sealed dot on the seat marker | 120 |
 | `BribeResolved` | **P3** | X | briber -> each opponent | votes flip face-up; on success N chits fan out to every opponent at once (coalesced), bars dissolve | 900 |
 | `PropertyTransferred` | P3 | C | tile | band sweeps to the new owner's colour (**coalesced** across a portfolio) | 400 + 40/tile |
-| `PlayerBankrupt` | **P1** | X | that player | **recede**; pawn greys and lowers; the whole portfolio's bands sweep to the creditor in one motion | 1600 |
+| `PlayerBankrupt` | **P1** | X | that player | **recede**; pawn greys and lowers; the whole portfolio's bands sweep back to *no owner* in one motion (ADR-0031) | 1600 |
 | `PlayerResigned` | P3 | X | that player | pawn greys and lowers (no recede - resigning is not an event *to* the table) | 700 |
 | `GameEnded` | **P1** | X | winner | recede; Deco rule sweeps full width; winner's seat rises | 2000 |
 | `TimeUp` | **P1** | X | clock -> winner | the game clock's hairline empties, then the win beat | 2200 |
@@ -460,14 +483,19 @@ game is built on, and it has no moment.
 **`PlayerBankrupt` (P1) - the only compound P1.**
 
 Recede. The pawn greys and lowers *in place* (it does not leave the board -
-it is a monument). Then the portfolio: every transferred tile's band sweeps
-to the creditor **in one coalesced motion**, staggered 40 ms, so a large
-estate reads as a single event and not a drip. Then the hold. 1600 ms total
-regardless of portfolio size - an 18-tile bankruptcy and a 2-tile one take
-the same time, because the *information* is the same ("X is out, Y took
-everything"), only the magnitude differs, and magnitude is conveyed by how
-much of the board changes colour at once. That is the coalescing rule paying
-for itself.
+it is a monument). Then the portfolio: every released tile's band sweeps back
+to **no owner at all** (ADR-0031 - nobody inherits) **in one coalesced
+motion**, staggered 40 ms, so a large estate reads as a single event and not a
+drip. Then the hold. 1600 ms total regardless of portfolio size - an 18-tile
+bankruptcy and a 2-tile one take the same time, because the *information* is
+the same ("X is out, and all of that is back on the market"), only the
+magnitude differs, and magnitude is conveyed by how much of the board goes
+blank at once. That is the coalescing rule paying for itself.
+
+It is also the rare case where the motion is doing strategic work rather than
+just reporting: the tiles that just went blank are the next few auctions, and
+every seat needs to see *which* ones, immediately, because they are about to
+bid on them.
 
 **`RentBoostConsumed` (ADR-0012, one-shot trap) - the pure "why did that happen?" case.**
 

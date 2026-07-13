@@ -102,6 +102,76 @@ fn unpayable_rent_bankrupts_and_ends_the_game() {
 }
 
 #[test]
+fn bankruptcy_releases_the_estate_to_the_bank_and_only_the_cash_to_the_creditor() {
+    // ADR-0031: nobody inherits. The creditor is whoever happened to own the
+    // tile the debtor landed on - they paid nothing and chose nothing, so
+    // handing them a whole portfolio (and the victory points in it, ADR-0020)
+    // was the biggest luck-driven snowball in the game. The board reopens
+    // instead, and the freed tiles go back through the sealed-bid auction like
+    // anything else.
+    let engine = engine_with(plain_board());
+    let mut st = engine.new_game(
+        vec![
+            ("p0".into(), "P0".into()),
+            ("p1".into(), "P1".into()),
+            ("p2".into(), "P2".into()),
+        ],
+        7,
+    );
+    st.current = 1;
+    st.tiles[6].owner = Some(0); // the creditor's tile: rent 20 (singleton group)
+
+    // The debtor's estate is already fully mortgaged, so liquidation can raise
+    // nothing and the rent really does bankrupt them. All of it must come back
+    // to the bank clean anyway - mortgage and boosts included.
+    st.tiles[2].owner = Some(1);
+    st.tiles[3].owner = Some(1);
+    st.tiles[2].mortgaged = true;
+    st.tiles[3].mortgaged = true;
+    st.tiles[3].boosts = 2;
+    st.players[1].cash = 5;
+    st.players[1].position = 3;
+
+    let (st, ev) = play(&engine, &st, "p1", 3); // lands on 6, cannot pay
+
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::PlayerBankrupt {
+            player: 1,
+            creditor: Some(0)
+        }
+    )));
+    // Every tile released, none inherited.
+    for tile in [2, 3] {
+        assert!(ev.iter().any(|e| matches!(
+            e,
+            Event::PropertyTransferred { tile: t, to: None, .. } if *t == tile
+        )));
+        assert_eq!(st.tiles[tile].owner, None, "tile {tile} back to the bank");
+        assert!(
+            !st.tiles[tile].mortgaged,
+            "the mortgage dies with the owner"
+        );
+        assert_eq!(st.tiles[tile].houses, 0);
+        assert_eq!(st.tiles[tile].boosts, 0);
+    }
+    // The creditor is paid in cash, as far as the debtor could pay - and in
+    // nothing else. Killing a rival is worth their money, not their board.
+    assert_eq!(st.players[0].cash, 1505);
+    assert_eq!(
+        st.tiles[6].owner,
+        Some(0),
+        "the creditor keeps only their own"
+    );
+    assert!(st.players[1].bankrupt);
+    assert_eq!(
+        st.phase,
+        GamePhase::Active,
+        "two players left, game continues"
+    );
+}
+
+#[test]
 fn liquidation_sells_houses_before_bankruptcy() {
     let engine = engine_with(plain_board());
     let mut st = two_players(&engine);

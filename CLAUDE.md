@@ -15,12 +15,13 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0030` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0031` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
    0017-0024 are the v2 ruleset (implemented); 0026 the spotlight; 0028
    the animation-ack watermark (server timers wait for client rendering);
    0030 the client animation budget + motion profiles (paired with
-   `docs/motion-language.md`, the game-feel reference doc).
+   `docs/motion-language.md`, the game-feel reference doc); 0031 a
+   bankruptcy releases the estate to the bank (nobody inherits).
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -71,7 +72,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 163 tests, all must pass
+cargo test  --workspace --locked          # 164 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -337,8 +338,15 @@ turn just ends, retry next turn), and the unchanged jail card
 exit then a normal `PlayMovementCard`; cards stay in the cyclic deck once
 drawn - a count, not tradeable objects). A jailed seat's canonical/AFK
 action is the Legal Route in ascending order. Partial-payment bankruptcy
-with even-aware liquidation (houses then auto-mortgages) and transfer to
-creditor (mortgages carry as-is; bank refurbishes); **trading**
+with even-aware liquidation (houses then auto-mortgages); the estate is
+then RELEASED TO THE BANK, never inherited (ADR-0031, 2026-07): every tile
+goes back unowned/unmortgaged/stripped and must be won again through the
+normal sealed-bid auction, and the creditor gets only the residual cash -
+`Event::PlayerBankrupt { creditor }` now means "who took the cash". Same
+path as `Resign`. Do not reintroduce inheritance: it was the biggest
+luck-driven snowball in the game (the creditor is whoever happened to own
+the tile you landed on, and a portfolio carries its ADR-0020 victory
+points with it); **trading**
 (asynchronous offers, any solvent player any time EXCEPT during a
 `BlindAuction`/`BribeVote`; exempt from turn check like Resign;
 re-validated at acceptance - stale offers reject without mutation; purged

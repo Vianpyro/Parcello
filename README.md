@@ -127,7 +127,7 @@ ADR-0025); only the CLI accepts a pasted token instead.
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
 
 ```sh
-# Rust: 163 tests, formatting, and lints (all must pass before a PR)
+# Rust: 164 tests, formatting, and lints (all must pass before a PR)
 cargo test   --workspace --locked
 cargo fmt    --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -360,9 +360,12 @@ then a normal move the same turn; the decks are immutable cyclic
 shuffles, so drawn cards never leave the rotation). A jailed seat's
 canonical/AFK action is the Legal Route in ascending order - nobody rots
 in jail. Partial-payment bankruptcy with liquidation (houses at
-half cost first, then automatic mortgages, highest value first) and asset
-transfer to the creditor (mortgages carry over as-is; the bank refurbishes
-returned tiles), resignation, last-player-standing win. Optional time-boxed games
+half cost first, then automatic mortgages, highest value first). **Nobody
+inherits an estate** (ADR-0031): a bankruptcy releases every one of the
+debtor's tiles back to the bank, clean (no houses, no boosts, mortgage
+cleared), to be won back through the ordinary sealed-bid auction; the creditor
+receives the debtor's residual *cash* and nothing else. Resignation does the
+same. Last-player-standing win. Optional time-boxed games
 (`--game-timeout`): at the buzzer the richest player by net worth wins
 (cash + property equity + houses), ADR-0010. Aggressive mods-gated
 mechanics for swingy games: expropriation (seize a rival's property at a
