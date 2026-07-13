@@ -1,11 +1,28 @@
 # Sound effects
 
 Drop the sound effect files **in this folder** (`clients/flutter/assets/sfx/`),
-with exactly these names:
+with exactly these names. A missing file is silent, never a crash - so a new
+name below can be added at any time without touching code.
+
+## Earcons (category sounds)
+
+Sound is a property of a beat's **category**, not of the event that produced it
+(`docs/motion-language.md` section 4): one identity per category, reused
+everywhere, so a player absorbs the vocabulary without being taught it. These
+four are the vocabulary; the rest of the table is UI chrome.
+
+| File | Category | Status |
+| --- | --- | --- |
+| `card-draw.mp3` | a chance card is revealed | **missing** - silent today |
+| `cash-gain.mp3` | money arrived **at you** | **missing** - silent today |
+| `cash-loss.mp3` | money left **you** (a third party's money makes no sound: at six seats that is a wall of noise) | **missing** - silent today |
+| `arrest.mp3` | P1 - the table stops (a bankruptcy, a win). One low, long tone; never layered | **missing** - silent today |
+
+## The rest
 
 | File | Played when |
 | --- | --- |
-| `dice-roll.mp3` | a player plays a movement card |
+| `dice-roll.mp3` | a player plays a movement card. **The file name is a leftover**: Parcello has had no dice since ADR-0017, and the clip is a stand-in the audio pass should replace (the code calls this `sfx.cardPlay()`) |
 | `move-pawn-01.mp3` .. `move-pawn-11.mp3` | a pawn hops from tile to tile (one per step, cycling / random) |
 | `stop-pawn-1.mp3` .. `stop-pawn-3.mp3` | a pawn lands on its destination (random) |
 | `button-hover-0.mp3` .. `button-hover-9.mp3` | mouse hovers any button in the app (random) |

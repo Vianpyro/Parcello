@@ -9,12 +9,19 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import 'board.dart' show CashFloater, hopMillis;
+import 'director.dart';
+import 'motion.dart';
 import 'protocol.dart';
 import 'session_storage.dart';
 import 'sfx.dart';
+import 'stage.dart';
 
 class GameSession extends ChangeNotifier {
+  /// What the board is currently *showing*, as opposed to what the server says
+  /// is *true* (`view`). A separate notifier: animation frames repaint the
+  /// board, they must not repaint the action panel's text fields.
+  final StageState stage = StageState();
+
   WebSocketChannel? _ws;
   StreamSubscription? _sub;
 
@@ -119,44 +126,6 @@ class GameSession extends ChangeNotifier {
         ? (voteEndsAt ?? DateTime.now().add(const Duration(seconds: 5)))
         : null;
   }
-
-  /// Latest movement card played, for the center-of-board flash (ADR-0017).
-  /// `cardSeq` bumps on every play so the overlay re-triggers even on a
-  /// repeated value.
-  int cardSeq = 0;
-  int cardValue = 0;
-
-  /// Latest drawn chance/community card text, revealed over the board for a
-  /// beat (ADR-0028) - without it, card effects were invisible and
-  /// card-driven relocations looked like unexplained teleports.
-  int chanceCardSeq = 0;
-  String chanceCardText = '';
-
-  /// Latest spotlighted tile name, for a brief banner (ADR-0026/0028).
-  int spotlightFlashSeq = 0;
-  String spotlightFlashText = '';
-
-  /// Director-driven pawn positions (ADR-0028): the board renders these,
-  /// advanced beat by beat through each Update's events so multi-hop
-  /// chains (chance -> reveal -> teleport) read as separate moments; they
-  /// converge on the authoritative view positions once the Update applies.
-  final Map<int, int> displayPositions = {};
-
-  /// Per-seat "the current move is a straight teleport glide, not a
-  /// tile-by-tile hop" flag (ADR-0028): set on every `moved`/`went_to_jail`
-  /// beat so a "do not pass Go" card slides straight instead of appearing
-  /// to cross the Go corner. Read by the board's pawn layer.
-  final Map<int, bool> pawnGlide = {};
-
-  /// Per-seat "hop the whole way even though it's a long teleport" flag:
-  /// a card that wraps forward through Go always collects salary, so it
-  /// must be seen crossing Go (2026-07 playtest feedback) - otherwise the
-  /// pawn just vanishes and the +$salary floater has no visible cause.
-  final Map<int, bool> pawnForceHop = {};
-
-  /// Transient cash-delta floaters over board tiles (ADR-0028 extras).
-  final List<CashFloater> floaters = [];
-  int _floaterId = 0;
 
   /// Tile the hovered movement card would land on (null = no hover): the
   /// board outlines it so players see where a card takes them before
@@ -324,7 +293,16 @@ class GameSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The tile the last command was about, so a rejection can be shown *on the
+  /// thing that refused* rather than as a log line the player is not reading.
+  /// The wire carries tile ids (`t3`), not indices; the board speaks indices.
+  int? _lastCmdTile;
+
   void sendCmd(Map<String, dynamic> cmd) {
+    final id = cmd['tile'] as String?;
+    final i =
+        id == null ? -1 : (content?.board.indexWhere((t) => t.id == id) ?? -1);
+    _lastCmdTile = i < 0 ? null : i;
     _ws?.sink.add(jsonEncode({'type': 'cmd', 'cmd': cmd}));
   }
 
@@ -417,7 +395,10 @@ class GameSession extends ChangeNotifier {
         _drainUpdates();
       case 'rejected':
         sfx.error();
-        _log('Rejected: ${msg['error']['code']}');
+        // On the thing that said no, not in a modal and not only in the log.
+        final code = (msg['error'] as Map<String, dynamic>)['code'] as String;
+        stage.refuse(_lastCmdTile, code);
+        _log('Rejected: $code');
       case 'error':
         sfx.error();
         if (!joined) loginMessage = msg['message'] as String;
@@ -442,43 +423,71 @@ class GameSession extends ChangeNotifier {
     });
   }
 
-  /// Plays one Update as a sequence of paced beats - pawn slides, card
-  /// reveals, cash floaters - so a multi-event burst (move -> chance card
-  /// -> teleport -> auction) reads as separate moments instead of one
-  /// instant snap. The authoritative view applies only once the beats
-  /// finish, which is also what holds the sealed-bid overlay and the local
-  /// turn countdown back until this client has visually arrived; the final
-  /// ack then releases the server's own gated timers.
+  /// What `compile` needs to know about the world (ADR-0030). Positions come
+  /// from the *stage*, not the view: a beat animates from where the pawn
+  /// visually is, which mid-chain is not where the server says it ended up.
+  CompileCtx _ctx() => CompileCtx(
+        boardLen: content?.board.length ?? 0,
+        jailTile: content?.board.indexWhere((t) => t.kind == 'jail') ?? -1,
+        mySeat: seat,
+        positions: Map.of(stage.pawnAt),
+        tileName: tileName,
+        playerName: playerName,
+        profile: stage.profile,
+      );
+
+  /// Plays one Update: compile the whole burst into a plan, play it, apply the
+  /// authoritative view, ack.
+  ///
+  /// Compiling *before* playing is what makes the budget enforceable (ADR-0030):
+  /// the plan's cost is known before the first frame, so an over-budget Update
+  /// is compressed rather than discovered to be too long halfway through - at
+  /// which point the server would already have un-gated at `ANIM_ACK_CAP` and
+  /// left this client behind the game.
   Future<void> _playUpdate(Map<String, dynamic> msg) async {
     final epoch = _updateEpoch;
     final events = (msg['events'] as List).cast<Map<String, dynamic>>();
-    final animate = view != null && joined;
     for (final e in events) {
       _log(describeEvent(
           e, playerName, tileName, content?.marketEventName ?? (id) => id));
-      if (animate) {
-        await _playBeat(e);
-        if (_disposed || epoch != _updateEpoch) return; // context changed
-      } else if (e['type'] == 'movement_card_played') {
-        // Fresh join, no prior view: show the flash, skip the pacing.
-        cardValue = e['value'] as int;
-        cardSeq++;
-      }
     }
-    // Victory-point deltas float over each player's tile once the beats
-    // are done and the authoritative totals land (ADR-0020 visibility:
-    // covers every source at once - groups completed/lost, conglomerates,
-    // utilities, the round bonus - without re-deriving the scoring).
+
+    if (view != null && joined) {
+      await _execute(compile(events, _ctx()), epoch);
+      if (_disposed || epoch != _updateEpoch) return; // context changed
+    }
+
     final oldVp = [
       for (final p in view?.players ?? const <PlayerView>[]) p.victoryPoints
     ];
     view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
-    _syncDisplayPositions();
-    if (oldVp.isNotEmpty) {
-      for (var i = 0; i < view!.players.length && i < oldVp.length; i++) {
-        _floatVp(i, view!.players[i].victoryPoints - oldVp[i]);
-      }
+    stage.syncPositions([for (final p in view!.players) p.position]);
+
+    // The decision *mode* is derived from the view, not from whatever the beats
+    // left behind: an open window keeps its tile lifted and the board receded
+    // for as long as the player is still deciding, and everything else clears.
+    final turn = view!.turn;
+    stage.settle(decisionTile: switch (turn.type) {
+      'blind_auction' => turn.tile,
+      'bribe_vote' => stage.pawnAt[turn.briber ?? -1],
+      _ => null,
+    });
+
+    // Victory points settle once the authoritative totals land: the aggregate
+    // diff covers every source at once (groups won and lost, conglomerates,
+    // utilities, the round bonus) without re-deriving the scoring client-side.
+    // Gold that moves always means VP - nothing else in the game may.
+    for (var i = 0; i < view!.players.length && i < oldVp.length; i++) {
+      final delta = view!.players[i].victoryPoints - oldVp[i];
+      if (delta == 0) continue;
+      stage.addChit(
+        from: TileAnchor(stage.pawnAt[i] ?? 0),
+        to: SeatAnchor(i),
+        text: '${delta > 0 ? '+' : '-'}${delta.abs()} VP',
+        kind: ChitKind.victoryPoints,
+      );
     }
+
     turnEndsAt = _deadlineFrom(_effectiveTurnSeconds());
     banks = (msg['banks'] as List?)?.cast<int>();
     _trackTimedWindows();
@@ -494,145 +503,72 @@ class GameSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// One event's visual beat: mutate the display state, notify, then wait
-  /// for however long that visual runs. Events with no visual fall through
-  /// instantly.
-  Future<void> _playBeat(Map<String, dynamic> e) async {
-    switch (e['type']) {
-      case 'movement_card_played':
-        cardValue = e['value'] as int;
-        cardSeq++;
-        sfx.diceRoll();
-        notifyListeners();
-      // The pawn slide itself follows in this Update's `moved` beat.
-      case 'moved':
-        final p = e['player'] as int;
-        final from = e['from'] as int? ?? displayPositions[p] ?? 0;
-        final to = e['to'] as int;
-        // A forward wrap that collects salary (`passed_go`) always
-        // crossed Go - it must hop the whole way, even for a long card
-        // teleport, or the +$salary floater has no visible cause
-        // (2026-07 playtest feedback). A wrap WITHOUT salary ("do not
-        // pass Go") is the opposite case: it must glide straight instead
-        // of appearing to hop through Go. Every moved beat sets both so a
-        // later plain walk never inherits a stale flag from either.
-        final n = content?.board.length ?? 0;
-        final wraps = n > 0 && from + ((to - from) % n) >= n;
-        final passedGo = e['passed_go'] == true;
-        pawnGlide[p] = wraps && !passedGo;
-        pawnForceHop[p] = wraps && passedGo;
-        displayPositions[p] = to;
-        notifyListeners();
-        await Future.delayed(_moveDuration(from, to,
-            straight: pawnGlide[p]!, forceHop: pawnForceHop[p]!));
-      case 'went_to_jail':
-        final p = e['player'] as int;
-        final jail = content?.board.indexWhere((t) => t.kind == 'jail') ?? -1;
-        // The jail hop is a teleport - always a straight slide.
-        pawnGlide[p] = true;
-        pawnForceHop[p] = false;
-        if (jail >= 0) displayPositions[p] = jail;
-        notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 1100));
-      case 'card_drawn':
-        chanceCardText = e['text'] as String? ?? '';
-        chanceCardSeq++;
-        notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 1700));
-      case 'spotlight_started':
-        // Naming a tile alone didn't explain what happened (2026-07
-        // playtest feedback) - spell out the actual effect.
-        final pct = e['rent_pct'] as int;
-        final turns = e['duration_turns'] as int;
-        final span = turns <= 0
-            ? 'until the next Exposition landing'
-            : 'for $turns turns';
-        spotlightFlashText =
-            '${tileName(e['tile'] as int)} is in the spotlight!\n'
-            '+$pct% rent $span';
-        spotlightFlashSeq++;
-        notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 1800));
-      case 'salary_paid':
-        _floatCash(e['player'] as int, e['amount'] as int);
-        await Future.delayed(const Duration(milliseconds: 500));
-      case 'rent_paid':
-        _floatCash(e['from'] as int, -(e['amount'] as int));
-        await Future.delayed(const Duration(milliseconds: 500));
-      case 'tax_paid':
-        _floatCash(e['player'] as int, -(e['amount'] as int));
-        await Future.delayed(const Duration(milliseconds: 500));
-      case 'cash_adjusted':
-        _floatCash(e['player'] as int, e['delta'] as int);
-        await Future.delayed(const Duration(milliseconds: 500));
+  /// Runs a plan against the clock. Mirrors `Plan.cost` exactly - an exclusive
+  /// beat holds the plan open, a concurrent one rides alongside and only costs
+  /// whatever of it outlasts the last exclusive beat - so what we waited for is
+  /// always what we costed.
+  Future<void> _execute(Plan plan, int epoch) async {
+    stage.beginPlan();
+    var tail = Duration.zero;
+    for (final beat in plan.beats) {
+      beat.apply(stage);
+      if (beat is ArrestBeat) stage.markArrest();
+      _sound(beat);
+      // A skipped plan still applies every beat - only the waiting stops. State
+      // is never lost, only its journey (ADR-0030).
+      if (stage.skipping) continue;
+      if (beat.lane == Lane.exclusive) {
+        tail = Duration.zero;
+        if (beat.cost > Duration.zero) {
+          await Future<void>.delayed(beat.cost);
+          if (_disposed || epoch != _updateEpoch) return;
+        }
+      } else if (beat.cost > tail) {
+        tail = beat.cost;
+      }
+    }
+    if (tail > Duration.zero && !stage.skipping) {
+      await Future<void>.delayed(tail);
     }
   }
 
-  /// Mirrors `_PawnLayer`'s hop timing (`hopMillis`, plus its 260ms
-  /// wind-up) so a beat waits for the glide it just triggered. A straight
-  /// glide (teleport) matches the layer's fixed 700ms slide.
-  Duration _moveDuration(int from, int to,
-      {bool straight = false, bool forceHop = false}) {
-    final n = content?.board.length ?? 0;
-    if (n == 0) return const Duration(milliseconds: 700);
-    final forward = (to - from) % n;
-    final glide = (!straight && (forceHop || (forward >= 1 && forward <= 12)))
-        ? hopMillis(forward)
-        : 700;
-    return Duration(milliseconds: 260 + glide + 150);
-  }
-
-  /// Spawns a rising "+$X"/"-$X" over the player's current tile (ADR-0028
-  /// extras); removes it once its own animation has run out.
-  void _floatCash(int player, int amount) {
-    if (amount == 0) return;
-    final sign = amount > 0 ? '+' : '-';
-    _float(player, '$sign\$${amount.abs()}', gain: amount > 0);
-  }
-
-  /// Spawns a rising "+N VP"/"-N VP" over the player's tile: the VP race is
-  /// the primary win condition (ADR-0020) but its gains were invisible -
-  /// nobody understood when or why points moved (2026-07 playtest).
-  void _floatVp(int player, int delta) {
-    if (delta == 0) return;
-    final sign = delta > 0 ? '+' : '-';
-    _float(player, '$sign${delta.abs()} VP', gain: delta > 0, vp: true);
-  }
-
-  void _float(int player, String text, {required bool gain, bool vp = false}) {
-    final tile = displayPositions[player] ??
-        view?.players.elementAtOrNull(player)?.position ??
-        0;
-    final f = CashFloater(
-        id: _floaterId++, tile: tile, text: text, gain: gain, vp: vp);
-    floaters.add(f);
-    notifyListeners();
-    Timer(const Duration(milliseconds: 1200), () {
-      if (_disposed) return;
-      floaters.remove(f);
-      notifyListeners();
-    });
-  }
-
-  void _syncDisplayPositions() {
-    final v = view;
-    if (v == null) return;
-    for (var i = 0; i < v.players.length; i++) {
-      displayPositions[i] = v.players[i].position;
+  /// Sound is a property of the beat's *category*, not of the event that
+  /// produced it - one earcon per category, reused everywhere, so a player
+  /// learns the vocabulary without being taught it.
+  void _sound(Beat beat) {
+    switch (beat) {
+      case CardPlayBeat():
+        sfx.cardPlay();
+      case BannerBeat():
+        sfx.cardDraw();
+      case ChitBeat(:final kind):
+        // A third party's money is visible, not audible: sounding every
+        // transfer at a six-seat table is a wall of noise. Only what happens
+        // to *you* makes a sound.
+        if (kind == ChitKind.gain) sfx.gain();
+        if (kind == ChitKind.loss) sfx.loss();
+      case ArrestBeat():
+        sfx.arrest();
+      case ThreatBeat():
+        sfx.error();
+      // Movement sounds per hop from the pawn layer itself; the rest are
+      // silent by design - a sound per beat would be a wall of noise.
+      case MoveBeat() || JailBeat() || FocusBeat():
+      case BidRevealBeat() || BandSweepBeat():
+        break;
     }
   }
 
-  /// Aborts any in-flight beat sequence and clears the director's
-  /// transient state - called whenever the room context changes.
+  /// Aborts any in-flight plan and snaps the stage to truth - called whenever
+  /// the room context changes. A reconnecting client renders the present, never
+  /// a replay of the past: animating twenty seconds of missed events would
+  /// spend its whole budget on history while it is already late for the
+  /// decision in front of it.
   void _resetDirector() {
     _updateEpoch++;
     _pendingUpdates.clear();
     _animating = false;
-    floaters.clear();
-    displayPositions.clear();
-    pawnGlide.clear();
-    pawnForceHop.clear();
-    _syncDisplayPositions();
+    stage.reset([for (final p in view?.players ?? const <PlayerView>[]) p.position]);
   }
 
   DateTime? _deadlineFrom(dynamic secs) =>

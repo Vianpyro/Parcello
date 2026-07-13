@@ -1,39 +1,22 @@
-/// Board rendering: classic 40-tile counter-clockwise ring on an 11x11 grid
-/// (same cell walk as the reference web client), wrap fallback for modded
-/// board sizes. Pure projection of content + view; taps bubble up. Pawns
-/// live in an animated overlay (`_PawnLayer`) that glides them tile by tile
-/// so a move is actually visible.
+/// Board rendering: a `4*(d-1)` square ring (32 -> 9x9, 40 -> 11x11), wrap
+/// fallback for other modded sizes. A pure projection of content + view +
+/// stage; taps bubble up.
+///
+/// The board is the protagonist (`docs/motion-language.md` 2): every animation
+/// starts or ends on something drawn here, and the camera never moves.
+/// Attention is expressed by exactly three devices - frame, lift, recede - and
+/// nothing else.
 library;
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'motion.dart';
 import 'protocol.dart';
 import 'sfx.dart';
-
-const pawnColors = [
-  Color(0xFFC0564F),
-  Color(0xFF3D7DC0),
-  Color(0xFF4D9E5A),
-  Color(0xFFC8963F),
-  Color(0xFF8A5FB3),
-  Color(0xFF4FA3A8),
-];
-
-const _groupColors = <String, Color>{
-  'brown': Color(0xFF8A5A3B),
-  'lightblue': Color(0xFF8FC7E8),
-  'pink': Color(0xFFD76FA3),
-  'orange': Color(0xFFE08A3C),
-  'red': Color(0xFFC0564F),
-  'yellow': Color(0xFFE0C93C),
-  'green': Color(0xFF4D9E5A),
-  'navy': Color(0xFF3B5A8A),
-  'utility': Color(0xFF2A9D8F),
-  'transit': Color(0xFF444444),
-  'works': Color(0xFF999999),
-};
+import 'stage.dart';
+import 'tokens.dart';
 
 /// A board of `n` tiles renders as a square ring when `n` is `4*(d-1)`
 /// for a `d`x`d` grid (32 -> 9x9, 40 -> 11x11, ...).
@@ -49,46 +32,20 @@ int ringSide(int n) => n ~/ 4 + 1; // the `d` above
   return (r: i - 3 * d + 4, c: d); // right column down
 }
 
-/// One transient cash delta ("+$200" / "-$50") rising over a tile
-/// (ADR-0028 extras). Owned by the session's animation director; the board
-/// only renders whatever is currently alive.
-class CashFloater {
-  final int id;
-  final int tile;
-  /// Rendered as-is ("+$200", "-$50", "+2 VP").
-  final String text;
-  final bool gain;
-  /// Victory-point deltas render gold instead of green/red (ADR-0020: the
-  /// race is the game, so its feedback gets its own colour).
-  final bool vp;
-  const CashFloater({
-    required this.id,
-    required this.tile,
-    required this.text,
-    required this.gain,
-    this.vp = false,
-  });
-}
-
 class BoardWidget extends StatefulWidget {
   final GameContent content;
   final ClientView? view;
   final int? mySeat;
   final void Function(int tile) onTileTap;
+
   /// Whether tapping this tile would actually offer an action - gates the
-  /// hover outline below (no highlight promising something a tap can't do).
+  /// hover outline (no highlight promising something a tap cannot do).
   final bool Function(int tile) canAct;
-  /// Director-driven pawn positions (ADR-0028), advanced beat by beat;
-  /// falls back to the view's authoritative positions when absent.
-  final Map<int, int> pawnPositions;
-  /// Per-seat "glide straight, don't hop" flag for the current move (a
-  /// teleport, or a "do not pass Go" card); see `GameSession.pawnGlide`.
-  final Map<int, bool> pawnGlide;
-  /// Per-seat "hop the whole way even if it's a long teleport" flag: a
-  /// card that wraps forward through Go; see `GameSession.pawnForceHop`.
-  final Map<int, bool> pawnForceHop;
-  /// Live cash floaters (ADR-0028 extras).
-  final List<CashFloater> floaters;
+
+  /// What the board is currently *showing*: pawn positions mid-chain, the
+  /// focused tile, the recede, bands in the middle of changing hands.
+  final StageState stage;
+
   /// Tile to outline as a movement destination (hovered hand card), if any.
   final int? highlightTile;
   final Widget center;
@@ -100,10 +57,7 @@ class BoardWidget extends StatefulWidget {
     required this.mySeat,
     required this.onTileTap,
     required this.canAct,
-    this.pawnPositions = const {},
-    this.pawnGlide = const {},
-    this.pawnForceHop = const {},
-    this.floaters = const [],
+    required this.stage,
     this.highlightTile,
     required this.center,
   });
@@ -113,10 +67,12 @@ class BoardWidget extends StatefulWidget {
 }
 
 class _BoardWidgetState extends State<BoardWidget> {
-  /// Tile currently under the pointer, or null. A plain field (not a
-  /// StatefulBuilder-local one) so it survives rebuilds triggered by a new
-  /// server `Update` while the mouse hasn't moved.
+  /// Tile currently under the pointer. A plain field (not StatefulBuilder-local)
+  /// so it survives rebuilds triggered by a server Update while the mouse has
+  /// not moved.
   int? _hoveredTile;
+
+  final _ringKey = GlobalKey();
 
   List<PawnData> _pawns() {
     final v = widget.view;
@@ -126,8 +82,8 @@ class _BoardWidgetState extends State<BoardWidget> {
         if (!v.players[s].bankrupt)
           PawnData(
             seat: s,
-            color: pawnColors[s % pawnColors.length],
-            position: widget.pawnPositions[s] ?? v.players[s].position,
+            color: pawnColor(s),
+            position: widget.stage.pawnAt[s] ?? v.players[s].position,
             label: v.players[s].name.isEmpty
                 ? '${s + 1}'
                 : v.players[s].name.characters.first.toUpperCase(),
@@ -135,8 +91,34 @@ class _BoardWidgetState extends State<BoardWidget> {
     ];
   }
 
+  /// Hands the stage a way to turn a tile index into a screen point, so a chit
+  /// can fly from a board tile to a seat marker in the side panel. Only this
+  /// widget knows the ring geometry.
+  void _installAnchors(int d, double w, double h) {
+    widget.stage.anchors.tiles = (tile) {
+      final box = _ringKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize || tile < 0) return null;
+      final c = cellOf(tile, d);
+      return box.localToGlobal(Offset((c.c - 0.5) * w, (c.r - 0.5) * h));
+    };
+  }
+
+  /// The board subscribes to the stage itself rather than relying on a caller
+  /// to wrap it - a component handed a notifier should listen to it, and one
+  /// that quietly does not is a footgun (it renders a stale frame and nothing
+  /// says why).
+  ///
+  /// `center` is a widget built by the *caller*, so on an animation frame it is
+  /// the same instance and Flutter reuses its element untouched. That is what
+  /// keeps the action panel's text fields out of the repaint path: the board
+  /// repaints forty times a second, the half-typed bid inside it does not.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: widget.stage,
+        builder: (context, _) => _build(context),
+      );
+
+  Widget _build(BuildContext context) {
     final n = widget.content.board.length;
     if (!isSquareRing(n)) return _wrapLayout();
     final d = ringSide(n); // grid is d x d
@@ -144,7 +126,8 @@ class _BoardWidgetState extends State<BoardWidget> {
       aspectRatio: 1,
       child: LayoutBuilder(builder: (context, box) {
         final w = box.maxWidth / d, h = box.maxHeight / d;
-        return Stack(children: [
+        _installAnchors(d, w, h);
+        return Stack(key: _ringKey, children: [
           Positioned(
             left: w,
             top: h,
@@ -153,7 +136,8 @@ class _BoardWidgetState extends State<BoardWidget> {
             child: Container(
               margin: const EdgeInsets.all(2),
               padding: const EdgeInsets.all(8),
-              color: const Color(0xFFDFE7D8),
+              // The centre plaza (visual-identity.md), not a white sheet.
+              color: Pc.sage,
               child: widget.center,
             ),
           ),
@@ -165,63 +149,16 @@ class _BoardWidgetState extends State<BoardWidget> {
               height: h,
               child: _tile(i, cellW: w),
             ),
-          // Animated pawns ride on top of the tiles.
           Positioned.fill(
             child: _PawnLayer(
-                side: d,
-                cellW: w,
-                cellH: h,
-                pawns: _pawns(),
-                glide: widget.pawnGlide,
-                forceHop: widget.pawnForceHop),
+                side: d, cellW: w, cellH: h, pawns: _pawns(), stage: widget.stage),
           ),
-          // Rising cash deltas over their tiles (ADR-0028 extras).
-          for (final f in widget.floaters) _floater(f, w, h, d),
         ]);
       }),
     );
   }
 
-  Widget _floater(CashFloater f, double w, double h, int d) {
-    final c = cellOf(f.tile, d);
-    final color = f.vp
-        ? const Color(0xFFA9812F)
-        : f.gain
-            ? const Color(0xFF2F6F3E)
-            : const Color(0xFFC0564F);
-    return Positioned(
-      left: (c.c - 1) * w,
-      top: (c.r - 1) * h,
-      width: w,
-      height: h,
-      child: IgnorePointer(
-        child: TweenAnimationBuilder<double>(
-          key: ValueKey(f.id),
-          tween: Tween(begin: 0, end: 1),
-          duration: const Duration(milliseconds: 1100),
-          builder: (context, t, _) => Opacity(
-            opacity: t < 0.6 ? 1 : (1 - (t - 0.6) / 0.4).clamp(0.0, 1.0),
-            child: Transform.translate(
-              offset: Offset(0, -h * 0.4 * t),
-              child: Center(
-                child: Text(
-                  f.text,
-                  style: TextStyle(
-                    fontSize: (w * 0.16).clamp(13.0, 18.0),
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                    shadows: const [Shadow(color: Colors.white, blurRadius: 4)],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Non-40 boards (mods): plain wrap, the center panel goes below. Pawns are
+  // Non-ring boards (mods): plain wrap, the centre panel goes below. Pawns are
   // drawn statically in-tile here (no ring geometry to glide along).
   Widget _wrapLayout() {
     return Column(children: [
@@ -231,23 +168,24 @@ class _BoardWidgetState extends State<BoardWidget> {
         children: [
           for (var i = 0; i < widget.content.board.length; i++)
             SizedBox(
-                width: 110, height: 96, child: _tile(i, cellW: 110, staticPawns: true)),
+                width: 110,
+                height: 96,
+                child: _tile(i, cellW: 110, staticPawns: true)),
         ],
       ),
       const SizedBox(height: 8),
       Expanded(
         child: Container(
           padding: const EdgeInsets.all(8),
-          color: const Color(0xFFDFE7D8),
+          color: Pc.sage,
           child: widget.center,
         ),
       ),
     ]);
   }
 
-  /// Whether `owner` holds every tile of `group` - drives the "SET"
-  /// full-group badge (the classic unimproved x2 was invisible before:
-  /// 2026-07 playtest feedback).
+  /// Whether `owner` holds every tile of `group` - drives the "SET" badge (the
+  /// unimproved x2 was invisible before).
   bool _ownsFullGroup(int owner, String? group) {
     if (group == null) return false;
     final v = widget.view;
@@ -262,132 +200,185 @@ class _BoardWidgetState extends State<BoardWidget> {
   }
 
   Widget _tile(int i, {required double cellW, bool staticPawns = false}) {
+    final st = widget.stage;
     final def = widget.content.board[i];
     final ts = widget.view?.tiles.elementAtOrNull(i);
-    // The Exposition corner's spotlight (ADR-0026): fully public, so this
-    // check needs no seat-masking, unlike ts?.owner.
     final spotlit = widget.view?.spotlight?.tile == i;
     final hovering = _hoveredTile == i && widget.canAct(i);
-    // Movement-card hover: outline where the hovered card would land.
     final dest = widget.highlightTile == i;
-    final fullGroup =
-        ts?.owner != null && _ownsFullGroup(ts!.owner!, def.group);
-    // Text scales with the cell so it stays legible on any window size.
+    final fullGroup = ts?.owner != null && _ownsFullGroup(ts!.owner!, def.group);
+
+    // The three attention devices, and nothing else (motion-language.md 2).
+    final lifted = st.focusTile == i; // "act on this tile"
+    final framed = st.frameTile == i; // "this tile is the subject"
+    final receded = st.recede && !lifted; // "nothing else matters right now"
+    final threatened = st.threatTiles.contains(i); // something was done to it
+
+    // Ownership is the band. A tile changing hands sweeps its band to the new
+    // owner's colour; until the sweep lands, the view still says the old owner.
+    final sweepTo = st.sweeping[i];
+    final owner = sweepTo ?? ts?.owner;
+
     final nameSize = (cellW * 0.115).clamp(11.0, 17.0);
     final metaSize = (cellW * 0.095).clamp(9.0, 13.0);
     final bandH = (cellW * 0.11).clamp(9.0, 18.0);
     final ownerSz = (cellW * 0.13).clamp(9.0, 16.0);
+
+    // The band is the group colour; a full gold band marks the group-scaled
+    // "utility" tiles. Non-properties get no band at all.
     final band = def.isProperty
-        ? (_groupColors[def.group] ?? const Color(0xFF777777))
-        : const Color(0xFFB9C2B0);
+        ? (groupColors[def.group] ?? Pc.textFaint)
+        : Pc.borderMuted;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hoveredTile = i),
       onExit: (_) {
-        // Guard against an adjacent tile's onEnter firing before this
-        // tile's onExit - only clear if we're still the hovered one.
+        // Guard against an adjacent tile's onEnter firing before this tile's
+        // onExit - only clear if we are still the hovered one.
         if (_hoveredTile == i) setState(() => _hoveredTile = null);
       },
-      child: Container(
-        // A separate outer ring from the inner ownership/spotlight border
-        // below, so the hover outline never competes with those for the
-        // same edge - it just frames the whole tile when relevant. The
-        // card-destination outline wins over the can-act hover.
-        decoration: BoxDecoration(
-          border: dest
-              ? Border.all(color: const Color(0xFF3D7DC0), width: 3)
-              : hovering
-                  ? Border.all(color: const Color(0xFF3D7DC0), width: 1.5)
-                  : null,
-          borderRadius: BorderRadius.circular(3),
-        ),
-        child: GestureDetector(
-          onTap: () => widget.onTileTap(i),
+      child: _Refusable(
+        // "No" is a physical gesture, and it belongs on the thing that said it.
+        // The only lateral shake in the game.
+        active: st.refuseTile == i,
+        seq: st.refuseSeq,
+        child: AnimatedOpacity(
+        opacity: receded ? 0.35 : 1,
+        duration: Motion.establish,
+        curve: Motion.deliberate,
+        child: AnimatedScale(
+          scale: lifted ? 1.06 : 1,
+          duration: Motion.establish,
+          curve: Motion.deliberate,
           child: Container(
-            margin: const EdgeInsets.all(1),
             decoration: BoxDecoration(
-              color: const Color(0xFFF4F7EF),
-              borderRadius: BorderRadius.circular(2),
-              border: spotlit
-                  ? Border.all(color: const Color(0xFFD8B45A), width: 3)
-                  : ts?.owner != null && ts!.owner == widget.mySeat
-                      ? Border.all(color: const Color(0xFF2F6F3E), width: 2)
+              border: dest
+                  ? Border.all(color: Pc.gold, width: 3)
+                  : hovering
+                      ? Border.all(color: Pc.gold, width: 1.5)
                       : null,
+              borderRadius: Pc.radius,
             ),
-            child: Stack(children: [
-              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Container(height: bandH, color: band),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 3, 4, 0),
-                    child: Text(
-                      def.name,
-                      maxLines: 3,
-                      style: TextStyle(
-                        fontSize: nameSize,
-                        height: 1.1,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF1E1E1E),
+            child: GestureDetector(
+              onTap: () => widget.onTileTap(i),
+              child: AnimatedContainer(
+                duration: Motion.refuse,
+                curve: Motion.threat, // snaps in, lingers
+                margin: const EdgeInsets.all(1),
+                decoration: BoxDecoration(
+                  // Property faces are card-stock parchment, never white.
+                  color: threatened
+                      ? Pc.oxblood
+                      : def.isProperty
+                          ? Pc.parchment
+                          : Pc.surface,
+                  borderRadius: Pc.radius,
+                  border: Border.all(
+                    color: lifted
+                        ? Pc.gold
+                        : spotlit
+                            ? Pc.gold
+                            : framed
+                                ? Pc.goldDark
+                                : owner != null && owner == widget.mySeat
+                                    ? Pc.sage
+                                    : Colors.transparent,
+                    width: lifted || spotlit ? 3 : 2,
+                  ),
+                  boxShadow: lifted ? Pc.hairShadow : null,
+                ),
+                child: Stack(children: [
+                  Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // The band sweeps to the new owner's colour on a
+                        // transfer; ownership is never announced in a popup.
+                        AnimatedContainer(
+                          duration: Motion.bandSweep,
+                          curve: Motion.arrive,
+                          height: bandH,
+                          color: owner != null && def.isProperty
+                              ? Color.lerp(band, pawnColor(owner), 0.55)!
+                              : band,
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 3, 4, 0),
+                            child: Text(
+                              def.name,
+                              maxLines: 3,
+                              style: TextStyle(
+                                fontSize: nameSize,
+                                height: 1.1,
+                                fontWeight: FontWeight.w600,
+                                color: def.isProperty
+                                    ? Pc.parchmentInk
+                                    : Pc.text,
+                              ),
+                              overflow: TextOverflow.fade,
+                            ),
+                          ),
+                        ),
+                        if (ts != null && ts.houses > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 3),
+                            child: Row(children: [
+                              if (ts.houses >= 5)
+                                Icon(Icons.apartment,
+                                    size: metaSize + 5, color: Pc.sage)
+                              else
+                                for (var h = 0; h < ts.houses; h++)
+                                  Icon(Icons.home,
+                                      size: metaSize + 3, color: Pc.sage),
+                            ]),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 0, 4, 3),
+                          child: Text(
+                            _meta(def, ts,
+                                spotlit: spotlit, fullGroup: fullGroup),
+                            style: TextStyle(
+                              fontSize: metaSize,
+                              fontWeight: FontWeight.w700,
+                              color: ts?.mortgaged == true
+                                  ? Pc.oxblood
+                                  : spotlit
+                                      ? Pc.goldDark
+                                      : def.isProperty
+                                          ? Pc.textFaint
+                                          : Pc.textMuted,
+                            ),
+                          ),
+                        ),
+                      ]),
+                  if (spotlit)
+                    const Positioned(
+                        top: 2,
+                        left: 2,
+                        child: Icon(Icons.auto_awesome,
+                            size: 12, color: Pc.goldDark)),
+                  if (owner != null)
+                    Positioned(
+                      top: 2,
+                      right: 2,
+                      child: AnimatedContainer(
+                        duration: Motion.bandSweep,
+                        curve: Motion.arrive,
+                        width: ownerSz,
+                        height: ownerSz,
+                        decoration: BoxDecoration(
+                          color: pawnColor(owner),
+                          borderRadius: Pc.radius,
+                          border: Border.all(color: Pc.parchmentInk, width: 0.5),
+                        ),
                       ),
-                      overflow: TextOverflow.fade,
                     ),
-                  ),
-                ),
-                // Buildings as icons, not text markers (2026-07 playtest
-                // feedback): one house each, a single tower at the top
-                // (conglomerate) level.
-                if (ts != null && ts.houses > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 3),
-                    child: Row(children: [
-                      if (ts.houses >= 5)
-                        Icon(Icons.apartment,
-                            size: metaSize + 5, color: const Color(0xFF2F6F3E))
-                      else
-                        for (var h = 0; h < ts.houses; h++)
-                          Icon(Icons.home,
-                              size: metaSize + 3,
-                              color: const Color(0xFF2F6F3E)),
-                    ]),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 3),
-                  child: Text(
-                    _meta(def, ts, spotlit: spotlit, fullGroup: fullGroup),
-                    style: TextStyle(
-                      fontSize: metaSize,
-                      fontWeight: FontWeight.w700,
-                      color: ts?.mortgaged == true
-                          ? const Color(0xFFC0564F)
-                          : spotlit
-                              ? const Color(0xFFA9812F)
-                              : const Color(0xFF555555),
-                    ),
-                  ),
-                ),
-              ]),
-              if (spotlit)
-                Positioned(
-                  top: 2,
-                  left: 2,
-                  child: Text('✨', style: TextStyle(fontSize: ownerSz)),
-                ),
-              if (ts?.owner != null)
-                Positioned(
-                  top: 2,
-                  right: 2,
-                  child: Container(
-                    width: ownerSz,
-                    height: ownerSz,
-                    decoration: BoxDecoration(
-                      color: pawnColors[ts!.owner! % pawnColors.length],
-                      borderRadius: BorderRadius.circular(2),
-                      border: Border.all(color: Colors.black26),
-                    ),
-                  ),
-                ),
-              if (staticPawns) _staticPawns(i),
-            ]),
+                  if (staticPawns) _staticPawns(i),
+                ]),
+              ),
+            ),
           ),
+        ),
         ),
       ),
     );
@@ -399,7 +390,7 @@ class _BoardWidgetState extends State<BoardWidget> {
     final here = [
       for (var s = 0; s < v.players.length; s++)
         if (!v.players[s].bankrupt &&
-            (widget.pawnPositions[s] ?? v.players[s].position) == i)
+            (widget.stage.pawnAt[s] ?? v.players[s].position) == i)
           s,
     ];
     return Positioned(
@@ -412,9 +403,9 @@ class _BoardWidgetState extends State<BoardWidget> {
             height: 16,
             margin: const EdgeInsets.only(right: 3),
             decoration: BoxDecoration(
-              color: pawnColors[s % pawnColors.length],
+              color: pawnColor(s),
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 1.5),
+              border: Border.all(color: Pc.parchment, width: 1.5),
             ),
           ),
       ]),
@@ -431,15 +422,61 @@ class _BoardWidgetState extends State<BoardWidget> {
     if (def.isProperty) parts.add('\$${def.price}');
     if (def.amount != null) parts.add('pay \$${def.amount}');
     if (def.minPct != null) parts.add('${def.minPct}-${def.maxPct}% NW');
-    // Full colour group: the classic rule doubles UNIMPROVED rent only -
-    // surface it ("SET x2"), and keep a plain "SET" marker once houses
-    // take over the escalation.
-    if (fullGroup) parts.add((ts?.houses ?? 0) == 0 ? 'SET ×2' : 'SET');
-    if (ts != null && ts.boosts > 0) parts.add('⚡${ts.boosts}');
+    // The classic rule doubles UNIMPROVED rent only - surface it, and keep a
+    // plain marker once houses take over the escalation.
+    if (fullGroup) parts.add((ts?.houses ?? 0) == 0 ? 'SET x2' : 'SET');
+    if (ts != null && ts.boosts > 0) parts.add('BOOST ${ts.boosts}');
     if (ts?.mortgaged == true) parts.add('MORT.');
-    if (spotlit) parts.add('✨ SPOTLIGHT');
-    return parts.join(' ');
+    if (spotlit) parts.add('SPOTLIGHT');
+    return parts.join('  ');
   }
+}
+
+/// Shakes its child once when the server refuses a command about it.
+///
+/// The only lateral shake in Parcello. Everywhere else motion resolves and
+/// stops - but "no" is a physical gesture, and an error that appears in a log
+/// the player is not reading, or in a modal that interrupts them, is an error
+/// they have to *hunt* for. It belongs on the thing that said it.
+class _Refusable extends StatefulWidget {
+  final bool active;
+  final int seq;
+  final Widget child;
+  const _Refusable(
+      {required this.active, required this.seq, required this.child});
+
+  @override
+  State<_Refusable> createState() => _RefusableState();
+}
+
+class _RefusableState extends State<_Refusable>
+    with SingleTickerProviderStateMixin {
+  late final _ctrl =
+      AnimationController(vsync: this, duration: Motion.refuse);
+
+  @override
+  void didUpdateWidget(_Refusable old) {
+    super.didUpdateWidget(old);
+    if (widget.active && widget.seq != old.seq) _ctrl.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _ctrl,
+        child: widget.child,
+        builder: (context, child) => Transform.translate(
+          // Three shakes, damped to nothing: a refusal, not a tantrum.
+          offset: Offset(
+              math.sin(_ctrl.value * math.pi * 6) * 3 * (1 - _ctrl.value), 0),
+          child: child,
+        ),
+      );
 }
 
 class PawnData {
@@ -455,38 +492,23 @@ class PawnData {
   });
 }
 
-/// Total hop-animation time for a `forward`-tile trip: the normal,
-/// perceptible 260ms/tile rate up to 12 tiles (a real movement-card play
-/// never exceeds the velocity deck's max, well under that), and a
-/// tapering, faster rate beyond it so a long forced hop (a card teleport
-/// wrapping through Go) stays brisk rather than taking several seconds.
-/// Public (not `_PawnLayerState`-private) so `GameSession._moveDuration`
-/// can mirror it exactly for the beat's `await`.
-int hopMillis(int forward) => forward <= 12
-    ? (forward * 260).clamp(400, 3200)
-    : (900 + forward * 60).clamp(900, 2400);
-
 /// Overlay that draws each pawn and animates it when its tile changes.
-/// A normal move (short forward distance) hops tile by tile around the
-/// ring; a teleport (card, jail, backward) slides straight to the target.
+///
+/// A normal move hops tile by tile - the count is the information, and a player
+/// should be able to count it. A teleport slides straight. Which of the two a
+/// given move gets is decided by the director (the truth rule: motion may not
+/// imply a path the engine did not take), and handed over on the stage.
 class _PawnLayer extends StatefulWidget {
   final int side; // ring grid dimension (d)
   final double cellW, cellH;
   final List<PawnData> pawns;
-  /// Per-seat "glide straight, don't hop" hint for the current move.
-  final Map<int, bool> glide;
-  /// Per-seat "hop the whole way even if it's a long teleport" hint: a card
-  /// that wraps forward through Go always collects salary, so it must be
-  /// seen crossing Go or the salary floater reads as coming from nowhere
-  /// (2026-07 playtest feedback).
-  final Map<int, bool> forceHop;
+  final StageState stage;
   const _PawnLayer({
     required this.side,
     required this.cellW,
     required this.cellH,
     required this.pawns,
-    this.glide = const {},
-    this.forceHop = const {},
+    required this.stage,
   });
 
   @override
@@ -505,8 +527,6 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
   int get _boardLen => 4 * (widget.side - 1);
   final Map<int, _PawnAnim> _anims = {};
 
-  /// Creates a pawn animation with the SFX hooks: a per-tile step sound as
-  /// the glide crosses each square, a landing sound on completion.
   _PawnAnim _makeAnim(int pos) {
     final anim = _PawnAnim(AnimationController(vsync: this), pos);
     anim.ctrl.addListener(() => _onTick(anim));
@@ -539,47 +559,47 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
     super.didUpdateWidget(old);
     for (final p in widget.pawns) {
       final a = _anims.putIfAbsent(p.seat, () => _makeAnim(p.position));
-      if (p.position != a.target) {
-        _animate(a, p.position,
-            straight: widget.glide[p.seat] == true,
-            forceHop: widget.forceHop[p.seat] == true);
-      }
+      if (p.position != a.target) _animate(a, p.seat, p.position);
     }
   }
 
-  void _animate(_PawnAnim a, int to, {bool straight = false, bool forceHop = false}) {
+  void _animate(_PawnAnim a, int seat, int to) {
+    final st = widget.stage;
     final from = a.target;
     a.lastHopSeg = 0;
-    final forward = (to - from) % _boardLen; // 0..39
-    final List<int> path;
-    // `straight` forces a glide even for a short forward distance: a "do
-    // not pass Go" card can move only a few tiles yet must not appear to
-    // hop through the Go corner. `forceHop` is the opposite override: a
-    // card teleport that wraps through Go always collects salary, so it
-    // must hop the whole way even if the distance is long - otherwise the
-    // pawn just vanishes and the +$salary floater has no visible cause.
-    if (!straight && (forceHop || (forward >= 1 && forward <= 12))) {
-      // Hop each tile so the pawn follows the border. ~260ms per tile for
-      // a normal short move, eased per hop (see _offsetOf) so the
-      // step-by-step travel reads clearly rather than as one fast glide.
-      // A forced long hop (wrapping through Go) tapers the per-tile time
-      // down instead, so crossing a quarter of the board doesn't take
-      // several seconds - still visibly a hop, just a brisk one.
-      path = [for (var k = 0; k <= forward; k++) (from + k) % _boardLen];
-      a.ctrl.duration = Duration(milliseconds: hopMillis(forward));
-    } else {
-      // Teleport / backward / long jump that doesn't cross Go: glide
-      // straight to the target.
-      path = [from, to];
-      a.ctrl.duration = const Duration(milliseconds: 700);
-    }
+    final forward = (to - from) % _boardLen;
+    final straight = st.glide[seat] == true;
+    final forceHop = st.forceHop[seat] == true;
+
+    // The single source of truth for how long this takes is `Motion` - the
+    // director costed the beat from the same constants. They used to be derived
+    // independently and could silently drift.
+    final hops = !straight &&
+        (forceHop || (forward >= 1 && forward <= Motion.hopTaperFrom));
+    final base = hops ? Motion.hop(forward) : Motion.glide;
+    final scaled = base * st.hopScale;
+
+    final path = hops
+        ? [for (var k = 0; k <= forward; k++) (from + k) % _boardLen]
+        : [from, to];
+
+    a.ctrl.duration = scaled;
     a.target = to;
-    // Reset to 0 now so the pawn holds at its START square during the beat
-    // below (otherwise it lingers at the previous move's end = 1.0).
+    // Reset now so the pawn holds at its START square during the wind-up
+    // (otherwise it lingers at the previous move's end = 1.0).
     a.ctrl.reset();
     setState(() => a.waypoints = path);
-    // A short beat between the move landing and the pawn setting off.
-    Future.delayed(const Duration(milliseconds: 260), () {
+
+    if (scaled == Duration.zero) {
+      // Instant profile, or a beat the budget compressor zeroed: snap. The
+      // state is never lost, only its journey.
+      setState(() => a.waypoints = [to]);
+      return;
+    }
+
+    // A beat between the command landing and the pawn setting off, so the move
+    // reads as a decision followed by a consequence rather than one blur.
+    Future.delayed(Motion.hopWindUp * st.hopScale, () {
       if (!mounted || a.target != to) return; // superseded by a newer move
       a.ctrl.forward(from: 0).whenComplete(() {
         if (mounted) setState(() => a.waypoints = [a.target]);
@@ -597,9 +617,10 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
     if (pts.length == 1) return pts.first;
     final p = a.ctrl.value * (pts.length - 1);
     final seg = p.floor().clamp(0, pts.length - 2);
-    // Ease within each tile-to-tile segment so the pawn "hops" from square
-    // to square instead of gliding at constant speed.
-    final eased = Curves.easeInOut.transform(p - seg);
+    // Ease within each tile-to-tile segment so the pawn hops from square to
+    // square instead of gliding at constant speed. No bounce: motion resolves
+    // and stops.
+    final eased = Motion.arrive.transform(p - seg);
     return Offset.lerp(pts[seg], pts[seg + 1], eased)!;
   }
 
@@ -635,16 +656,14 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: p.color,
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 2),
-          boxShadow: const [
-            BoxShadow(color: Colors.black45, blurRadius: 3, offset: Offset(0, 1)),
-          ],
+          border: Border.all(color: Pc.text, width: 2),
+          boxShadow: Pc.hairShadow,
         ),
         child: Center(
           child: Text(
             p.label,
             style: TextStyle(
-              color: Colors.white,
+              color: Pc.text,
               fontWeight: FontWeight.bold,
               fontSize: size * 0.5,
             ),

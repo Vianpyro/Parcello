@@ -9,10 +9,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'board.dart';
+import 'motion.dart';
 import 'oidc.dart';
+import 'overlay.dart';
 import 'protocol.dart';
 import 'session.dart';
 import 'sfx.dart';
+import 'stage.dart';
+import 'tokens.dart';
 import 'lan_discovery.dart';
 import 'server_manager.dart';
 
@@ -28,11 +32,23 @@ class ParcelloApp extends StatelessWidget {
       title: 'Parcello',
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF1C1F26),
+        scaffoldBackgroundColor: Pc.bg,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFD8B45A),
+          seedColor: Pc.gold,
           brightness: Brightness.dark,
-        ),
+        ).copyWith(surface: Pc.surface, error: Pc.oxblood),
+        // Sharp corners everywhere: no pills, no soft blobs. Art direction, not
+        // preference (`docs/visual-identity.md`).
+        cardTheme: const CardThemeData(
+            shape: RoundedRectangleBorder(borderRadius: Pc.radius)),
+        filledButtonTheme: FilledButtonThemeData(
+            style: FilledButton.styleFrom(
+                shape: const RoundedRectangleBorder(borderRadius: Pc.radius))),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+                shape: const RoundedRectangleBorder(borderRadius: Pc.radius))),
+        dialogTheme: const DialogThemeData(
+            shape: RoundedRectangleBorder(borderRadius: Pc.radius)),
       ),
       home: ListenableBuilder(
         listenable: session,
@@ -147,11 +163,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       style: TextStyle(
                           fontSize: 30,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFFD8B45A))),
+                          color: Pc.gold)),
                   const SizedBox(height: 2),
                   const Text('Connect to a server',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Color(0xFF9AA3B2))),
+                      style: TextStyle(color: Pc.textMuted)),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _url,
@@ -182,7 +198,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   const SizedBox(height: 8),
                   Text(s.loginMessage,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Color(0xFF9AA3B2))),
+                      style: const TextStyle(color: Pc.textMuted)),
                 ],
               ),
             ),
@@ -215,7 +231,7 @@ class _MenuScreenState extends State<MenuScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Parcello'),
-        backgroundColor: const Color(0xFF262B35),
+        backgroundColor: Pc.surface2,
         actions: [
           TextButton.icon(
             onPressed: s.disconnectFromServer,
@@ -242,7 +258,7 @@ class _MenuScreenState extends State<MenuScreen> {
                             style: TextStyle(
                                 fontSize: 12,
                                 letterSpacing: 1,
-                                color: Color(0xFF9AA3B2))),
+                                color: Pc.textMuted)),
                         const SizedBox(height: 10),
                         wideButton('Create a game',
                             () => s.createGame(mods: _parseMods())),
@@ -287,7 +303,7 @@ class _MenuScreenState extends State<MenuScreen> {
                               style: TextStyle(
                                   fontSize: 12,
                                   letterSpacing: 1,
-                                  color: Color(0xFF9AA3B2))),
+                                  color: Pc.textMuted)),
                           const SizedBox(height: 10),
                           wideButton('Browse public games', () {
                             Navigator.push(
@@ -305,7 +321,7 @@ class _MenuScreenState extends State<MenuScreen> {
                           const SizedBox(height: 6),
                           const Text('Coming soon.',
                               style: TextStyle(
-                                  fontSize: 12, color: Color(0xFF9AA3B2))),
+                                  fontSize: 12, color: Pc.textMuted)),
                         ],
                       ),
                     ),
@@ -314,7 +330,7 @@ class _MenuScreenState extends State<MenuScreen> {
                 const SizedBox(height: 10),
                 Text(s.loginMessage,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Color(0xFFC0564F))),
+                    style: const TextStyle(color: Pc.oxblood)),
               ],
             ),
           ),
@@ -338,45 +354,76 @@ class GameScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The action panel lives inside the board's centre, and it holds text
+    // fields a player types into. It is built HERE, once per server update, and
+    // handed to the stage listener below as a `child` - so an animation frame
+    // repaints the board without ever touching it. Sharing one notifier between
+    // transient visual state and durable input state is what used to wipe a
+    // half-typed bid out from under the player.
+    final centre = _CenterPanel(s: s);
+
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(
-            child: Stack(alignment: Alignment.center, children: [
-              BoardWidget(
-                content: s.content!,
-                view: s.view,
-                mySeat: s.seat,
-                onTileTap: (i) => _tileMenu(context, i),
-                canAct: _hasTileActions,
-                pawnPositions: s.displayPositions,
-                pawnGlide: s.pawnGlide,
-                pawnForceHop: s.pawnForceHop,
-                floaters: s.floaters,
-                highlightTile: s.hoverTile,
-                center: _CenterPanel(s: s),
-              ),
-              // Played movement card, floating over the middle of the board.
-              _CardFlash(seq: s.cardSeq, value: s.cardValue),
-              // Drawn chance/community card, revealed for a beat before its
-              // effect plays out (ADR-0028).
-              _BannerFlash(seq: s.chanceCardSeq, text: s.chanceCardText),
-              // Spotlight announcement (ADR-0026), offset below the card
-              // banner so back-to-back beats never overlap.
-              Transform.translate(
-                offset: const Offset(0, 90),
-                child: _BannerFlash(
-                  seq: s.spotlightFlashSeq,
-                  text: '✨ ${s.spotlightFlashText}',
-                  hold: const Duration(milliseconds: 1600),
+      // Motion never gates input, and a player who has seen enough may say so:
+      // Escape skips the plan in flight (the remaining beats apply instantly -
+      // state is never lost, only its journey).
+      body: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): s.stage.requestSkip,
+        },
+        child: Focus(
+          autofocus: true,
+          child: Stack(children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(
+                  child: Stack(alignment: Alignment.center, children: [
+                    // The board subscribes to the stage itself; `centre` is
+                    // built out here, so on an animation frame it is the same
+                    // widget instance and its element - text fields and all -
+                    // is reused untouched.
+                    BoardWidget(
+                      content: s.content!,
+                      view: s.view,
+                      mySeat: s.seat,
+                      onTileTap: (i) => _tileMenu(context, i),
+                      canAct: _hasTileActions,
+                      stage: s.stage,
+                      highlightTile: s.hoverTile,
+                      center: centre,
+                    ),
+                    ListenableBuilder(
+                      listenable: s.stage,
+                      builder: (context, _) =>
+                          Stack(alignment: Alignment.center, children: [
+                        // The played movement card. The one action a player
+                        // takes every turn, so it is the one that gets weight.
+                        _CardFlash(
+                            seq: s.stage.cardSeq, value: s.stage.cardValue),
+                        // Card reveals, spotlight and market announcements all
+                        // share one banner: same shape, same place, every time.
+                        // A player should never have to work out *where* the
+                        // game is about to tell them something.
+                        _BannerFlash(
+                            seq: s.stage.bannerSeq,
+                            text: s.stage.bannerText,
+                            kind: s.stage.bannerKind),
+                      ]),
+                    ),
+                  ]),
                 ),
-              ),
-            ]),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(width: 340, child: _SidePanel(s: s)),
-        ]),
+                const SizedBox(width: 12),
+                SizedBox(width: 340, child: _SidePanel(s: s)),
+              ]),
+            ),
+            // Chits crossing from the board to the side panel, and the P1
+            // arrest. Above everything, because money travelling from a tile to
+            // a seat marker crosses both subtrees - which is exactly why a
+            // board-local floater could never express the money rule.
+            StageOverlay(stage: s.stage),
+          ]),
+        ),
       ),
     );
   }
@@ -512,22 +559,35 @@ class _CenterPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTextStyle(
-      style: const TextStyle(color: Color(0xFF2A2A2A), fontSize: 13),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Text('PARCELLO',
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
-          const Spacer(),
-          // Shown for the whole game, end included: the final time left is
-          // part of the result (a bankruptcy win keeps time on the clock).
-          if (s.gameEndsAt != null) ...[
-            _Countdown(endsAt: s.gameEndsAt!),
-            const SizedBox(width: 8),
-          ],
-          const _MuteButton(),
-        ]),
+    // A dark plate on the sage plaza: the HUD is a panel *on* the board, not a
+    // hole in it. (The plaza itself stays sage - `docs/visual-identity.md`.)
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Pc.surface,
+        borderRadius: Pc.radius,
+        border: Border.all(color: Pc.goldDark, width: 1.5),
+      ),
+      child: DefaultTextStyle(
+        style: const TextStyle(color: Pc.text, fontSize: 13),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Text('PARCELLO',
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 3,
+                    color: Pc.gold)),
+            const Spacer(),
+            // Shown for the whole game, end included: the final time left is
+            // part of the result (a bankruptcy win keeps time on the clock).
+            if (s.gameEndsAt != null) ...[
+              _Countdown(endsAt: s.gameEndsAt!),
+              const SizedBox(width: 8),
+            ],
+            _MotionButton(s: s),
+            const _MuteButton(),
+          ]),
         const SizedBox(height: 4),
         Row(children: [
           Expanded(
@@ -578,30 +638,31 @@ class _CenterPanel extends StatelessWidget {
                 paused: s.isAnimating),
           ],
         ]),
-        if (_poolsLine() != null) ...[
-          const SizedBox(height: 2),
-          Text(_poolsLine()!,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
-        ],
-        if (_forecastLine() != null) ...[
-          const SizedBox(height: 2),
-          Text(_forecastLine()!,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
-        ],
-        if (_spotlightLine() != null) ...[
-          const SizedBox(height: 2),
-          Text(_spotlightLine()!,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
-        ],
-        if (_vpLegend() != null) ...[
+          if (_poolsLine() != null) ...[
+            const SizedBox(height: 2),
+            Text(_poolsLine()!,
+                style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+          ],
+          if (_forecastLine() != null) ...[
+            const SizedBox(height: 2),
+            Text(_forecastLine()!,
+                style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+          ],
+          if (_spotlightLine() != null) ...[
+            const SizedBox(height: 2),
+            Text(_spotlightLine()!,
+                style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+          ],
+          if (_vpLegend() != null) ...[
+            const SizedBox(height: 6),
+            _vpLegend()!,
+          ],
           const SizedBox(height: 6),
-          _vpLegend()!,
-        ],
-        const SizedBox(height: 6),
-        _Actions(s: s),
-        const SizedBox(height: 6),
-        Expanded(child: _EventLog(log: s.log)),
-      ]),
+          _Actions(s: s),
+          const SizedBox(height: 6),
+          Expanded(child: _EventLog(log: s.log)),
+        ]),
+      ),
     );
   }
 
@@ -620,16 +681,16 @@ class _CenterPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: const Color(0xFFD8B45A).withValues(alpha: 0.12),
+        color: Pc.gold.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: const Color(0xFFD8B45A), width: 1),
+        border: Border.all(color: Pc.gold, width: 1),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('VICTORY POINTS  ·  first to $target wins',
             style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFA9812F),
+                color: Pc.goldDark,
                 letterSpacing: 1)),
         const SizedBox(height: 3),
         for (final (pts, what) in rows)
@@ -642,11 +703,11 @@ class _CenterPanel extends StatelessWidget {
                     style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFFA9812F))),
+                        color: Pc.goldDark)),
               ),
               Expanded(
                 child: Text(what,
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF444444))),
+                    style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
               ),
             ]),
           ),
@@ -687,7 +748,7 @@ class _CenterPanel extends StatelessWidget {
             style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFA9812F),
+                color: Pc.goldDark,
                 letterSpacing: 1)),
         const SizedBox(width: 8),
         // One pip per surviving player: filled once they have cycled their
@@ -699,21 +760,21 @@ class _CenterPanel extends StatelessWidget {
             margin: const EdgeInsets.only(right: 3),
             decoration: BoxDecoration(
               color: done.contains(i)
-                  ? pawnColors[i % pawnColors.length]
+                  ? pawnColor(i)
                   : Colors.transparent,
               shape: BoxShape.circle,
               border: Border.all(
-                  color: pawnColors[i % pawnColors.length], width: 1.5),
+                  color: pawnColor(i), width: 1.5),
             ),
           ),
         const SizedBox(width: 4),
         Text('${done.length}/${alive.length} hands cycled',
-            style: const TextStyle(fontSize: 10, color: Color(0xFF666666))),
+            style: const TextStyle(fontSize: 10, color: Pc.textFaint)),
       ]),
       const SizedBox(height: 2),
       Text(
         '+2 VP to ${s.playerName(leader)} (richest) when the round closes',
-        style: const TextStyle(fontSize: 10, color: Color(0xFF444444)),
+        style: const TextStyle(fontSize: 10, color: Pc.textMuted),
       ),
     ];
   }
@@ -895,7 +956,7 @@ class _CountdownState extends State<_Countdown> {
         '${(secs ~/ 60).toString().padLeft(2, '0')}:${(secs % 60).toString().padLeft(2, '0')}';
     final warn = secs <= widget.warnSecs;
     final color =
-        warn ? const Color(0xFFC0564F) : const Color(0xFF2A2A2A);
+        warn ? Pc.oxblood : Pc.text;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(widget.icon, size: 18, color: color),
       const SizedBox(width: 4),
@@ -927,8 +988,47 @@ class _MuteButtonState extends State<_MuteButton> {
       constraints: const BoxConstraints(),
       tooltip: sfx.enabled ? 'Mute sound' : 'Unmute sound',
       icon: Icon(sfx.enabled ? Icons.volume_up : Icons.volume_off,
-          color: const Color(0xFF2A2A2A)),
+          color: Pc.textMuted),
       onPressed: () => setState(() => sfx.enabled = !sfx.enabled),
+    ));
+  }
+}
+
+/// The accessibility knob (ADR-0030): full -> reduced -> instant.
+///
+/// `instant` is not a degraded mode. It is the same "I do not animate" path the
+/// CLI and bot seats already take under ADR-0028, which is why the server needs
+/// no change to tolerate it - and why nothing in the game is ever conveyed by
+/// motion alone. Pause on any frame and the game is still playable.
+class _MotionButton extends StatefulWidget {
+  final GameSession s;
+  const _MotionButton({required this.s});
+
+  @override
+  State<_MotionButton> createState() => _MotionButtonState();
+}
+
+class _MotionButtonState extends State<_MotionButton> {
+  static const _icons = {
+    MotionProfile.full: Icons.animation,
+    MotionProfile.reduced: Icons.slow_motion_video,
+    MotionProfile.instant: Icons.bolt,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final stage = widget.s.stage;
+    return hoverSfx(IconButton(
+      iconSize: 18,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints(),
+      tooltip: 'Motion: ${stage.profile.name}',
+      icon: Icon(_icons[stage.profile], color: Pc.textMuted),
+      onPressed: () => setState(() {
+        const cycle = MotionProfile.values;
+        stage.profile = cycle[(stage.profile.index + 1) % cycle.length];
+      }),
     ));
   }
 }
@@ -971,22 +1071,25 @@ class _CardFlashState extends State<_CardFlash> {
     return IgnorePointer(
       child: AnimatedOpacity(
         opacity: _visible ? 1 : 0,
-        duration: const Duration(milliseconds: 300),
+        duration: Motion.cardPlay,
+        curve: Motion.arrive,
         child: Container(
           width: 66,
           height: 66,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-            ],
+            color: Pc.parchment,
+            borderRadius: Pc.radius,
+            border: Border.all(color: Pc.goldDark, width: 1.5),
+            boxShadow: Pc.hairShadow,
           ),
           child: Text(
             '${widget.value}',
             style: const TextStyle(
-                fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF221D0E)),
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                color: Pc.parchmentInk,
+                fontFeatures: [FontFeature.tabularFigures()]),
           ),
         ),
       ),
@@ -994,17 +1097,17 @@ class _CardFlashState extends State<_CardFlash> {
   }
 }
 
-/// A one-shot text banner over the board (drawn card text, spotlight
-/// announcement), retriggered by `seq` exactly like `_CardFlash`
-/// (ADR-0028). Parchment-styled so a card read feels like a card.
+/// A one-shot banner over the board: a drawn card, a spotlight, a market event.
+/// One shape, one place, every time - a player should never have to work out
+/// *where* the game is going to tell them something.
 class _BannerFlash extends StatefulWidget {
   final int seq;
   final String text;
-  final Duration hold;
+  final BannerKind kind;
   const _BannerFlash({
     required this.seq,
     required this.text,
-    this.hold = const Duration(milliseconds: 1500),
+    required this.kind,
   });
 
   @override
@@ -1021,7 +1124,12 @@ class _BannerFlashState extends State<_BannerFlash> {
     if (widget.seq != old.seq && widget.seq > 0) {
       setState(() => _visible = true);
       _timer?.cancel();
-      _timer = Timer(widget.hold, () {
+      // Held for as long as the beat the director paid for - the two must agree,
+      // or the banner outlives the pause that exists to let it be read.
+      final hold = widget.kind == BannerKind.card
+          ? Motion.cardReveal
+          : Motion.banner;
+      _timer = Timer(hold, () {
         if (mounted) setState(() => _visible = false);
       });
     }
@@ -1035,28 +1143,29 @@ class _BannerFlashState extends State<_BannerFlash> {
 
   @override
   Widget build(BuildContext context) {
+    // Paper for a card read; a dark plate for a world event. The register tells
+    // you which kind of thing just happened before you read a word of it.
+    final paper = widget.kind == BannerKind.card;
     return IgnorePointer(
       child: AnimatedOpacity(
         opacity: _visible ? 1 : 0,
-        duration: const Duration(milliseconds: 250),
+        duration: Motion.ambient,
         child: Container(
           constraints: const BoxConstraints(maxWidth: 320),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           decoration: BoxDecoration(
-            color: const Color(0xFFECE0C2),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: const Color(0xFFA9812F)),
-            boxShadow: const [
-              BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-            ],
+            color: paper ? Pc.parchment : Pc.surface,
+            borderRadius: Pc.radius,
+            border: Border.all(color: Pc.goldDark, width: 1.5),
+            boxShadow: Pc.hairShadow,
           ),
           child: Text(
             widget.text,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF2A2420),
+              color: paper ? Pc.parchmentInk : Pc.text,
             ),
           ),
         ),
@@ -1193,7 +1302,7 @@ class _ActionsState extends State<_Actions> {
           const Text(
             'Outbid a rival above the floor and you pay only 90% of your '
             'bid - your reward for landing here.',
-            style: TextStyle(fontSize: 10, color: Color(0xFF777777)),
+            style: TextStyle(fontSize: 10, color: Pc.textFaint),
           ),
         SizedBox(
           width: 90,
@@ -1206,7 +1315,7 @@ class _ActionsState extends State<_Actions> {
               FilteringTextInputFormatter.digitsOnly,
               _MaxValueFormatter(cash),
             ],
-            style: const TextStyle(color: Color(0xFF2A2A2A)),
+            style: const TextStyle(color: Pc.text),
             decoration: const InputDecoration(isDense: true),
           ),
         ),
@@ -1323,7 +1432,7 @@ class _ActionsState extends State<_Actions> {
                 child: TextField(
                   controller: _bribe,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Color(0xFF2A2A2A)),
+                  style: const TextStyle(color: Pc.text),
                   decoration: const InputDecoration(isDense: true),
                 ),
               ),
@@ -1354,7 +1463,7 @@ class _ActionsState extends State<_Actions> {
           children.add(btn('End turn', {'type': 'end_turn'}));
       }
       children.add(const Text('Tap your tiles to build / mortgage.',
-          style: TextStyle(color: Color(0xFF777777), fontSize: 11)));
+          style: TextStyle(color: Pc.textFaint, fontSize: 11)));
     }
     return Wrap(
         spacing: 6,
@@ -1380,10 +1489,10 @@ class _ActionsState extends State<_Actions> {
       }),
       style: style.copyWith(
         backgroundColor: WidgetStateProperty.all(
-            picked ? const Color(0xFFD8B45A).withValues(alpha: 0.3) : null),
+            picked ? Pc.gold.withValues(alpha: 0.3) : null),
         side: WidgetStateProperty.all(BorderSide(
             color:
-                picked ? const Color(0xFFA9812F) : const Color(0xFF9AA3B2))),
+                picked ? Pc.goldDark : Pc.textMuted)),
       ),
       child: Text(picked ? '$value  #${pos + 1}' : '$value'),
     ));
@@ -1398,8 +1507,8 @@ class _EventLog extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFFFFDF6),
-        border: Border.all(color: const Color(0xFFC9C4AE)),
+        color: Pc.bg,
+        border: Border.all(color: Pc.border),
         borderRadius: BorderRadius.circular(4),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1408,7 +1517,7 @@ class _EventLog extends StatelessWidget {
         itemCount: log.length,
         itemBuilder: (ctx, i) => Text(
           log[log.length - 1 - i],
-          style: const TextStyle(fontSize: 11, color: Color(0xFF333333)),
+          style: const TextStyle(fontSize: 11, color: Pc.textMuted),
         ),
       ),
     );
@@ -1428,7 +1537,7 @@ class _SidePanel extends StatelessWidget {
       // Game over: replay together, or go back to the start screen.
       if (v != null && v.finished)
         Card(
-          color: const Color(0xFF2E2A1C),
+          color: Pc.surface2,
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -1438,7 +1547,7 @@ class _SidePanel extends StatelessWidget {
                       style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFFD8B45A))),
+                          color: Pc.gold)),
                   const SizedBox(height: 8),
                   Row(children: [
                     Expanded(child: wideButton('Play again', s.sendPlayAgain)),
@@ -1448,7 +1557,7 @@ class _SidePanel extends StatelessWidget {
                             primary: false)),
                   ]),
                   const Text('"Play again" restarts for everyone still here.',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
+                      style: TextStyle(fontSize: 11, color: Pc.textMuted)),
                 ]),
           ),
         ),
@@ -1463,7 +1572,7 @@ class _SidePanel extends StatelessWidget {
                     style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFFD8B45A),
+                        color: Pc.gold,
                         letterSpacing: 2)),
               ),
               if (s.code != null)
@@ -1471,12 +1580,17 @@ class _SidePanel extends StatelessWidget {
                   iconSize: 18,
                   visualDensity: VisualDensity.compact,
                   tooltip: 'Copy room code',
-                  icon: const Icon(Icons.copy, color: Color(0xFF9AA3B2)),
+                  icon: const Icon(Icons.copy, color: Pc.textMuted),
                   onPressed: () => copyCode(context, s.code!),
                 )),
             ]),
             const SizedBox(height: 6),
-            _players(),
+            // The seat list is the only part of the side panel the stage drives
+            // (chit anchors, the sealed-bid reveal), so it is the only part that
+            // repaints on an animation frame. The trade panel and the settings
+            // fields below never do.
+            ListenableBuilder(
+                listenable: s.stage, builder: (context, _) => _players()),
             if (s.view == null) ...[
               const SizedBox(height: 8),
               wideButton('Start game',
@@ -1520,7 +1634,7 @@ class _SidePanel extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child: hoverSfx(OutlinedButton(
             style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFC0564F)),
+                foregroundColor: Pc.oxblood),
             onPressed: () async {
               final ok = await showDialog<bool>(
                 context: context,
@@ -1613,12 +1727,12 @@ class _SidePanel extends StatelessWidget {
         padding: EdgeInsets.symmetric(horizontal: 6, vertical: isActive ? 5 : 2),
         decoration: BoxDecoration(
           color: isActive
-              ? const Color(0xFFD8B45A).withValues(alpha: 0.16)
+              ? Pc.gold.withValues(alpha: 0.16)
               : null,
           borderRadius: BorderRadius.circular(4),
           border: Border(
             left: BorderSide(
-              color: isActive ? const Color(0xFFD8B45A) : Colors.transparent,
+              color: isActive ? Pc.gold : Colors.transparent,
               width: 3,
             ),
           ),
@@ -1630,27 +1744,29 @@ class _SidePanel extends StatelessWidget {
               width: 16,
               child: isActive
                   ? const Icon(Icons.play_arrow,
-                      size: 16, color: Color(0xFFA9812F))
+                      size: 16, color: Pc.goldDark)
                   : null,
             ),
-            // Pawn circle doubles as the live VP leaderboard: rank number
-            // inside, a crown for the current leader (2026-07 feedback).
+            // Pawn circle doubles as the live VP leaderboard - and as the
+            // anchor every chit addressed to this player flies to. Money that
+            // lands somewhere is money you can see arriving.
             Container(
+              key: s.stage.anchors.seatKey(i),
               width: 18,
               height: 18,
               alignment: Alignment.center,
-              decoration: BoxDecoration(
-                  color: pawnColors[i % pawnColors.length],
-                  shape: BoxShape.circle),
+              decoration:
+                  BoxDecoration(color: pawnColor(i), shape: BoxShape.circle),
               child: rank == null
                   ? null
                   : rank == 1
-                      ? const Text('👑', style: TextStyle(fontSize: 10))
+                      ? const Icon(Icons.workspace_premium,
+                          size: 12, color: Pc.text)
                       : Text('$rank',
                           style: const TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: Colors.white)),
+                              color: Pc.text)),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -1662,19 +1778,29 @@ class _SidePanel extends StatelessWidget {
                         p?.bankrupt == true ? TextDecoration.lineThrough : null,
                   )),
             ),
+            // A sealed bid, face-up (ADR-0018). Every seat's bid flips at once
+            // and is held long enough to compare - this is the single most
+            // information-dense moment in Parcello, and the old client never
+            // rendered it at all: the auction just silently resolved.
+            if (s.stage.bidReveal case final r?)
+              if (i < r.bids.length) _BidChip(bid: r.bids[i], won: r.winner == i),
             if (p != null)
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text('\$${p.cash}'),
+                Text('\$${p.cash}',
+                    style: const TextStyle(
+                        fontFeatures: [FontFeature.tabularFigures()])),
                 // Net worth decides a timed game (ADR-0010), so surface it then.
                 if (s.gameEndsAt != null)
                   Text('NW \$${s.netWorth(i)}',
-                      style: const TextStyle(
-                          fontSize: 11, color: Color(0xFF9AA3B2))),
+                      style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
                 // Victory-point race (ADR-0020): "the race IS the game".
                 if ((s.content?.winVictoryPoints ?? 0) > 0)
                   Text('VP ${p.victoryPoints}/${s.content!.winVictoryPoints}',
                       style: const TextStyle(
-                          fontSize: 11, color: Color(0xFF9AA3B2))),
+                          fontSize: 11,
+                          color: Pc.goldDark,
+                          fontWeight: FontWeight.w700,
+                          fontFeatures: [FontFeature.tabularFigures()])),
               ]),
           ]),
         ),
@@ -1699,11 +1825,11 @@ class _SidePanel extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('TRADES',
           style: TextStyle(
-              fontSize: 12, color: Color(0xFF9AA3B2), letterSpacing: 1)),
+              fontSize: 12, color: Pc.textMuted, letterSpacing: 1)),
       const SizedBox(height: 6),
       if (offers.isEmpty)
         const Text('No open offers.',
-            style: TextStyle(color: Color(0xFF9AA3B2))),
+            style: TextStyle(color: Pc.textMuted)),
       for (final o in offers)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1739,6 +1865,49 @@ class _SidePanel extends StatelessWidget {
           child: const Text('New offer'),
         )),
     ]);
+  }
+}
+
+/// One seat's sealed bid, revealed (ADR-0018). Flips up on the seat marker, in
+/// the same instant as everyone else's, and holds - the hold is what makes a
+/// simultaneous decision comparable, which is the whole point of showing it.
+class _BidChip extends StatelessWidget {
+  final int bid;
+  final bool won;
+  const _BidChip({required this.bid, required this.won});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Motion.bidReveal,
+      curve: Motion.arrive,
+      builder: (context, t, child) => Transform(
+        alignment: Alignment.center,
+        // A card turning over, not a number appearing.
+        transform: Matrix4.identity()..rotateX((1 - t) * 1.4),
+        child: Opacity(opacity: t, child: child),
+      ),
+      child: Container(
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: won ? Pc.gold : Pc.parchment,
+          borderRadius: Pc.radius,
+          border: Border.all(color: won ? Pc.goldDark : Pc.border),
+        ),
+        child: Text(
+          // Zero is an abstention, and it reads as one.
+          bid == 0 ? '--' : '\$$bid',
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: Pc.parchmentInk,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1855,7 +2024,7 @@ class _SettingsPanelState extends State<_SettingsPanel> {
         title: const Text('Game settings',
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
         subtitle: Text(_summary(s),
-            style: const TextStyle(fontSize: 11, color: Color(0xFF9AA3B2))),
+            style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
         children: host ? _hostFields() : _readOnly(s),
       ),
     );
@@ -1965,7 +2134,7 @@ class _FeedbackCardState extends State<_FeedbackCard> {
               child: Text('HOW WAS THE GAME?',
                   style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFF9AA3B2),
+                      color: Pc.textMuted,
                       letterSpacing: 1)),
             ),
             hoverSfx(IconButton(
@@ -1979,7 +2148,7 @@ class _FeedbackCardState extends State<_FeedbackCard> {
               hoverSfx(IconButton(
                 icon: Icon(
                   star <= _rating ? Icons.star : Icons.star_border,
-                  color: const Color(0xFFD8B45A),
+                  color: Pc.gold,
                 ),
                 onPressed: () => setState(() => _rating = star),
               )),

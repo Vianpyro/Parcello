@@ -500,8 +500,15 @@ side of nothing - Go To Jail is unchanged, only escape is redesigned).
 
 ## Roadmap
 
-- FX + audio and real multiplayer playtesting for the Flutter client
-  (next priority).
+- Flutter client polish and real multiplayer playtesting (next priority).
+  The motion language and game feel are specified in
+  `docs/motion-language.md` (+ ADR-0030: the client animation budget and
+  the reduced/instant motion profiles); its section 13 is the
+  authoritative list of what is built and what is not. The largest known
+  gap is anchoring the sealed-bid input to the tile being bid on, with
+  the 12s window drawn as a hairline draining along that tile's own edge.
+  Audio is still a placeholder clip set - `clients/flutter/assets/sfx/README.md`
+  lists the four category earcons that are currently silent.
 - Deploy the OIDC issuer (Rauthy); the server-side EdDSA verifier is done
   (ADR-0009). The deprecated HS256 auth stays until LAN/WAN playtests have
   happened.

@@ -36,7 +36,33 @@ class Sfx {
     }
   }
 
-  void diceRoll() => _play('dice-roll.mp3');
+  // -- earcons -------------------------------------------------------------
+  //
+  // Sound is a property of a beat's *category*, not of the event that produced
+  // it: one identity per category, reused everywhere, so a player absorbs the
+  // vocabulary without ever being taught it (`docs/motion-language.md` 4).
+  //
+  // The clip set is still the placeholder batch; several earcons below have no
+  // asset yet and are silent (`_play` swallows a missing file). Replacing the
+  // batch with real category earcons is the audio pass, and it needs no code
+  // change here - only files.
+
+  /// A movement card leaves the hand. The asset is still `dice-roll.mp3`, a
+  /// stand-in: Parcello has had no dice since ADR-0017, so the *name* here is
+  /// the meaning and the file is what the audio pass replaces.
+  void cardPlay() => _play('dice-roll.mp3');
+
+  /// A chance card is revealed.
+  void cardDraw() => _play('card-draw.mp3');
+
+  /// Money arrived.
+  void gain() => _play('cash-gain.mp3');
+
+  /// Money left.
+  void loss() => _play('cash-loss.mp3');
+
+  /// P1: the table stops.
+  void arrest() => _play('arrest.mp3');
 
   /// One of the 11 movement clips, cycling by hop so a run of steps varies.
   void moveHop(int hop) {

@@ -15,10 +15,12 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0028` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0030` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
    0017-0024 are the v2 ruleset (implemented); 0026 the spotlight; 0028
-   the animation-ack watermark (server timers wait for client rendering).
+   the animation-ack watermark (server timers wait for client rendering);
+   0030 the client animation budget + motion profiles (paired with
+   `docs/motion-language.md`, the game-feel reference doc).
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -243,12 +245,36 @@ architecture doc section 5; dependencies point downward only):
   equivalent - stubbed out on web, hidden behind `kIsWeb` in the menu),
   `session_storage.dart` (a file on desktop, `localStorage` on web). When
   adding an Event or CommandKind, update it too (protocol.dart +
-  main.dart), same drill as the CLI. `session.dart` hosts the animation
-  director (ADR-0028): Updates queue and play as paced beats (pawn
-  slides, card reveal banner, jail slide, spotlight flash, cash
-  floaters); the authoritative view applies after the beats and the
-  `animation_done` ack releases the server's gated timers - when adding
-  an Event with a visual, give it a beat in `_playBeat`.
+  main.dart), same drill as the CLI.
+
+  **Motion / game feel** is specified in `docs/motion-language.md` (the
+  reference doc: philosophy, tiers, visual grammar, the full event
+  catalogue, and an honest "built vs. not built" list) and ADR-0030 (the
+  animation budget + motion profiles). Read both before touching anything
+  animated. The client-side split, dependencies pointing downward:
+  - `tokens.dart` - the palette and geometry from
+    `docs/visual-identity.md`. A colour exists here or nowhere; a hex
+    literal at a use site is a bug.
+  - `motion.dart` - every duration, curve, tier and the `ANIM_BUDGET`.
+    A duration literal anywhere else is a bug: the director and the pawn
+    layer used to derive their timing independently and could drift.
+  - `stage.dart` - `StageState`, the *transient* visual state (what the
+    board is showing), deliberately a SEPARATE notifier from
+    `GameSession` (what the server says is true) so animation frames
+    never repaint the action panel's text fields.
+  - `director.dart` - `compile(events, ctx) -> Plan` is **pure** (no
+    socket, no widgets, no clock) and is where tiers, lanes, coalescing
+    and the budget are decided; `session.dart` only executes the plan and
+    acks. When adding an Event with a visual, give it a beat in
+    `_beatsFor` - and add a test, because the budget invariant is
+    checkable (`test/director_test.dart`).
+  - `overlay.dart` - what crosses between board and HUD (money chits) and
+    the P1 arrest.
+  - ADR-0028's contract is unchanged: Updates queue, play in order, the
+    view applies after the beats, the `animation_done` ack releases the
+    server's gated timers. ADR-0030 adds that the client must never
+    exceed `ANIM_BUDGET` = 4s against the server's `ANIM_ACK_CAP` = 6s -
+    a client that outruns the cap is not slow, it is *behind the game*.
 
 Mods: the server resolves a default set at boot (`--mod`), and each room
 may override it at creation via the optional `mods` field on Create
@@ -411,11 +437,21 @@ six-step build order in `docs/business-tour-direction.md`, "V2 ruleset"
 section, is complete - `mods/classic` was removed at step 6.
 
 1. Flutter client polish (`clients/flutter` exists: full protocol, board,
-   trades, tests; still needs real multiplayer playtesting, FX + audio -
-   owner priority 2026-07 - and Android/mobile targets, postponed by
-   owner). The visual identity is specified in `docs/visual-identity.md`
-   (Art Deco geometry, validated palette, FR+EN via gen-l10n, ranked
-   menu greyed until a matchmaking service exists).
+   trades, tests; still needs real multiplayer playtesting and
+   Android/mobile targets, postponed by owner). The visual identity is
+   specified in `docs/visual-identity.md` (Art Deco geometry, validated
+   palette, FR+EN via gen-l10n, ranked menu greyed until a matchmaking
+   service exists); the motion language and game feel in
+   `docs/motion-language.md` + ADR-0030. The palette and the motion
+   architecture landed 2026-07; its section 13 is the authoritative list
+   of what is still missing. In priority order, the known gaps are:
+   **anchoring the sealed-bid input to the lifted tile** (the window clock
+   as a hairline draining on the tile's own edge, not a number in a
+   corner - the biggest remaining spec/build gap), trade animations, the
+   AFK auto-play marker (the server plays your turn and nothing tells
+   you), bundling the three OFL fonts, then gen-l10n, then the audio pass
+   (the clip set is placeholder; `assets/sfx/README.md` lists the four
+   category earcons that are still silent).
 2. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
    the Flutter client (`oidc.dart`: PKCE + system browser + loopback; web
    and CLI paste the token manually). Remaining: run the deploy on the
