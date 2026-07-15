@@ -67,7 +67,7 @@ jobs:
           cache: true
       - run: flutter build web --release
         working-directory: clients/flutter
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flutter-web
           path: clients/flutter/build/web
@@ -107,7 +107,7 @@ jobs:
           [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           "target/release/parcello-server$ext" --version
           "target/release/parcello-cli$ext" --version
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: flutter-web
           path: build/web

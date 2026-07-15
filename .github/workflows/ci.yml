@@ -115,7 +115,7 @@ jobs:
             --ignore-filename-regex "$COVERAGE_IGNORE"
           cargo llvm-cov report --html \
             --ignore-filename-regex "$COVERAGE_IGNORE"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
@@ -128,7 +128,7 @@ jobs:
       # service outage must never block a merge - the hard gate stays the
       # local --fail-under-lines. Requires the repo to be enabled on
       # codecov.io + a CODECOV_TOKEN repo secret (see README).
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         if: always()
         continue-on-error: true
         with:
