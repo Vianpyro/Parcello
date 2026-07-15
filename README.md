@@ -215,7 +215,36 @@ linux/amd64 - it builds its own Flutter Web client in a self-contained
 Docker stage, ADR-0025). Keep `clients/flutter/pubspec.yaml`'s version in
 step - it stamps the client executable. Re-pushing without a bump is a
 no-op. All dependency licenses are permissive (checked with cargo-license),
-so commercial distribution is unencumbered.
+so commercial distribution is unencumbered. Release binaries are built with
+the `[profile.release]` in `Cargo.toml` (full LTO, one codegen unit,
+symbols stripped) for the smallest, fastest artifacts.
+
+### Verifying a download
+
+Every release attaches a `SHA256SUMS` file listing the SHA-256 of each
+archive. To check integrity, download it next to the archives and run:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+When Sigstore is available at build time the release also carries
+`SHA256SUMS.sig` + `SHA256SUMS.pem`, a keyless [cosign](https://docs.sigstore.dev/)
+signature proving the sums were produced by this repo's release workflow
+(GitHub OIDC identity, no long-lived key). Verify provenance, then integrity:
+
+```sh
+cosign verify-blob SHA256SUMS \
+  --signature SHA256SUMS.sig --certificate SHA256SUMS.pem \
+  --certificate-identity-regexp 'https://github.com/Vianpyro/parcello/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+Signing is best-effort: it never blocks a release, so a run may attach the
+sums without a signature. The pipeline is structured so Windows Authenticode
+and Apple notarization can be added later as extra signatures over the same
+`SHA256SUMS`, keeping one verification story.
 
 ## Protocol (v0, JSON over WebSocket at `/ws`)
 

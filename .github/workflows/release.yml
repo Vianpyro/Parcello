@@ -71,6 +71,9 @@ jobs:
         with:
           name: flutter-web
           path: clients/flutter/build/web
+          # Consumed only by the server legs in this same run; no reason to
+          # keep it in storage afterwards.
+          retention-days: 1
 
   server:
     name: server + cli (${{ matrix.label }})
@@ -93,6 +96,17 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked -p parcello-server -p parcello-cli
+      # Smoke test: the freshly built binaries must at least start and print
+      # their version (every matrix leg runs on its native arch, so this
+      # executes everywhere, arm64 included). Catches a DOA build before it
+      # is ever packaged and shipped.
+      - name: smoke test binaries
+        shell: bash
+        run: |
+          ext=""
+          [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          "target/release/parcello-server$ext" --version
+          "target/release/parcello-cli$ext" --version
       - uses: actions/download-artifact@v4
         with:
           name: flutter-web
@@ -229,9 +243,87 @@ jobs:
           tar -czf "parcello-allinone-v$V-linux-x64.tar.gz" parcello
           gh release upload "v$V" "parcello-allinone-v$V-linux-x64.tar.gz"
 
+  # Integrity + provenance for every attached asset. Runs after all uploads
+  # but BEFORE publish, so SHA256SUMS (and its Sigstore signature) are in the
+  # release the instant it goes public. Also the single place that asserts
+  # the release is complete: the expected-asset check fails the run if any
+  # matrix leg silently dropped its upload.
+  checksums:
+    name: checksums + signing
+    needs: [version, server, client, bundle]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach SHA256SUMS (+ signature) to the release
+      id-token: write # Sigstore keyless signing via GitHub OIDC
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }} # no checkout in this job; gh needs it
+      V: ${{ needs.version.outputs.version }}
+    steps:
+      - name: download every attached asset
+        run: |
+          mkdir -p assets
+          gh release download "v$V" --dir assets --pattern 'parcello-*'
+      - name: verify all expected artifacts are present
+        run: |
+          expected=(
+            "parcello-server-v$V-linux-x64.tar.gz"
+            "parcello-server-v$V-linux-arm64.tar.gz"
+            "parcello-server-v$V-windows-x64.zip"
+            "parcello-server-v$V-macos-arm64.tar.gz"
+            "parcello-client-v$V-windows-x64.zip"
+            "parcello-client-v$V-linux-x64.tar.gz"
+            "parcello-client-v$V-macos.zip"
+            "parcello-allinone-v$V-windows-x64.zip"
+            "parcello-allinone-v$V-linux-x64.tar.gz"
+          )
+          missing=0
+          for f in "${expected[@]}"; do
+            [ -f "assets/$f" ] || { echo "MISSING: $f" >&2; missing=1; }
+          done
+          [ "$missing" = 0 ] || { echo "release is incomplete" >&2; exit 1; }
+      - name: validate archive integrity + contents
+        run: |
+          cd assets
+          fail=0
+          for a in *.tar.gz; do tar -tzf "$a" >/dev/null || { echo "corrupt: $a" >&2; fail=1; }; done
+          for a in *.zip;    do unzip -tqq "$a" >/dev/null || { echo "corrupt: $a" >&2; fail=1; }; done
+          # Every server archive must actually carry the server binary.
+          for a in parcello-server-*.tar.gz; do tar -tzf "$a" | grep -qE 'parcello-server(\.exe)?$' || { echo "no server binary in $a" >&2; fail=1; }; done
+          for a in parcello-server-*.zip;    do unzip -l  "$a" | grep -qE 'parcello-server(\.exe)?'  || { echo "no server binary in $a" >&2; fail=1; }; done
+          [ "$fail" = 0 ]
+      - name: generate SHA256SUMS
+        run: |
+          cd assets
+          sha256sum parcello-* | sort -k2 > ../SHA256SUMS
+          cat ../SHA256SUMS
+      # Best-effort signing: a Sigstore outage or a fork without OIDC must
+      # never fail the release, so both steps continue-on-error and the
+      # upload only attaches .sig/.pem if they were produced. Authenticode /
+      # Apple notarization would slot in here later as extra sign steps
+      # against the same SHA256SUMS - the verification story stays one file.
+      - name: install cosign
+        id: cosign
+        continue-on-error: true
+        uses: sigstore/cosign-installer@v3
+      - name: sign checksums (Sigstore keyless)
+        if: steps.cosign.outcome == 'success'
+        continue-on-error: true
+        run: |
+          cosign sign-blob --yes SHA256SUMS \
+            --output-signature SHA256SUMS.sig \
+            --output-certificate SHA256SUMS.pem
+      - name: upload checksums (+ signature if present)
+        run: |
+          files=(SHA256SUMS)
+          [ -f SHA256SUMS.sig ] && files+=(SHA256SUMS.sig)
+          [ -f SHA256SUMS.pem ] && files+=(SHA256SUMS.pem)
+          gh release upload "v$V" "${files[@]}" --clobber
+
   publish:
     name: publish release
-    needs: [version, server, client, bundle]
+    needs: [version, server, client, bundle, checksums]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:

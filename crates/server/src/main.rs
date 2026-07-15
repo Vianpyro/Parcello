@@ -17,7 +17,11 @@ use parcello_server::room::Rooms;
 use parcello_server::{AppState, eddsa, game_router, lan};
 
 #[derive(Parser, Debug)]
-#[command(name = "parcello-server", about = "Parcello authoritative game server")]
+#[command(
+    name = "parcello-server",
+    version,
+    about = "Parcello authoritative game server"
+)]
 struct Args {
     /// Listen address.
     #[arg(long, env = "PARCELLO_BIND", default_value = "0.0.0.0:7878")]

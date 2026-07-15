@@ -110,9 +110,17 @@ archives for windows and linux (client + server, Steam-depot-shaped; the
 linux one also fits the Steam Deck), and a GHCR image
 (`ghcr.io/<owner>/parcello-server`, amd64). Keep the pubspec version in
 step. The release goes live only after all binary jobs succeed
-(draft-then-publish); the docker job is independent. Dependency licenses
-are all permissive (checked 2026-07 with cargo-license; keep it that way
-- commercial distribution is planned).
+(draft-then-publish); the docker job is independent. Binaries use the
+size/perf `[profile.release]` (LTO, codegen-units=1, strip). A `checksums`
+job runs between the binary jobs and publish: it asserts all nine expected
+archives are present, validates each archive (readable + carries the server
+binary), writes `SHA256SUMS`, and best-effort keyless-signs it with cosign
+(Sigstore/GitHub OIDC, `id-token: write`) - signing never fails the release
+(the slot is where Authenticode/notarization would later be added over the
+same sums). `.github/release.yml` categorizes the auto-generated notes by PR
+label; `.github/dependabot.yml` keeps the pinned actions current. Dependency
+licenses are all permissive (checked 2026-07 with cargo-license; keep it
+that way - commercial distribution is planned).
 
 Self-hosting: `compose-deploy.yml` + `.env.example` deploy the game
 server with a Rauthy issuer behind any reverse proxy (`.env` is

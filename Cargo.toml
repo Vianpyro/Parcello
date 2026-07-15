@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.15.9"
+version = "0.15.10"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Vianpyro/parcello"
@@ -29,6 +29,19 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-st
 # clippy with `-D warnings`, so everything warned here is enforced. The
 # allows below are the deliberate exceptions - each has a reason; add new
 # ones here (with one) rather than sprinkling #[allow] in code.
+# Distribution profile: the release archives (release.yml) and the Docker
+# image are built with this. LTO across the whole graph plus a single
+# codegen unit maximize optimization; `strip` drops the debug/symbol tables
+# (megabytes off every binary) - the shipped artifacts are not debugged in
+# place. panic stays the default "unwind": the server runs one Tokio task
+# per room and relies on a panic unwinding that task instead of aborting the
+# whole process. Release builds are infrequent (a version bump only), so the
+# extra compile time is a fine trade for smaller, faster binaries.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

@@ -27,7 +27,11 @@ use tokio_tungstenite::tungstenite::Message;
 const BOT_PACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
 #[derive(Parser, Debug)]
-#[command(name = "parcello-cli", about = "Parcello terminal test client")]
+#[command(
+    name = "parcello-cli",
+    version,
+    about = "Parcello terminal test client"
+)]
 struct Args {
     /// Server WebSocket URL.
     #[arg(long, default_value = "ws://127.0.0.1:7878/ws")]

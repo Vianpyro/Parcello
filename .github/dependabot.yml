@@ -1,0 +1,17 @@
+# Keep the pinned GitHub Actions (checkout, upload-artifact, cosign-installer,
+# codeql-action, ...) current. Scoped to the actions ecosystem on purpose:
+# Cargo advisory/version drift is already watched by the CI `deps` job
+# (cargo-deny) and the weekly bit-rot cron, so a second Cargo feed here would
+# only add noise. All action bumps land in one grouped weekly PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [ci, dependencies]
+    commit-message:
+      prefix: "ci"
