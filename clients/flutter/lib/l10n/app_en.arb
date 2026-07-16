@@ -56,5 +56,491 @@
   "rulesJailTitle": "Jail",
   "rulesJailBody": "Escape by choice, not dice: play a Legal Route (a fresh ordered hand), bribe your way out (opponents vote), or spend a jail card. While your Legal Route lasts, your tiles charge no rent.",
   "rulesWinTitle": "Winning",
-  "rulesWinBody": "Win by points, by being the last player still solvent, or - in timed games - by being the richest when the clock runs out."
+  "rulesWinBody": "Win by points, by being the last player still solvent, or - in timed games - by being the richest when the clock runs out.",
+
+  "tileBuildHouse": "Build house (${amount})",
+  "@tileBuildHouse": { "placeholders": { "amount": { "type": "int" } } },
+  "tileSellHouse": "Sell house",
+  "tileBoostRent": "Boost rent (${amount})",
+  "@tileBoostRent": { "placeholders": { "amount": { "type": "int" } } },
+  "tileMortgage": "Mortgage",
+  "tileRedeemMortgage": "Redeem mortgage",
+  "tileBuyOutMortgage": "Buy out mortgage (${amount})",
+  "@tileBuyOutMortgage": { "placeholders": { "amount": { "type": "int" } } },
+  "tileBuyOutMortgageSub": "take this tile - stays mortgaged, redeem it after",
+  "tileSeizeLiquidate": "Seize + liquidate (${amount})",
+  "@tileSeizeLiquidate": { "placeholders": { "amount": { "type": "int" } } },
+  "tileSeize": "Seize (${amount})",
+  "@tileSeize": { "placeholders": { "amount": { "type": "int" } } },
+  "tileSeizeSub": "take this tile from its owner",
+
+  "statusReadyHostCanStart": "Ready — host can start.",
+  "statusWaitingForPlayers": "Waiting for players…",
+  "statusNobody": "nobody",
+  "statusGameOver": "Game over — {name} wins!",
+  "@statusGameOver": { "placeholders": { "name": { "type": "String" } } },
+  "statusSealedBid": "Sealed bid on {tile} — waiting on: {waiting}",
+  "@statusSealedBid": {
+    "placeholders": { "tile": { "type": "String" }, "waiting": { "type": "String" } }
+  },
+  "statusBribeVote": "{briber} offers ${amount} to leave jail — waiting on: {waiting}",
+  "@statusBribeVote": {
+    "placeholders": {
+      "briber": { "type": "String" },
+      "amount": { "type": "int" },
+      "waiting": { "type": "String" }
+    }
+  },
+  "statusPlayerTurn": "{name}'s turn",
+  "@statusPlayerTurn": { "placeholders": { "name": { "type": "String" } } },
+
+  "actionSealedBidFloor": "Sealed bid on {tile} (floor ${price} if you stay silent):",
+  "@actionSealedBidFloor": {
+    "placeholders": { "tile": { "type": "String" }, "price": { "type": "int" } }
+  },
+  "actionSealedBid": "Sealed bid on {tile}:",
+  "@actionSealedBid": { "placeholders": { "tile": { "type": "String" } } },
+  "actionDiscovererHint": "Outbid a rival above the floor and you pay only 90% of your bid - your reward for landing here.",
+  "actionBid": "Bid",
+  "actionAbstain": "Abstain",
+  "actionRaisePct": "+{pct}%",
+  "@actionRaisePct": { "placeholders": { "pct": { "type": "int" } } },
+  "actionMaxBid": "Max (${cash})",
+  "@actionMaxBid": { "placeholders": { "cash": { "type": "int" } } },
+  "actionBribePrompt": "{briber} offers ${amount} to leave jail:",
+  "@actionBribePrompt": {
+    "placeholders": { "briber": { "type": "String" }, "amount": { "type": "int" } }
+  },
+  "actionAccept": "Accept",
+  "actionReject": "Reject",
+  "actionPlayRoute": "Play {value} (route)",
+  "@actionPlayRoute": { "placeholders": { "value": { "type": "int" } } },
+  "actionUseJailCard": "Use jail card",
+  "actionLegalRouteHint": "Legal Route: take a fresh hand and lock in the order you will play it. You leave jail at once and the first card plays now - but the plan is public, and your properties charge no rent until it runs out.",
+  "actionChooseRoute": "Choose route",
+  "actionReset": "Reset",
+  "actionOfferBribe": "Offer bribe",
+  "actionEndTurn": "End turn",
+  "actionTapTilesHint": "Tap your tiles to build / mortgage.",
+
+  "sideWinnerWins": "{name} wins!",
+  "@sideWinnerWins": { "placeholders": { "name": { "type": "String" } } },
+  "playAgain": "Play again",
+  "continueLabel": "Continue",
+  "playAgainHint": "\"Play again\" restarts for everyone still here.",
+  "sideRoom": "ROOM {code}",
+  "@sideRoom": { "placeholders": { "code": { "type": "String" } } },
+  "copyRoomCode": "Copy room code",
+  "startGame": "Start game",
+  "addBot": "Add bot",
+  "removeBot": "Remove bot",
+  "copyCodeToShare": "Copy code to share",
+  "resignConfirmTitle": "Resign from the game?",
+  "resign": "Resign",
+
+  "playerTagHandCycled": "✓ hand cycled",
+  "playerTagYou": "(you)",
+  "playerTagJail": "[jail]",
+  "playerTagRoute": "[route: {cards} left]",
+  "@playerTagRoute": { "placeholders": { "cards": { "type": "String" } } },
+  "playerTagJailCard": "[{count} jail card]",
+  "@playerTagJailCard": { "placeholders": { "count": { "type": "int" } } },
+  "playerTagBot": "🤖 bot",
+  "playerTagOffline": "(offline)",
+  "seatFallback": "seat {number}",
+  "@seatFallback": { "placeholders": { "number": { "type": "int" } } },
+  "sideNetWorth": "NW ${amount}",
+  "@sideNetWorth": { "placeholders": { "amount": { "type": "int" } } },
+  "sideVictoryPoints": "VP {have}/{target}",
+  "@sideVictoryPoints": {
+    "placeholders": { "have": { "type": "int" }, "target": { "type": "int" } }
+  },
+
+  "tradesHeader": "TRADES",
+  "tradeNothing": "nothing",
+  "tradeNoOffers": "No open offers.",
+  "tradeOffer": "#{id} {from} gives {give} for {receive} (to {to})",
+  "@tradeOffer": {
+    "placeholders": {
+      "id": { "type": "int" },
+      "from": { "type": "String" },
+      "give": { "type": "String" },
+      "receive": { "type": "String" },
+      "to": { "type": "String" }
+    }
+  },
+  "tradeRefuse": "Refuse",
+  "tradeNewOffer": "New offer",
+
+  "vpLegendHeader": "VICTORY POINTS  ·  first to {target} wins",
+  "@vpLegendHeader": { "placeholders": { "target": { "type": "int" } } },
+  "vpLegendFullGroup": "a complete colour group",
+  "vpLegendMaxedTile": "a maxed (conglomerate) tile",
+  "vpLegendUtilityTile": "a utility tile you own",
+  "vpLegendRoundBonus": "each round, to the richest player",
+  "roundLabel": "ROUND {number}",
+  "@roundLabel": { "placeholders": { "number": { "type": "int" } } },
+  "roundHandsCycled": "{done}/{total} hands cycled",
+  "@roundHandsCycled": {
+    "placeholders": { "done": { "type": "int" }, "total": { "type": "int" } }
+  },
+  "roundBonusHint": "+2 VP to {name} (richest) when the round closes",
+  "@roundBonusHint": { "placeholders": { "name": { "type": "String" } } },
+  "poolsUnlimited": "unlimited",
+  "poolsLine": "Subsidiaries: {subs} | Conglomerates: {congs}",
+  "@poolsLine": {
+    "placeholders": { "subs": { "type": "String" }, "congs": { "type": "String" } }
+  },
+  "forecastActive": "{event} active ({pct}%, ends turn {turn})",
+  "@forecastActive": {
+    "placeholders": {
+      "event": { "type": "String" },
+      "pct": { "type": "String" },
+      "turn": { "type": "int" }
+    }
+  },
+  "forecastUpcomingItem": "{event} (turn {turn})",
+  "@forecastUpcomingItem": {
+    "placeholders": { "event": { "type": "String" }, "turn": { "type": "int" } }
+  },
+  "forecastUpcoming": "upcoming: {list}",
+  "@forecastUpcoming": { "placeholders": { "list": { "type": "String" } } },
+  "spotlightUntilReplaced": "until replaced",
+  "spotlightEndsTurn": "ends turn {turn}",
+  "@spotlightEndsTurn": { "placeholders": { "turn": { "type": "int" } } },
+  "spotlightLine": "{tile} spotlighted (+{pct}%, {until})",
+  "@spotlightLine": {
+    "placeholders": {
+      "tile": { "type": "String" },
+      "pct": { "type": "int" },
+      "until": { "type": "String" }
+    }
+  },
+
+  "feedbackTitle": "HOW WAS THE GAME?",
+  "feedbackDismiss": "Dismiss",
+  "feedbackCommentHint": "Anything to add? (optional)",
+  "feedbackSend": "Send",
+
+  "cashLabel": "Cash",
+  "tradeNewOfferTitle": "New trade offer",
+  "tradeYouGive": "You give",
+  "tradeYouWant": "You want",
+  "close": "Close",
+  "tradePropose": "Propose",
+
+  "settingsTitle": "Game settings",
+  "settingApply": "Apply settings",
+  "settingsSummary": "game {game} - turn {turn} - bank {bank}",
+  "@settingsSummary": {
+    "placeholders": {
+      "game": { "type": "String" },
+      "turn": { "type": "String" },
+      "bank": { "type": "String" }
+    }
+  },
+
+  "settingGameLength": "Game length (min, 0=off)",
+  "settingTurnLimit": "Turn limit (s, 0=off)",
+  "settingTimeBank": "Time bank (s, 0=off)",
+  "settingStartingBalance": "Starting balance",
+  "settingGoSalary": "GO salary",
+  "settingVelocityMin": "Velocity min",
+  "settingVelocityMax": "Velocity max",
+  "settingMaxHouses": "Max houses (1-5)",
+  "settingBankruptcyThreshold": "Bankruptcy threshold",
+  "settingExpropriationPct": "Expropriation %",
+  "settingRentBoostPct": "Rent boost %",
+  "settingDominationGroups": "Domination groups (0=off)",
+  "settingVictoryPointsTarget": "Victory points target (0=off)",
+  "settingSubsidiaryPool": "Subsidiary pool factor (0=off)",
+  "settingConglomeratePool": "Conglomerate pool factor (0=off)",
+  "settingSpotlightRentPct": "Spotlight rent % (0=off)",
+  "settingSpotlightDuration": "Spotlight duration (turns)",
+
+  "settingRoGameLength": "Game length",
+  "settingRoTurnLimit": "Turn limit",
+  "settingRoTimeBank": "Time bank",
+  "settingRoVelocity": "Velocity",
+  "settingRoMaxHouses": "Max houses",
+  "settingRoExpropriation": "Expropriation",
+  "settingRoRentBoost": "Rent boost",
+  "settingRoDomination": "Domination",
+  "settingRoVictoryPoints": "Victory points",
+  "settingRoSubsidiaryPool": "Subsidiary pool",
+  "settingRoConglomeratePool": "Conglomerate pool",
+  "settingRoSpotlight": "Spotlight",
+
+  "settingOff": "off",
+  "settingMinutes": "{n} min",
+  "@settingMinutes": { "placeholders": { "n": { "type": "int" } } },
+  "settingSeconds": "{n} s",
+  "@settingSeconds": { "placeholders": { "n": { "type": "int" } } },
+  "settingPercent": "{n}%",
+  "@settingPercent": { "placeholders": { "n": { "type": "int" } } },
+  "settingGroups": "{n} groups",
+  "@settingGroups": { "placeholders": { "n": { "type": "int" } } },
+  "settingPoolFactor": "×{n}",
+  "@settingPoolFactor": { "placeholders": { "n": { "type": "int" } } },
+  "settingSpotlightValue": "+{pct}% / {dur} turns",
+  "@settingSpotlightValue": {
+    "placeholders": { "pct": { "type": "int" }, "dur": { "type": "int" } }
+  },
+
+  "roomCodeCopied": "Room code {code} copied",
+  "@roomCodeCopied": { "placeholders": { "code": { "type": "String" } } },
+  "muteSound": "Mute sound",
+  "unmuteSound": "Unmute sound",
+
+  "logJoinedRoom": "Joined room {code}. Mods: {mods}",
+  "@logJoinedRoom": {
+    "placeholders": { "code": { "type": "String" }, "mods": { "type": "String" } }
+  },
+  "logGameStarted": "Game started.",
+  "logRejected": "Rejected: {code}",
+  "@logRejected": { "placeholders": { "code": { "type": "String" } } },
+  "logError": "Error: {message}",
+  "@logError": { "placeholders": { "message": { "type": "String" } } },
+
+  "evtTurnStarted": "--- {player}'s turn ---",
+  "@evtTurnStarted": { "placeholders": { "player": { "type": "String" } } },
+  "evtMovementCardPlayed": "{player} played movement card {value}",
+  "@evtMovementCardPlayed": {
+    "placeholders": { "player": { "type": "String" }, "value": { "type": "int" } }
+  },
+  "evtMoved": "{player} moved to {tile}",
+  "@evtMoved": {
+    "placeholders": { "player": { "type": "String" }, "tile": { "type": "String" } }
+  },
+  "evtMovedPassedGo": "{player} moved to {tile} (passed Go)",
+  "@evtMovedPassedGo": {
+    "placeholders": { "player": { "type": "String" }, "tile": { "type": "String" } }
+  },
+  "evtSalaryPaid": "{player} collected ${amount} salary",
+  "@evtSalaryPaid": {
+    "placeholders": { "player": { "type": "String" }, "amount": { "type": "int" } }
+  },
+  "evtAuctionOpened": "{discoverer} landed on {tile}: sealed bid open (${floor} floor for {discoverer})",
+  "@evtAuctionOpened": {
+    "placeholders": {
+      "discoverer": { "type": "String" },
+      "tile": { "type": "String" },
+      "floor": { "type": "int" }
+    }
+  },
+  "evtBidSubmitted": "{player} submitted a bid",
+  "@evtBidSubmitted": { "placeholders": { "player": { "type": "String" } } },
+  "evtAuctionUnsold": "{tile} stays unsold",
+  "@evtAuctionUnsold": { "placeholders": { "tile": { "type": "String" } } },
+  "evtAuctionWon": "{winner} won {tile} at ${amount}",
+  "@evtAuctionWon": {
+    "placeholders": {
+      "winner": { "type": "String" },
+      "tile": { "type": "String" },
+      "amount": { "type": "int" }
+    }
+  },
+  "evtRentPaid": "{from} paid ${amount} rent to {to} for {tile}",
+  "@evtRentPaid": {
+    "placeholders": {
+      "from": { "type": "String" },
+      "amount": { "type": "int" },
+      "to": { "type": "String" },
+      "tile": { "type": "String" }
+    }
+  },
+  "evtTaxPaid": "{player} paid ${amount} tax",
+  "@evtTaxPaid": {
+    "placeholders": { "player": { "type": "String" }, "amount": { "type": "int" } }
+  },
+  "evtCardDrawn": "{player} drew: {text}",
+  "@evtCardDrawn": {
+    "placeholders": { "player": { "type": "String" }, "text": { "type": "String" } }
+  },
+  "evtCashReceived": "{player} received ${amount} ({reason})",
+  "@evtCashReceived": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "amount": { "type": "int" },
+      "reason": { "type": "String" }
+    }
+  },
+  "evtCashPaid": "{player} paid ${amount} ({reason})",
+  "@evtCashPaid": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "amount": { "type": "int" },
+      "reason": { "type": "String" }
+    }
+  },
+  "evtHouseBuilt": "{player} built on {tile} (now {houses})",
+  "@evtHouseBuilt": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "tile": { "type": "String" },
+      "houses": { "type": "int" }
+    }
+  },
+  "evtHouseSold": "{player} sold a house on {tile} (+${refund})",
+  "@evtHouseSold": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "tile": { "type": "String" },
+      "refund": { "type": "int" }
+    }
+  },
+  "evtExpropriated": "{player} seized {tile} from {from} for ${cost}",
+  "@evtExpropriated": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "tile": { "type": "String" },
+      "from": { "type": "String" },
+      "cost": { "type": "int" }
+    }
+  },
+  "evtExpropriatedLiquidated": "{player} seized {tile} from {from} for ${cost} ({levels} levels liquidated, ${refund} to the former owner)",
+  "@evtExpropriatedLiquidated": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "tile": { "type": "String" },
+      "from": { "type": "String" },
+      "cost": { "type": "int" },
+      "levels": { "type": "int" },
+      "refund": { "type": "int" }
+    }
+  },
+  "evtRentBoosted": "{player} boosted {tile} rent to level {level} for ${cost}",
+  "@evtRentBoosted": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "tile": { "type": "String" },
+      "level": { "type": "int" },
+      "cost": { "type": "int" }
+    }
+  },
+  "evtMortgaged": "{player} mortgaged {tile} for ${value}",
+  "@evtMortgaged": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "tile": { "type": "String" },
+      "value": { "type": "int" }
+    }
+  },
+  "evtUnmortgaged": "{player} redeemed {tile} for ${cost}",
+  "@evtUnmortgaged": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "tile": { "type": "String" },
+      "cost": { "type": "int" }
+    }
+  },
+  "evtWentToJail": "{player} went to jail",
+  "@evtWentToJail": { "placeholders": { "player": { "type": "String" } } },
+  "evtLegalRouteChosen": "{player} chose a Legal Route [{order}] (rent-free on their tiles until it's done)",
+  "@evtLegalRouteChosen": {
+    "placeholders": { "player": { "type": "String" }, "order": { "type": "String" } }
+  },
+  "evtBribeOffered": "{player} offers a ${amount} bribe to leave jail",
+  "@evtBribeOffered": {
+    "placeholders": { "player": { "type": "String" }, "amount": { "type": "int" } }
+  },
+  "evtBribeVoteCast": "{player} voted on the bribe",
+  "@evtBribeVoteCast": { "placeholders": { "player": { "type": "String" } } },
+  "evtBribeAccepted": "Bribe accepted ({accepts}/{total}): {briber} pays ${amount}, split among the table",
+  "@evtBribeAccepted": {
+    "placeholders": {
+      "accepts": { "type": "int" },
+      "total": { "type": "int" },
+      "briber": { "type": "String" },
+      "amount": { "type": "int" }
+    }
+  },
+  "evtBribeRejected": "Bribe rejected ({accepts}/{total}): {briber} stays in jail",
+  "@evtBribeRejected": {
+    "placeholders": {
+      "accepts": { "type": "int" },
+      "total": { "type": "int" },
+      "briber": { "type": "String" }
+    }
+  },
+  "evtJailCardReceived": "{player} received a get-out-of-jail-free card",
+  "@evtJailCardReceived": { "placeholders": { "player": { "type": "String" } } },
+  "evtJailCardUsed": "{player} used a get-out-of-jail-free card",
+  "@evtJailCardUsed": { "placeholders": { "player": { "type": "String" } } },
+  "evtLeftJail": "{player} left jail",
+  "@evtLeftJail": { "placeholders": { "player": { "type": "String" } } },
+  "evtPropertyReturnedToBank": "{tile} returned to the bank",
+  "@evtPropertyReturnedToBank": { "placeholders": { "tile": { "type": "String" } } },
+  "evtPropertyTransferred": "{tile} transferred to {to}",
+  "@evtPropertyTransferred": {
+    "placeholders": { "tile": { "type": "String" }, "to": { "type": "String" } }
+  },
+  "evtTradeProposed": "{from} proposed trade #{trade} to {to}",
+  "@evtTradeProposed": {
+    "placeholders": {
+      "from": { "type": "String" },
+      "trade": { "type": "int" },
+      "to": { "type": "String" }
+    }
+  },
+  "evtTradeAccepted": "{to} accepted trade #{trade}",
+  "@evtTradeAccepted": {
+    "placeholders": { "to": { "type": "String" }, "trade": { "type": "int" } }
+  },
+  "evtTradeDeclined": "Trade #{trade} declined",
+  "@evtTradeDeclined": { "placeholders": { "trade": { "type": "int" } } },
+  "evtTradeCancelled": "Trade #{trade} cancelled",
+  "@evtTradeCancelled": { "placeholders": { "trade": { "type": "int" } } },
+  "evtPlayerBankrupt": "{player} went bankrupt",
+  "@evtPlayerBankrupt": { "placeholders": { "player": { "type": "String" } } },
+  "evtPlayerResigned": "{player} resigned",
+  "@evtPlayerResigned": { "placeholders": { "player": { "type": "String" } } },
+  "evtGameEnded": "Game over -- {winner} wins!",
+  "@evtGameEnded": { "placeholders": { "winner": { "type": "String" } } },
+  "evtTimeUp": "Time's up! {winner} wins on net worth.",
+  "@evtTimeUp": { "placeholders": { "winner": { "type": "String" } } },
+  "evtWonByGroups": "{winner} wins by controlling {groups} colour groups!",
+  "@evtWonByGroups": {
+    "placeholders": { "winner": { "type": "String" }, "groups": { "type": "int" } }
+  },
+  "evtWonByPoints": "{player} wins with {points} victory points!",
+  "@evtWonByPoints": {
+    "placeholders": { "player": { "type": "String" }, "points": { "type": "int" } }
+  },
+  "evtWonByPoolExhaustion": "The conglomerate pool ran dry -- {winner} wins on victory points!",
+  "@evtWonByPoolExhaustion": { "placeholders": { "winner": { "type": "String" } } },
+  "evtMarketActivated": "Market event: {event} ({pct}%)",
+  "@evtMarketActivated": {
+    "placeholders": { "event": { "type": "String" }, "pct": { "type": "String" } }
+  },
+  "evtMarketActivatedDuration": "Market event: {event} ({pct}% for {duration} turns)",
+  "@evtMarketActivatedDuration": {
+    "placeholders": {
+      "event": { "type": "String" },
+      "pct": { "type": "String" },
+      "duration": { "type": "int" }
+    }
+  },
+  "evtMarketExpired": "Market event ended: {event}",
+  "@evtMarketExpired": { "placeholders": { "event": { "type": "String" } } },
+  "evtSpotlightStartedUntil": "The Exposition spotlights {tile} (+{pct}% rent until the next Exposition landing)",
+  "@evtSpotlightStartedUntil": {
+    "placeholders": { "tile": { "type": "String" }, "pct": { "type": "int" } }
+  },
+  "evtSpotlightStartedDuration": "The Exposition spotlights {tile} (+{pct}% rent for {duration} turns)",
+  "@evtSpotlightStartedDuration": {
+    "placeholders": {
+      "tile": { "type": "String" },
+      "pct": { "type": "int" },
+      "duration": { "type": "int" }
+    }
+  },
+  "evtSpotlightEnded": "The spotlight on {tile} fades",
+  "@evtSpotlightEnded": { "placeholders": { "tile": { "type": "String" } } },
+  "evtRentBoostConsumed": "The boost on {tile} is spent (one-shot trap)",
+  "@evtRentBoostConsumed": { "placeholders": { "tile": { "type": "String" } } },
+  "evtRoundBonusAwarded": "{player} is the round's cash leader: +{points} permanent VP",
+  "@evtRoundBonusAwarded": {
+    "placeholders": { "player": { "type": "String" }, "points": { "type": "int" } }
+  }
 }

@@ -77,6 +77,11 @@ class ParcelloApp extends StatelessWidget {
       home: ListenableBuilder(
         listenable: session,
         builder: (context, _) {
+          // This builder sits under MaterialApp's Localizations, so it is the
+          // earliest place the (context-free) session can be handed its
+          // AppLocalizations for the event log - refreshed every frame, set
+          // before any server message is processed.
+          session.l10n = AppLocalizations.of(context);
           if (session.joined) return GameScreen(s: session);
           if (session.connected) return MenuScreen(s: session);
           return ConnectScreen(s: session);
@@ -90,7 +95,7 @@ class ParcelloApp extends StatelessWidget {
 void copyCode(BuildContext context, String code) {
   Clipboard.setData(ClipboardData(text: code));
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text('Room code $code copied'),
+    content: Text(AppLocalizations.of(context).roomCodeCopied(code)),
     duration: const Duration(seconds: 1),
   ));
 }
@@ -671,6 +676,7 @@ class GameScreen extends StatelessWidget {
     // fall back to the content snapshot from join.
     final boost = s.settings?.rules.rentBoost ?? c.rentBoost;
     final expro = s.settings?.rules.expropriation ?? c.expropriation;
+    final t = AppLocalizations.of(context);
 
     showModalBottomSheet<void>(
       context: context,
@@ -684,7 +690,7 @@ class GameScreen extends StatelessWidget {
         if (mine) {
           if (def.rentModel == 'houses' && !ts.mortgaged) {
             items.add(ListTile(
-                title: Text('Build house (\$${def.houseCost})'),
+                title: Text(t.tileBuildHouse(def.houseCost)),
                 onTap: () {
                   s.sendCmd({'type': 'build', 'tile': def.id});
                   close();
@@ -692,7 +698,7 @@ class GameScreen extends StatelessWidget {
           }
           if (ts.houses > 0) {
             items.add(ListTile(
-                title: const Text('Sell house'),
+                title: Text(t.tileSellHouse),
                 onTap: () {
                   s.sendCmd({'type': 'sell_house', 'tile': def.id});
                   close();
@@ -700,14 +706,14 @@ class GameScreen extends StatelessWidget {
           }
           if (boost > 0 && !ts.mortgaged && ts.boosts < 3) {
             items.add(ListTile(
-                title: Text('Boost rent (\$${price * boost ~/ 100})'),
+                title: Text(t.tileBoostRent(price * boost ~/ 100)),
                 onTap: () {
                   s.sendCmd({'type': 'boost_rent', 'tile': def.id});
                   close();
                 }));
           }
           items.add(ListTile(
-              title: Text(ts.mortgaged ? 'Redeem mortgage' : 'Mortgage'),
+              title: Text(ts.mortgaged ? t.tileRedeemMortgage : t.tileMortgage),
               onTap: () {
                 s.sendCmd({
                   'type': ts.mortgaged ? 'unmortgage' : 'mortgage',
@@ -729,14 +735,14 @@ class GameScreen extends StatelessWidget {
           final String label;
           final String subtitle;
           if (ts.mortgaged) {
-            label = 'Buy out mortgage (\$${price ~/ 2})';
-            subtitle = 'take this tile - stays mortgaged, redeem it after';
+            label = t.tileBuyOutMortgage(price ~/ 2);
+            subtitle = t.tileBuyOutMortgageSub;
           } else if (ts.houses > 0) {
-            label = 'Seize + liquidate (\$${price * expro ~/ 100})';
-            subtitle = 'take this tile from its owner';
+            label = t.tileSeizeLiquidate(price * expro ~/ 100);
+            subtitle = t.tileSeizeSub;
           } else {
-            label = 'Seize (\$${price * expro ~/ 100})';
-            subtitle = 'take this tile from its owner';
+            label = t.tileSeize(price * expro ~/ 100);
+            subtitle = t.tileSeizeSub;
           }
           items.add(ListTile(
               title: Text(label),
@@ -761,6 +767,7 @@ class _CenterPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     // A dark plate on the sage plaza: the HUD is a panel *on* the board, not a
     // hole in it. (The plaza itself stays sage - `docs/visual-identity.md`.)
     return Container(
@@ -793,7 +800,7 @@ class _CenterPanel extends StatelessWidget {
         const SizedBox(height: 4),
         Row(children: [
           Expanded(
-              child: Text(_status(),
+              child: Text(_status(t),
                   style: const TextStyle(fontWeight: FontWeight.w600))),
           if (s.turnEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
@@ -840,24 +847,24 @@ class _CenterPanel extends StatelessWidget {
                 paused: s.isAnimating),
           ],
         ]),
-          if (_poolsLine() != null) ...[
+          if (_poolsLine(t) != null) ...[
             const SizedBox(height: 2),
-            Text(_poolsLine()!,
+            Text(_poolsLine(t)!,
                 style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
           ],
-          if (_forecastLine() != null) ...[
+          if (_forecastLine(t) != null) ...[
             const SizedBox(height: 2),
-            Text(_forecastLine()!,
+            Text(_forecastLine(t)!,
                 style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
           ],
-          if (_spotlightLine() != null) ...[
+          if (_spotlightLine(t) != null) ...[
             const SizedBox(height: 2),
-            Text(_spotlightLine()!,
+            Text(_spotlightLine(t)!,
                 style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
           ],
-          if (_vpLegend() != null) ...[
+          if (_vpLegend(t) != null) ...[
             const SizedBox(height: 6),
-            _vpLegend()!,
+            _vpLegend(t)!,
           ],
           const SizedBox(height: 6),
           _Actions(s: s),
@@ -871,14 +878,14 @@ class _CenterPanel extends StatelessWidget {
   /// How victory points are earned (ADR-0020), front and center on the
   /// table - the race is the win condition but its scoring was opaque in
   /// playtests (2026-07). Null when the VP race is off.
-  Widget? _vpLegend() {
+  Widget? _vpLegend(AppLocalizations t) {
     final target = s.content?.winVictoryPoints ?? 0;
     if (s.view == null || target <= 0) return null;
-    const rows = [
-      ('3', 'a complete colour group'),
-      ('2', 'a maxed (conglomerate) tile'),
-      ('1', 'a utility tile you own'),
-      ('+2', 'each round, to the richest player'),
+    final rows = [
+      ('1', t.vpLegendUtilityTile),
+      ('2', t.vpLegendMaxedTile),
+      ('3', t.vpLegendFullGroup),
+      ('+2', t.vpLegendRoundBonus),
     ];
     return Container(
       padding: const EdgeInsets.all(8),
@@ -888,7 +895,7 @@ class _CenterPanel extends StatelessWidget {
         border: Border.all(color: Pc.gold, width: 1),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('VICTORY POINTS  ·  first to $target wins',
+        Text(t.vpLegendHeader(target),
             style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
@@ -913,7 +920,7 @@ class _CenterPanel extends StatelessWidget {
               ),
             ]),
           ),
-        ..._roundProgress(),
+        ..._roundProgress(t),
       ]),
     );
   }
@@ -924,7 +931,7 @@ class _CenterPanel extends StatelessWidget {
   /// bonus banks to whoever is richest at that instant. The round number is
   /// the MINIMUM hands-cycled across survivors - so progress is simply how
   /// many players have already pulled ahead of that minimum.
-  List<Widget> _roundProgress() {
+  List<Widget> _roundProgress(AppLocalizations t) {
     final v = s.view;
     if (v == null || v.finished) return const [];
     final alive = [
@@ -946,7 +953,7 @@ class _CenterPanel extends StatelessWidget {
       const Divider(height: 1, color: Color(0x33A9812F)),
       const SizedBox(height: 5),
       Row(children: [
-        Text('ROUND ${round + 1}',
+        Text(t.roundLabel(round + 1),
             style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
@@ -970,12 +977,12 @@ class _CenterPanel extends StatelessWidget {
             ),
           ),
         const SizedBox(width: 4),
-        Text('${done.length}/${alive.length} hands cycled',
+        Text(t.roundHandsCycled(done.length, alive.length),
             style: const TextStyle(fontSize: 10, color: Pc.textFaint)),
       ]),
       const SizedBox(height: 2),
       Text(
-        '+2 VP to ${s.playerName(leader)} (richest) when the round closes',
+        t.roundBonusHint(s.playerName(leader)),
         style: const TextStyle(fontSize: 10, color: Pc.textMuted),
       ),
     ];
@@ -983,18 +990,19 @@ class _CenterPanel extends StatelessWidget {
 
   /// Shared building pools (ADR-0019): "the tension only works if everyone
   /// watches the shelf empty." Null when pooling is off entirely.
-  String? _poolsLine() {
+  String? _poolsLine(AppLocalizations t) {
     final v = s.view;
     if (v == null) return null;
     final subs = v.subsidiariesAvailable;
     final congs = v.conglomeratesAvailable;
     if (subs == null && congs == null) return null;
-    return 'Subsidiaries: ${subs ?? 'unlimited'} | Conglomerates: ${congs ?? 'unlimited'}';
+    return t.poolsLine(
+        subs?.toString() ?? t.poolsUnlimited, congs?.toString() ?? t.poolsUnlimited);
   }
 
   /// Public market forecast (ADR-0021): reveals draws already made, not the
   /// generator. Null when nothing is scheduled or active.
-  String? _forecastLine() {
+  String? _forecastLine(AppLocalizations t) {
     final v = s.view;
     final c = s.content;
     if (v == null || c == null) return null;
@@ -1004,21 +1012,22 @@ class _CenterPanel extends StatelessWidget {
     if (f.active != null) {
       final a = f.active!;
       final sign = a.magnitudePct > 0 ? '+' : '';
-      parts.add(
-          '${c.marketEventName(a.eventId)} active ($sign${a.magnitudePct}%, ends turn ${a.endsAtTurn})');
+      parts.add(t.forecastActive(
+          c.marketEventName(a.eventId), '$sign${a.magnitudePct}', a.endsAtTurn));
     }
     if (f.queue.isNotEmpty) {
       final upcoming = f.queue
-          .map((e) => '${c.marketEventName(e.eventId)} (turn ${e.startsAtTurn})')
+          .map((e) =>
+              t.forecastUpcomingItem(c.marketEventName(e.eventId), e.startsAtTurn))
           .join(', ');
-      parts.add('upcoming: $upcoming');
+      parts.add(t.forecastUpcoming(upcoming));
     }
     return parts.join(' | ');
   }
 
   /// The Exposition corner's spotlight (ADR-0026): fully public, no per-seat
   /// masking. Null when nothing is currently spotlit.
-  String? _spotlightLine() {
+  String? _spotlightLine(AppLocalizations t) {
     final v = s.view;
     final c = s.content;
     final sp = v?.spotlight;
@@ -1028,41 +1037,42 @@ class _CenterPanel extends StatelessWidget {
     // carries u32::MAX as its expiry sentinel - don't print that.
     final pct = s.settings?.rules.spotlightRentPct ?? c.spotlightRentPct;
     final until = sp.expiresAtTurn >= 0xFFFFFFFF
-        ? 'until replaced'
-        : 'ends turn ${sp.expiresAtTurn}';
-    return '${c.board[sp.tile].name} spotlighted (+$pct%, $until)';
+        ? t.spotlightUntilReplaced
+        : t.spotlightEndsTurn(sp.expiresAtTurn);
+    return t.spotlightLine(c.board[sp.tile].name, pct, until);
   }
 
-  String _status() {
+  String _status(AppLocalizations t) {
     final v = s.view;
     if (v == null) {
       return s.seats.length >= 2
-          ? 'Ready — host can start.'
-          : 'Waiting for players…';
+          ? t.statusReadyHostCanStart
+          : t.statusWaitingForPlayers;
     }
-    if (v.finished) return 'Game over — ${s.playerName(v.winner!)} wins!';
-    final t = v.turn;
-    switch (t.type) {
+    if (v.finished) return t.statusGameOver(s.playerName(v.winner!));
+    final turn = v.turn;
+    switch (turn.type) {
       case 'blind_auction':
         final pending = <int>[
-          for (var i = 0; i < t.bids.length; i++)
-            if (t.bids[i] == null) i
+          for (var i = 0; i < turn.bids.length; i++)
+            if (turn.bids[i] == null) i
         ];
         final waiting = pending.isEmpty
-            ? 'nobody'
+            ? t.statusNobody
             : pending.map(s.playerName).join(', ');
-        return 'Sealed bid on ${s.tileName(t.tile!)} — waiting on: $waiting';
+        return t.statusSealedBid(s.tileName(turn.tile!), waiting);
       case 'bribe_vote':
         final pending = <int>[
-          for (var i = 0; i < t.votes.length; i++)
-            if (i != t.briber && t.votes[i] == null) i
+          for (var i = 0; i < turn.votes.length; i++)
+            if (i != turn.briber && turn.votes[i] == null) i
         ];
         final waiting = pending.isEmpty
-            ? 'nobody'
+            ? t.statusNobody
             : pending.map(s.playerName).join(', ');
-        return '${s.playerName(t.briber!)} offers \$${t.amount} to leave jail — waiting on: $waiting';
+        return t.statusBribeVote(
+            s.playerName(turn.briber!), turn.amount!, waiting);
       default:
-        return "${s.playerName(v.current)}'s turn";
+        return t.statusPlayerTurn(s.playerName(v.current));
     }
   }
 }
@@ -1188,7 +1198,9 @@ class _MuteButtonState extends State<_MuteButton> {
       padding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
       constraints: const BoxConstraints(),
-      tooltip: sfx.enabled ? 'Mute sound' : 'Unmute sound',
+      tooltip: sfx.enabled
+          ? AppLocalizations.of(context).muteSound
+          : AppLocalizations.of(context).unmuteSound,
       icon: Icon(sfx.enabled ? Icons.volume_up : Icons.volume_off,
           color: Pc.textMuted),
       onPressed: () => setState(() => sfx.enabled = !sfx.enabled),
@@ -1427,6 +1439,7 @@ class _ActionsState extends State<_Actions> {
   @override
   Widget build(BuildContext context) {
     final s = widget.s;
+    final loc = AppLocalizations.of(context);
     final v = s.view;
     if (v == null || v.finished) return const SizedBox.shrink();
     final t = v.turn;
@@ -1494,17 +1507,16 @@ class _ActionsState extends State<_Actions> {
       children.addAll([
         Text(
           isDiscoverer
-              ? 'Sealed bid on ${s.tileName(t.tile!)} (floor \$$price if you stay silent):'
-              : 'Sealed bid on ${s.tileName(t.tile!)}:',
+              ? loc.actionSealedBidFloor(s.tileName(t.tile!), price)
+              : loc.actionSealedBid(s.tileName(t.tile!)),
           style: const TextStyle(fontSize: 12),
         ),
         // The discoverer's edge (ADR-0018): landing there took the risk,
         // so a contested win above the floor is rewarded with a discount.
         if (isDiscoverer)
-          const Text(
-            'Outbid a rival above the floor and you pay only 90% of your '
-            'bid - your reward for landing here.',
-            style: TextStyle(fontSize: 10, color: Pc.textFaint),
+          Text(
+            loc.actionDiscovererHint,
+            style: const TextStyle(fontSize: 10, color: Pc.textFaint),
           ),
         SizedBox(
           width: 90,
@@ -1528,9 +1540,9 @@ class _ActionsState extends State<_Actions> {
             'type': 'submit_blind_bid',
             'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
           }),
-          child: const Text('Bid'),
+          child: Text(loc.actionBid),
         )),
-        btn('Abstain', {'type': 'submit_blind_bid', 'amount': 0},
+        btn(loc.actionAbstain, {'type': 'submit_blind_bid', 'amount': 0},
             primary: false),
         // Quick raises as a percent of the list price, so escalating a bid
         // doesn't mean typing out full numbers under the clock. Mutating
@@ -1540,13 +1552,13 @@ class _ActionsState extends State<_Actions> {
           hoverSfx(OutlinedButton(
             onPressed: () => bumpBid(pct),
             style: touch,
-            child: Text('+$pct%'),
+            child: Text(loc.actionRaisePct(pct)),
           )),
         // All-in: the highest bid the sealed-bid invariant will accept.
         hoverSfx(OutlinedButton(
           onPressed: () => _bid.text = '$cash',
           style: touch,
-          child: Text('Max (\$$cash)'),
+          child: Text(loc.actionMaxBid(cash)),
         )),
       ]);
     } else if (t.type == 'bribe_vote') {
@@ -1562,11 +1574,11 @@ class _ActionsState extends State<_Actions> {
       }
       children.addAll([
         Text(
-          '${s.playerName(t.briber!)} offers \$${t.amount} to leave jail:',
+          loc.actionBribePrompt(s.playerName(t.briber!), t.amount!),
           style: const TextStyle(fontSize: 12),
         ),
-        btn('Accept', {'type': 'vote_on_bribe', 'accept': true}),
-        btn('Reject', {'type': 'vote_on_bribe', 'accept': false},
+        btn(loc.actionAccept, {'type': 'vote_on_bribe', 'accept': true}),
+        btn(loc.actionReject, {'type': 'vote_on_bribe', 'accept': false},
             primary: false),
       ]);
     } else if (s.myTurn) {
@@ -1580,13 +1592,13 @@ class _ActionsState extends State<_Actions> {
               onEnter: (_) => s.setHoverTile(
                   (me.position + route.first) % s.content!.board.length),
               onExit: (_) => s.setHoverTile(null),
-              child: btn('Play ${route.first} (route)',
+              child: btn(loc.actionPlayRoute(route.first),
                   {'type': 'play_movement_card', 'value': route.first}),
             ));
           } else if (me.inJail) {
             // Three exits: jail card, Corruption bribe, Legal Route.
             if (me.jailCards > 0) {
-              children.add(btn('Use jail card', {'type': 'use_jail_card'},
+              children.add(btn(loc.actionUseJailCard, {'type': 'use_jail_card'},
                   primary: false));
             }
             // A Legal Route is a permutation of the full FRESH hand - every
@@ -1609,12 +1621,8 @@ class _ActionsState extends State<_Actions> {
             }
             final routeComplete = _routeOrder.length == sorted.length;
             children.addAll([
-              const Text(
-                  'Legal Route: take a fresh hand and lock in the order you '
-                  'will play it. You leave jail at once and the first card '
-                  'plays now - but the plan is public, and your properties '
-                  'charge no rent until it runs out.',
-                  style: TextStyle(fontSize: 12)),
+              Text(loc.actionLegalRouteHint,
+                  style: const TextStyle(fontSize: 12)),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -1634,13 +1642,13 @@ class _ActionsState extends State<_Actions> {
                         }
                       : null,
                   style: touch,
-                  child: const Text('Choose route'),
+                  child: Text(loc.actionChooseRoute),
                 )),
                 if (_routeOrder.isNotEmpty) ...[
                   const SizedBox(width: 6),
                   hoverSfx(TextButton(
                     onPressed: () => setState(() => _routeOrder.clear()),
-                    child: const Text('Reset'),
+                    child: Text(loc.actionReset),
                   )),
                 ],
               ]),
@@ -1654,7 +1662,7 @@ class _ActionsState extends State<_Actions> {
                 ),
               ),
               btn(
-                  'Offer bribe',
+                  loc.actionOfferBribe,
                   {
                     'type': 'offer_bribe',
                     'amount': int.tryParse(_bribe.text) ?? 0
@@ -1677,16 +1685,23 @@ class _ActionsState extends State<_Actions> {
             }
           }
         case 'await_end':
-          children.add(btn('End turn', {'type': 'end_turn'}));
+          children.add(btn(loc.actionEndTurn, {'type': 'end_turn'}));
       }
-      children.add(const Text('Tap your tiles to build / mortgage.',
-          style: TextStyle(color: Pc.textFaint, fontSize: 11)));
+      children.add(Text(loc.actionTapTilesHint,
+          style: const TextStyle(color: Pc.textFaint, fontSize: 11)));
     }
-    return Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: children);
+    // Grouped so a controller / Steam Deck traverses the action buttons
+    // directionally; the Material buttons are already focus-highlighted and
+    // Enter/A-activatable. No autofocus here - this panel rebuilds on every
+    // server update, and stealing focus each time would fight the player.
+    return FocusTraversalGroup(
+      policy: ReadingOrderTraversalPolicy(),
+      child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: children),
+    );
   }
 
   /// One tappable movement-card chip for the Legal Route builder: tap to
@@ -1750,6 +1765,7 @@ class _SidePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final v = s.view;
+    final t = AppLocalizations.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       // Game over: replay together, or go back to the start screen.
       if (v != null && v.finished)
@@ -1760,21 +1776,22 @@ class _SidePanel extends StatelessWidget {
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${s.playerName(v.winner!)} wins!',
+                  Text(t.sideWinnerWins(s.playerName(v.winner!)),
                       style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: Pc.gold)),
                   const SizedBox(height: 8),
                   Row(children: [
-                    Expanded(child: wideButton('Play again', s.sendPlayAgain)),
+                    Expanded(child: wideButton(t.playAgain, s.sendPlayAgain)),
                     const SizedBox(width: 8),
                     Expanded(
-                        child: wideButton('Continue', s.leaveRoom,
+                        child: wideButton(t.continueLabel, s.leaveRoom,
                             primary: false)),
                   ]),
-                  const Text('"Play again" restarts for everyone still here.',
-                      style: TextStyle(fontSize: 11, color: Pc.textMuted)),
+                  Text(t.playAgainHint,
+                      style: const TextStyle(
+                          fontSize: 11, color: Pc.textMuted)),
                 ]),
           ),
         ),
@@ -1785,7 +1802,7 @@ class _SidePanel extends StatelessWidget {
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(
-                child: Text('ROOM ${s.code ?? ""}',
+                child: Text(t.sideRoom(s.code ?? ''),
                     style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
@@ -1796,7 +1813,7 @@ class _SidePanel extends StatelessWidget {
                 hoverSfx(IconButton(
                   iconSize: 18,
                   visualDensity: VisualDensity.compact,
-                  tooltip: 'Copy room code',
+                  tooltip: t.copyRoomCode,
                   icon: const Icon(Icons.copy, color: Pc.textMuted),
                   onPressed: () => copyCode(context, s.code!),
                 )),
@@ -1807,10 +1824,10 @@ class _SidePanel extends StatelessWidget {
             // repaints on an animation frame. The trade panel and the settings
             // fields below never do.
             ListenableBuilder(
-                listenable: s.stage, builder: (context, _) => _players()),
+                listenable: s.stage, builder: (context, _) => _players(t)),
             if (s.view == null) ...[
               const SizedBox(height: 8),
-              wideButton('Start game',
+              wideButton(t.startGame,
                   s.seat == 0 && s.seats.length >= 2 ? s.sendStart : null),
               // Host-only bot controls. Bots fill empty seats but yield to
               // humans, so they never block a join (ADR-0014).
@@ -1819,12 +1836,12 @@ class _SidePanel extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 6),
                   child: Row(children: [
                     Expanded(
-                        child: wideButton('Add bot',
+                        child: wideButton(t.addBot,
                             s.seats.length < 6 ? s.addBot : null,
                             primary: false)),
                     const SizedBox(width: 6),
                     Expanded(
-                        child: wideButton('Remove bot',
+                        child: wideButton(t.removeBot,
                             s.seats.any((x) => x.isBot) ? s.removeBot : null,
                             primary: false)),
                   ]),
@@ -1832,7 +1849,7 @@ class _SidePanel extends StatelessWidget {
               if (s.code != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: wideButton('Copy code to share', () => copyCode(context, s.code!),
+                  child: wideButton(t.copyCodeToShare, () => copyCode(context, s.code!),
                       primary: false),
                 ),
               if (s.settings != null) _SettingsPanel(s: s),
@@ -1856,26 +1873,26 @@ class _SidePanel extends StatelessWidget {
               final ok = await showDialog<bool>(
                 context: context,
                 builder: (ctx) => AlertDialog(
-                  title: const Text('Resign from the game?'),
+                  title: Text(t.resignConfirmTitle),
                   actions: [
                     hoverSfx(TextButton(
                         onPressed: () {
                           sfx.buttonNo();
                           Navigator.pop(ctx, false);
                         },
-                        child: const Text('Cancel'))),
+                        child: Text(t.cancel))),
                     hoverSfx(TextButton(
                         onPressed: () {
                           sfx.buttonYes();
                           Navigator.pop(ctx, true);
                         },
-                        child: const Text('Resign'))),
+                        child: Text(t.resign))),
                   ],
                 ),
               );
               if (ok == true) s.sendCmd({'type': 'resign'});
             },
-            child: const Text('Resign'),
+            child: Text(t.resign),
           )),
         ),
       ),
@@ -1901,7 +1918,7 @@ class _SidePanel extends StatelessWidget {
     return ranks;
   }
 
-  Widget _players() {
+  Widget _players(AppLocalizations t) {
     final v = s.view;
     final rows = <Widget>[];
     final count = v?.players.length ?? s.seats.length;
@@ -1920,7 +1937,7 @@ class _SidePanel extends StatelessWidget {
     for (var i = 0; i < count; i++) {
       final p = v?.players.elementAtOrNull(i);
       final seatInfo = s.seats.elementAtOrNull(i);
-      final name = p?.name ?? seatInfo?.name ?? 'seat $i';
+      final name = p?.name ?? seatInfo?.name ?? t.seatFallback(i);
       // Whose turn is it: bold text alone read as too subtle in playtests
       // (2026-07) - a highlighted row + a leading marker reads at a glance.
       final isActive = v != null && !v.finished && v.current == i;
@@ -1928,15 +1945,15 @@ class _SidePanel extends StatelessWidget {
       final cycled =
           round != null && p != null && !p.bankrupt && p.handsCycled > round;
       final tags = [
-        if (cycled) '✓ hand cycled',
-        if (i == s.seat) '(you)',
-        if (p?.inJail == true) '[jail]',
-        if (p?.jailRoute != null) '[route: ${p!.jailRoute!.join(',')} left]',
-        if ((p?.jailCards ?? 0) > 0) '[${p!.jailCards} jail card]',
+        if (cycled) t.playerTagHandCycled,
+        if (i == s.seat) t.playerTagYou,
+        if (p?.inJail == true) t.playerTagJail,
+        if (p?.jailRoute != null) t.playerTagRoute(p!.jailRoute!.join(',')),
+        if ((p?.jailCards ?? 0) > 0) t.playerTagJailCard(p!.jailCards),
         if (seatInfo?.isBot == true)
-          '\u{1F916} bot'
+          t.playerTagBot
         else if (seatInfo?.connected == false)
-          '(offline)',
+          t.playerTagOffline,
       ].join(' ');
       rows.add(AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -2008,11 +2025,11 @@ class _SidePanel extends StatelessWidget {
                         fontFeatures: [FontFeature.tabularFigures()])),
                 // Net worth decides a timed game (ADR-0010), so surface it then.
                 if (s.gameEndsAt != null)
-                  Text('NW \$${s.netWorth(i)}',
+                  Text(t.sideNetWorth(s.netWorth(i)),
                       style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
                 // Victory-point race (ADR-0020): "the race IS the game".
                 if ((s.content?.winVictoryPoints ?? 0) > 0)
-                  Text('VP ${p.victoryPoints}/${s.content!.winVictoryPoints}',
+                  Text(t.sideVictoryPoints(p.victoryPoints, s.content!.winVictoryPoints),
                       style: const TextStyle(
                           fontSize: 11,
                           color: Pc.goldDark,
@@ -2030,48 +2047,50 @@ class _SidePanel extends StatelessWidget {
 
   Widget _trades(BuildContext context) {
     final v = s.view;
+    final t = AppLocalizations.of(context);
     final offers = v?.pendingTrades ?? [];
     String side(int cash, List<int> tiles) {
       final parts = [
         if (cash > 0) '\$$cash',
         ...tiles.map(s.tileName),
       ];
-      return parts.isEmpty ? 'nothing' : parts.join(' + ');
+      return parts.isEmpty ? t.tradeNothing : parts.join(' + ');
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('TRADES',
-          style: TextStyle(
+      Text(t.tradesHeader,
+          style: const TextStyle(
               fontSize: 12, color: Pc.textMuted, letterSpacing: 1)),
       const SizedBox(height: 6),
       if (offers.isEmpty)
-        const Text('No open offers.',
-            style: TextStyle(color: Pc.textMuted)),
+        Text(t.tradeNoOffers, style: const TextStyle(color: Pc.textMuted)),
       for (final o in offers)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('#${o.id} ${s.playerName(o.from)} gives '
-                '${side(o.giveCash, o.giveTiles)} for '
-                '${side(o.receiveCash, o.receiveTiles)} '
-                '(to ${s.playerName(o.to)})'),
+            Text(t.tradeOffer(
+                o.id,
+                s.playerName(o.from),
+                side(o.giveCash, o.giveTiles),
+                side(o.receiveCash, o.receiveTiles),
+                s.playerName(o.to))),
             Row(children: [
               if (o.to == s.seat) ...[
                 hoverSfx(TextButton(
                     onPressed: () =>
                         s.sendCmd({'type': 'accept_trade', 'trade': o.id}),
-                    child: const Text('Accept'))),
+                    child: Text(t.actionAccept))),
                 hoverSfx(TextButton(
                     onPressed: () =>
                         s.sendCmd({'type': 'decline_trade', 'trade': o.id}),
-                    child: const Text('Refuse'))),
+                    child: Text(t.tradeRefuse))),
               ],
               if (o.from == s.seat)
                 hoverSfx(TextButton(
                     onPressed: () =>
                         s.sendCmd({'type': 'cancel_trade', 'trade': o.id}),
-                    child: const Text('Cancel'))),
+                    child: Text(t.cancel))),
             ]),
           ]),
         ),
@@ -2079,7 +2098,7 @@ class _SidePanel extends StatelessWidget {
         hoverSfx(OutlinedButton(
           onPressed: () => showDialog<void>(
               context: context, builder: (ctx) => TradeDialog(s: s)),
-          child: const Text('New offer'),
+          child: Text(t.tradeNewOffer),
         )),
     ]);
   }
@@ -2140,27 +2159,48 @@ class _SettingsPanel extends StatefulWidget {
 }
 
 class _SettingsPanelState extends State<_SettingsPanel> {
-  // key -> (label, controller). Order defines the display order.
-  static const _fields = [
-    ('game', 'Game length (min, 0=off)'),
-    ('turn', 'Turn limit (s, 0=off)'),
-    ('bank', 'Time bank (s, 0=off)'),
-    ('starting_balance', 'Starting balance'),
-    ('go_salary', 'GO salary'),
-    ('velocity_min', 'Velocity min'),
-    ('velocity_max', 'Velocity max'),
-    ('max_houses', 'Max houses (1-5)'),
-    ('bankruptcy_threshold', 'Bankruptcy threshold'),
-    ('expropriation', 'Expropriation %'),
-    ('rent_boost', 'Rent boost %'),
-    ('win_full_groups', 'Domination groups (0=off)'),
-    ('win_points', 'Victory points target (0=off)'),
-    ('subsidiary_pool', 'Subsidiary pool factor (0=off)'),
-    ('conglomerate_pool', 'Conglomerate pool factor (0=off)'),
-    ('spotlight_rent_pct', 'Spotlight rent % (0=off)'),
-    ('spotlight_duration', 'Spotlight duration (turns)'),
+  // Field keys in display order; labels are resolved per-locale in _hostLabel.
+  static const _fieldKeys = [
+    'game',
+    'turn',
+    'bank',
+    'starting_balance',
+    'go_salary',
+    'velocity_min',
+    'velocity_max',
+    'max_houses',
+    'bankruptcy_threshold',
+    'expropriation',
+    'rent_boost',
+    'win_full_groups',
+    'win_points',
+    'subsidiary_pool',
+    'conglomerate_pool',
+    'spotlight_rent_pct',
+    'spotlight_duration',
   ];
   late final Map<String, TextEditingController> _c;
+
+  String _hostLabel(AppLocalizations t, String key) => switch (key) {
+        'game' => t.settingGameLength,
+        'turn' => t.settingTurnLimit,
+        'bank' => t.settingTimeBank,
+        'starting_balance' => t.settingStartingBalance,
+        'go_salary' => t.settingGoSalary,
+        'velocity_min' => t.settingVelocityMin,
+        'velocity_max' => t.settingVelocityMax,
+        'max_houses' => t.settingMaxHouses,
+        'bankruptcy_threshold' => t.settingBankruptcyThreshold,
+        'expropriation' => t.settingExpropriationPct,
+        'rent_boost' => t.settingRentBoostPct,
+        'win_full_groups' => t.settingDominationGroups,
+        'win_points' => t.settingVictoryPointsTarget,
+        'subsidiary_pool' => t.settingSubsidiaryPool,
+        'conglomerate_pool' => t.settingConglomeratePool,
+        'spotlight_rent_pct' => t.settingSpotlightRentPct,
+        'spotlight_duration' => t.settingSpotlightDuration,
+        _ => key,
+      };
 
   @override
   void initState() {
@@ -2232,34 +2272,42 @@ class _SettingsPanelState extends State<_SettingsPanel> {
   @override
   Widget build(BuildContext context) {
     final s = widget.s.settings!;
+    final t = AppLocalizations.of(context);
     final host = widget.s.seat == 0;
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: const EdgeInsets.only(bottom: 8),
-        title: const Text('Game settings',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-        subtitle: Text(_summary(s),
+        title: Text(t.settingsTitle,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        subtitle: Text(_summary(s, t),
             style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
-        children: host ? _hostFields() : _readOnly(s),
+        children: host ? _hostFields(t) : _readOnly(s, t),
       ),
     );
   }
 
-  String _summary(RoomSettings s) {
-    final g = s.gameSeconds == null ? 'off' : '${s.gameSeconds! ~/ 60}min';
-    final t = s.turnSeconds == null ? 'off' : '${s.turnSeconds}s';
-    final b = s.timeBankSeconds == null ? 'off' : '${s.timeBankSeconds}s';
-    return 'game $g - turn $t - bank $b';
+  String _summary(RoomSettings s, AppLocalizations t) {
+    final g = s.gameSeconds == null
+        ? t.settingOff
+        : t.settingMinutes(s.gameSeconds! ~/ 60);
+    final tn =
+        s.turnSeconds == null ? t.settingOff : t.settingSeconds(s.turnSeconds!);
+    final b = s.timeBankSeconds == null
+        ? t.settingOff
+        : t.settingSeconds(s.timeBankSeconds!);
+    return t.settingsSummary(g, tn, b);
   }
 
-  List<Widget> _hostFields() => [
-        for (final (key, label) in _fields)
+  List<Widget> _hostFields(AppLocalizations t) => [
+        for (final key in _fieldKeys)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(children: [
-              Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
+              Expanded(
+                  child: Text(_hostLabel(t, key),
+                      style: const TextStyle(fontSize: 12))),
               SizedBox(
                 width: 84,
                 child: TextField(
@@ -2272,40 +2320,67 @@ class _SettingsPanelState extends State<_SettingsPanel> {
             ]),
           ),
         const SizedBox(height: 4),
-        wideButton('Apply settings', _apply, primary: false),
+        wideButton(t.settingApply, _apply, primary: false),
       ];
 
-  List<Widget> _readOnly(RoomSettings s) {
+  List<Widget> _readOnly(RoomSettings s, AppLocalizations t) {
     final r = s.rules;
     final rows = <(String, String)>[
-      ('Game length', s.gameSeconds == null ? 'off' : '${s.gameSeconds! ~/ 60} min'),
-      ('Turn limit', s.turnSeconds == null ? 'off' : '${s.turnSeconds} s'),
-      ('Time bank', s.timeBankSeconds == null ? 'off' : '${s.timeBankSeconds} s'),
-      ('Starting balance', '\$${r.startingBalance}'),
-      ('GO salary', '\$${r.goSalary}'),
-      ('Velocity', '${r.velocityMin}-${r.velocityMax}'),
-      ('Max houses', '${r.maxHousesPerProperty}'),
-      ('Bankruptcy threshold', '\$${r.bankruptcyThreshold}'),
-      ('Expropriation', r.expropriation == 0 ? 'off' : '${r.expropriation}%'),
-      ('Rent boost', r.rentBoost == 0 ? 'off' : '${r.rentBoost}%'),
-      ('Domination', r.winFullGroups == 0 ? 'off' : '${r.winFullGroups} groups'),
       (
-        'Victory points',
-        r.winVictoryPoints == 0 ? 'off' : '${r.winVictoryPoints}'
+        t.settingRoGameLength,
+        s.gameSeconds == null
+            ? t.settingOff
+            : t.settingMinutes(s.gameSeconds! ~/ 60)
       ),
       (
-        'Subsidiary pool',
-        r.subsidiaryPoolFactor == 0 ? 'off' : 'x${r.subsidiaryPoolFactor}'
+        t.settingRoTurnLimit,
+        s.turnSeconds == null ? t.settingOff : t.settingSeconds(s.turnSeconds!)
       ),
       (
-        'Conglomerate pool',
-        r.conglomeratePoolFactor == 0 ? 'off' : 'x${r.conglomeratePoolFactor}'
+        t.settingRoTimeBank,
+        s.timeBankSeconds == null
+            ? t.settingOff
+            : t.settingSeconds(s.timeBankSeconds!)
+      ),
+      (t.settingStartingBalance, '\$${r.startingBalance}'),
+      (t.settingGoSalary, '\$${r.goSalary}'),
+      (t.settingRoVelocity, '${r.velocityMin}-${r.velocityMax}'),
+      (t.settingRoMaxHouses, '${r.maxHousesPerProperty}'),
+      (t.settingBankruptcyThreshold, '\$${r.bankruptcyThreshold}'),
+      (
+        t.settingRoExpropriation,
+        r.expropriation == 0 ? t.settingOff : t.settingPercent(r.expropriation)
       ),
       (
-        'Spotlight',
+        t.settingRoRentBoost,
+        r.rentBoost == 0 ? t.settingOff : t.settingPercent(r.rentBoost)
+      ),
+      (
+        t.settingRoDomination,
+        r.winFullGroups == 0 ? t.settingOff : t.settingGroups(r.winFullGroups)
+      ),
+      (
+        t.settingRoVictoryPoints,
+        r.winVictoryPoints == 0 ? t.settingOff : '${r.winVictoryPoints}'
+      ),
+      (
+        t.settingRoSubsidiaryPool,
+        r.subsidiaryPoolFactor == 0
+            ? t.settingOff
+            : t.settingPoolFactor(r.subsidiaryPoolFactor)
+      ),
+      (
+        t.settingRoConglomeratePool,
+        r.conglomeratePoolFactor == 0
+            ? t.settingOff
+            : t.settingPoolFactor(r.conglomeratePoolFactor)
+      ),
+      (
+        t.settingRoSpotlight,
         r.spotlightRentPct == 0
-            ? 'off'
-            : '+${r.spotlightRentPct}% / ${r.spotlightDurationTurns} turns'
+            ? t.settingOff
+            : t.settingSpotlightValue(
+                r.spotlightRentPct, r.spotlightDurationTurns)
       ),
     ];
     return [
@@ -2342,14 +2417,15 @@ class _FeedbackCardState extends State<_FeedbackCard> {
   @override
   Widget build(BuildContext context) {
     final s = widget.s;
+    final t = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            const Expanded(
-              child: Text('HOW WAS THE GAME?',
-                  style: TextStyle(
+            Expanded(
+              child: Text(t.feedbackTitle,
+                  style: const TextStyle(
                       fontSize: 12,
                       color: Pc.textMuted,
                       letterSpacing: 1)),
@@ -2357,7 +2433,7 @@ class _FeedbackCardState extends State<_FeedbackCard> {
             hoverSfx(IconButton(
               icon: const Icon(Icons.close, size: 16),
               onPressed: s.dismissFeedback,
-              tooltip: 'Dismiss',
+              tooltip: t.feedbackDismiss,
             )),
           ]),
           Row(children: [
@@ -2373,15 +2449,15 @@ class _FeedbackCardState extends State<_FeedbackCard> {
           TextField(
             controller: _comment,
             maxLength: 500,
-            decoration: const InputDecoration(
-                labelText: 'Anything to add? (optional)', counterText: ''),
+            decoration: InputDecoration(
+                labelText: t.feedbackCommentHint, counterText: ''),
           ),
           const SizedBox(height: 6),
           hoverSfx(FilledButton(
             onPressed: _rating == 0
                 ? null
                 : () => s.sendFeedback(_rating, _comment.text),
-            child: const Text('Send'),
+            child: Text(t.feedbackSend),
           )),
         ]),
       ),
@@ -2409,6 +2485,7 @@ class _TradeDialogState extends State<TradeDialog> {
   @override
   Widget build(BuildContext context) {
     final s = widget.s;
+    final t = AppLocalizations.of(context);
     final v = s.view!;
     final candidates = [
       for (var i = 0; i < v.players.length; i++)
@@ -2451,12 +2528,12 @@ class _TradeDialogState extends State<TradeDialog> {
             controller: c,
             keyboardType: TextInputType.number,
             decoration:
-                const InputDecoration(labelText: 'Cash', isDense: true),
+                InputDecoration(labelText: t.cashLabel, isDense: true),
           ),
         );
 
     return AlertDialog(
-      title: const Text('New trade offer'),
+      title: Text(t.tradeNewOfferTitle),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         DropdownButton<int>(
           value: _to,
@@ -2472,13 +2549,13 @@ class _TradeDialogState extends State<TradeDialog> {
         ),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Column(children: [
-            const Text('You give'),
+            Text(t.tradeYouGive),
             cashField(_giveCash),
             tileList(s.seat, _giveTiles),
           ]),
           const SizedBox(width: 12),
           Column(children: [
-            const Text('You want'),
+            Text(t.tradeYouWant),
             cashField(_receiveCash),
             tileList(_to, _receiveTiles),
           ]),
@@ -2487,7 +2564,7 @@ class _TradeDialogState extends State<TradeDialog> {
       actions: [
         hoverSfx(TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Close'))),
+            child: Text(t.close))),
         hoverSfx(FilledButton(
           onPressed: _to == null
               ? null
@@ -2502,7 +2579,7 @@ class _TradeDialogState extends State<TradeDialog> {
                   });
                   Navigator.pop(context);
                 },
-          child: const Text('Propose'),
+          child: Text(t.tradePropose),
         )),
       ],
     );

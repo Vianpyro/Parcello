@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parcello_client/l10n/app_localizations.dart';
+import 'package:parcello_client/l10n/app_localizations_en.dart';
 import 'package:parcello_client/main.dart';
 import 'package:parcello_client/protocol.dart';
 import 'package:parcello_client/session.dart';
@@ -143,14 +144,16 @@ void main() {
   });
 
   test('describeEvent covers jail cards and falls back on unknown types', () {
+    final loc = AppLocalizationsEn();
     String p(int i) => 'P$i';
     String t(int i) => 'T$i';
     expect(
-      describeEvent({'type': 'jail_card_received', 'player': 0}, p, t),
+      describeEvent({'type': 'jail_card_received', 'player': 0}, loc, p, t),
       'P0 received a get-out-of-jail-free card',
     );
     expect(
-      describeEvent({'type': 'movement_card_played', 'player': 1, 'value': 4}, p, t),
+      describeEvent(
+          {'type': 'movement_card_played', 'player': 1, 'value': 4}, loc, p, t),
       'P1 played movement card 4',
     );
     expect(
@@ -161,11 +164,11 @@ void main() {
         'succeeded': true,
         'accepts': 2,
         'total': 3,
-      }, p, t),
+      }, loc, p, t),
       'Bribe accepted (2/3): P0 pays \$90, split among the table',
     );
     expect(
-      describeEvent({'type': 'brand_new_event', 'x': 1}, p, t),
+      describeEvent({'type': 'brand_new_event', 'x': 1}, loc, p, t),
       contains('brand_new_event'),
     );
   });

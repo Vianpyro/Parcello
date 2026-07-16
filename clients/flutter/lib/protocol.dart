@@ -4,6 +4,8 @@
 /// the reference web client, so the wire format stays visible at call sites.
 library;
 
+import 'l10n/app_localizations.dart';
+
 class SeatInfo {
   final int seat;
   final String playerId;
@@ -360,126 +362,129 @@ String _identityEventName(String id) => id;
 /// (and tests) that don't have content loaded yet still get the raw id.
 String describeEvent(
   Map<String, dynamic> e,
+  AppLocalizations loc,
   String Function(int seat) p,
   String Function(int tile) t, [
   String Function(String eventId) m = _identityEventName,
 ]) {
   switch (e['type']) {
     case 'turn_started':
-      return "--- ${p(e['player'])}'s turn ---";
+      return loc.evtTurnStarted(p(e['player']));
     case 'movement_card_played':
-      return "${p(e['player'])} played movement card ${e['value']}";
+      return loc.evtMovementCardPlayed(p(e['player']), e['value']);
     case 'moved':
-      return "${p(e['player'])} moved to ${t(e['to'])}"
-          "${e['passed_go'] == true ? ' (passed Go)' : ''}";
+      return e['passed_go'] == true
+          ? loc.evtMovedPassedGo(p(e['player']), t(e['to']))
+          : loc.evtMoved(p(e['player']), t(e['to']));
     case 'salary_paid':
-      return "${p(e['player'])} collected \$${e['amount']} salary";
+      return loc.evtSalaryPaid(p(e['player']), e['amount']);
     case 'blind_auction_opened':
-      return "${p(e['discoverer'])} landed on ${t(e['tile'])}: sealed bid open "
-          "(\$${e['floor']} floor for ${p(e['discoverer'])})";
+      return loc.evtAuctionOpened(p(e['discoverer']), t(e['tile']), e['floor']);
     case 'blind_bid_submitted':
-      return "${p(e['player'])} submitted a bid";
+      return loc.evtBidSubmitted(p(e['player']));
     case 'blind_auction_resolved':
       return e['winner'] == null
-          ? "${t(e['tile'])} stays unsold"
-          : "${p(e['winner'])} won ${t(e['tile'])} at \$${e['amount']}";
+          ? loc.evtAuctionUnsold(t(e['tile']))
+          : loc.evtAuctionWon(p(e['winner']), t(e['tile']), e['amount']);
     case 'rent_paid':
-      return "${p(e['from'])} paid \$${e['amount']} rent to ${p(e['to'])} for ${t(e['tile'])}";
+      return loc.evtRentPaid(
+          p(e['from']), e['amount'], p(e['to']), t(e['tile']));
     case 'tax_paid':
-      return "${p(e['player'])} paid \$${e['amount']} tax";
+      return loc.evtTaxPaid(p(e['player']), e['amount']);
     case 'card_drawn':
-      return "${p(e['player'])} drew: ${e['text']}";
+      return loc.evtCardDrawn(p(e['player']), e['text'] as String);
     case 'cash_adjusted':
       final int delta = e['delta'];
-      return "${p(e['player'])} ${delta >= 0 ? 'received' : 'paid'} \$${delta.abs()} (${e['reason']})";
+      return delta >= 0
+          ? loc.evtCashReceived(
+              p(e['player']), delta.abs(), e['reason'] as String)
+          : loc.evtCashPaid(p(e['player']), delta.abs(), e['reason'] as String);
     case 'house_built':
-      return "${p(e['player'])} built on ${t(e['tile'])} (now ${e['houses']})";
+      return loc.evtHouseBuilt(p(e['player']), t(e['tile']), e['houses']);
     case 'house_sold':
-      return "${p(e['player'])} sold a house on ${t(e['tile'])} (+\$${e['refund']})";
+      return loc.evtHouseSold(p(e['player']), t(e['tile']), e['refund']);
     case 'expropriated':
-      final base =
-          "${p(e['player'])} seized ${t(e['tile'])} from ${p(e['from'])} for \$${e['cost']}";
       final liquidated = e['liquidated'] as int? ?? 0;
       return liquidated > 0
-          ? "$base ($liquidated levels liquidated, \$${e['liquidation_refund']} to the former owner)"
-          : base;
+          ? loc.evtExpropriatedLiquidated(p(e['player']), t(e['tile']),
+              p(e['from']), e['cost'], liquidated, e['liquidation_refund'])
+          : loc.evtExpropriated(
+              p(e['player']), t(e['tile']), p(e['from']), e['cost']);
     case 'rent_boosted':
-      return "${p(e['player'])} boosted ${t(e['tile'])} rent to level ${e['boosts']} for \$${e['cost']}";
+      return loc.evtRentBoosted(
+          p(e['player']), t(e['tile']), e['boosts'], e['cost']);
     case 'property_mortgaged':
-      return "${p(e['player'])} mortgaged ${t(e['tile'])} for \$${e['value']}";
+      return loc.evtMortgaged(p(e['player']), t(e['tile']), e['value']);
     case 'property_unmortgaged':
-      return "${p(e['player'])} redeemed ${t(e['tile'])} for \$${e['cost']}";
+      return loc.evtUnmortgaged(p(e['player']), t(e['tile']), e['cost']);
     case 'went_to_jail':
-      return "${p(e['player'])} went to jail";
+      return loc.evtWentToJail(p(e['player']));
     case 'legal_route_chosen':
-      final order = (e['order'] as List).join(',');
-      return "${p(e['player'])} chose a Legal Route [$order] "
-          "(rent-free on their tiles until it's done)";
+      return loc.evtLegalRouteChosen(
+          p(e['player']), (e['order'] as List).join(','));
     case 'bribe_offered':
-      return "${p(e['player'])} offers a \$${e['amount']} bribe to leave jail";
+      return loc.evtBribeOffered(p(e['player']), e['amount']);
     case 'bribe_vote_cast':
-      return "${p(e['player'])} voted on the bribe";
+      return loc.evtBribeVoteCast(p(e['player']));
     case 'bribe_resolved':
       return e['succeeded'] == true
-          ? "Bribe accepted (${e['accepts']}/${e['total']}): "
-              "${p(e['briber'])} pays \$${e['amount']}, split among the table"
-          : "Bribe rejected (${e['accepts']}/${e['total']}): "
-              "${p(e['briber'])} stays in jail";
+          ? loc.evtBribeAccepted(
+              e['accepts'], e['total'], p(e['briber']), e['amount'])
+          : loc.evtBribeRejected(e['accepts'], e['total'], p(e['briber']));
     case 'jail_card_received':
-      return "${p(e['player'])} received a get-out-of-jail-free card";
+      return loc.evtJailCardReceived(p(e['player']));
     case 'jail_card_used':
-      return "${p(e['player'])} used a get-out-of-jail-free card";
+      return loc.evtJailCardUsed(p(e['player']));
     case 'left_jail':
-      return "${p(e['player'])} left jail";
+      return loc.evtLeftJail(p(e['player']));
     case 'property_transferred':
       return e['to'] == null
-          ? "${t(e['tile'])} returned to the bank"
-          : "${t(e['tile'])} transferred to ${p(e['to'])}";
+          ? loc.evtPropertyReturnedToBank(t(e['tile']))
+          : loc.evtPropertyTransferred(t(e['tile']), p(e['to']));
     case 'trade_proposed':
-      return "${p(e['from'])} proposed trade #${e['trade']} to ${p(e['to'])}";
+      return loc.evtTradeProposed(p(e['from']), e['trade'], p(e['to']));
     case 'trade_accepted':
-      return "${p(e['to'])} accepted trade #${e['trade']}";
+      return loc.evtTradeAccepted(p(e['to']), e['trade']);
     case 'trade_declined':
-      return "Trade #${e['trade']} declined";
+      return loc.evtTradeDeclined(e['trade']);
     case 'trade_cancelled':
-      return "Trade #${e['trade']} cancelled";
+      return loc.evtTradeCancelled(e['trade']);
     case 'player_bankrupt':
-      return "${p(e['player'])} went bankrupt";
+      return loc.evtPlayerBankrupt(p(e['player']));
     case 'player_resigned':
-      return "${p(e['player'])} resigned";
+      return loc.evtPlayerResigned(p(e['player']));
     case 'game_ended':
-      return "Game over -- ${p(e['winner'])} wins!";
+      return loc.evtGameEnded(p(e['winner']));
     case 'time_up':
-      return "Time's up! ${p(e['winner'])} wins on net worth.";
+      return loc.evtTimeUp(p(e['winner']));
     case 'won_by_groups':
-      return "${p(e['winner'])} wins by controlling ${e['groups']} colour groups!";
+      return loc.evtWonByGroups(p(e['winner']), e['groups']);
     case 'won_by_points':
-      return "${p(e['player'])} wins with ${e['points']} victory points!";
+      return loc.evtWonByPoints(p(e['player']), e['points']);
     case 'won_by_pool_exhaustion':
-      return "The conglomerate pool ran dry -- ${p(e['winner'])} wins on victory points!";
+      return loc.evtWonByPoolExhaustion(p(e['winner']));
     case 'market_event_activated':
       final pct = e['magnitude_pct'] as int;
-      final sign = pct > 0 ? '+' : '';
+      final pctStr = '${pct > 0 ? '+' : ''}$pct';
       final duration = e['duration_turns'] as int;
       return duration == 0
-          ? "Market event: ${m(e['event_id'] as String)} ($sign$pct%)"
-          : "Market event: ${m(e['event_id'] as String)} ($sign$pct% for $duration turns)";
+          ? loc.evtMarketActivated(m(e['event_id'] as String), pctStr)
+          : loc.evtMarketActivatedDuration(
+              m(e['event_id'] as String), pctStr, duration);
     case 'market_event_expired':
-      return "Market event ended: ${m(e['event_id'] as String)}";
+      return loc.evtMarketExpired(m(e['event_id'] as String));
     case 'spotlight_started':
       final pct = e['rent_pct'] as int;
       final duration = e['duration_turns'] as int;
-      final span = duration <= 0
-          ? 'until the next Exposition landing'
-          : 'for $duration turns';
-      return "The Exposition spotlights ${t(e['tile'])} (+$pct% rent $span)";
+      return duration <= 0
+          ? loc.evtSpotlightStartedUntil(t(e['tile']), pct)
+          : loc.evtSpotlightStartedDuration(t(e['tile']), pct, duration);
     case 'spotlight_ended':
-      return "The spotlight on ${t(e['tile'])} fades";
+      return loc.evtSpotlightEnded(t(e['tile']));
     case 'rent_boost_consumed':
-      return "The boost on ${t(e['tile'])} is spent (one-shot trap)";
+      return loc.evtRentBoostConsumed(t(e['tile']));
     case 'round_bonus_awarded':
-      return "${p(e['player'])} is the round's cash leader: "
-          "+${e['points']} permanent VP";
+      return loc.evtRoundBonusAwarded(p(e['player']), e['points']);
     default:
       return e.toString();
   }

@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'director.dart';
+import 'l10n/app_localizations.dart';
 import 'motion.dart';
 import 'protocol.dart';
 import 'session_storage.dart';
@@ -54,6 +55,10 @@ class GameSession extends ChangeNotifier {
   /// Current room settings (timers + rules, ADR-0015); the host edits them
   /// in the lobby. Null before the first Joined/Lobby message.
   RoomSettings? settings;
+  /// Localizations for the event log, set by the widget tree (which has a
+  /// BuildContext) on every frame - see ParcelloApp. Non-null from the first
+  /// rendered frame, i.e. before any server message is ever processed.
+  AppLocalizations? l10n;
   final List<String> log = [];
   String loginMessage = '';
   bool joined = false;
@@ -368,7 +373,9 @@ class GameSession extends ChangeNotifier {
         _trackTimedWindows();
         joined = true;
         loginMessage = '';
-        _log('Joined room $code. Mods: ${content!.modIds.join(', ')}');
+        if (l10n case final loc?) {
+          _log(loc.logJoinedRoom(code ?? '', content!.modIds.join(', ')));
+        }
       case 'lobby':
         final incoming = _seatList(msg['players']);
         _announceSeatChanges(incoming);
@@ -385,7 +392,7 @@ class GameSession extends ChangeNotifier {
         banks = null;
         _trackTimedWindows();
         sfx.gameStart();
-        _log('Game started.');
+        if (l10n case final loc?) _log(loc.logGameStarted);
       case 'update':
         // Queued rather than applied (ADR-0028): the animation director
         // below plays each Update as paced beats, applies the
@@ -398,11 +405,11 @@ class GameSession extends ChangeNotifier {
         // On the thing that said no, not in a modal and not only in the log.
         final code = (msg['error'] as Map<String, dynamic>)['code'] as String;
         stage.refuse(_lastCmdTile, code);
-        _log('Rejected: $code');
+        if (l10n case final loc?) _log(loc.logRejected(code));
       case 'error':
         sfx.error();
         if (!joined) loginMessage = msg['message'] as String;
-        _log('Error: ${msg['message']}');
+        if (l10n case final loc?) _log(loc.logError(msg['message'] as String));
     }
     notifyListeners();
   }
@@ -447,9 +454,11 @@ class GameSession extends ChangeNotifier {
   Future<void> _playUpdate(Map<String, dynamic> msg) async {
     final epoch = _updateEpoch;
     final events = (msg['events'] as List).cast<Map<String, dynamic>>();
-    for (final e in events) {
-      _log(describeEvent(
-          e, playerName, tileName, content?.marketEventName ?? (id) => id));
+    if (l10n case final loc?) {
+      for (final e in events) {
+        _log(describeEvent(e, loc, playerName, tileName,
+            content?.marketEventName ?? (id) => id));
+      }
     }
 
     if (view != null && joined) {
