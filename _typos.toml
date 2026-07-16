@@ -11,4 +11,11 @@ extend-exclude = [
     "clients/flutter/build/",
     "Cargo.lock",
     "clients/flutter/pubspec.lock",
+    # Translations: typos only has an English dictionary, so a French ARB is a
+    # wall of false positives (`sur` -> `sure`, `complet` -> `complete`, ...).
+    # The English template stays checked - it is the one file where a real typo
+    # would be authored, and it seeds every other locale. Any locale added later
+    # is excluded by this glob without touching this list again.
+    "clients/flutter/lib/l10n/*.arb",
+    "!clients/flutter/lib/l10n/app_en.arb",
 ]

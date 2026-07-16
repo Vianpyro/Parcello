@@ -109,6 +109,11 @@ pub enum ClientMessage {
     AnimationDone {
         through_seq: u64,
     },
+    /// Ask which mod ids this server can resolve (the subdirectories of its
+    /// mods dir), so a client can offer a picker instead of free-text ids.
+    /// Connection-scoped like `Ping`: valid before any room exists, because
+    /// the answer feeds room *creation* (ADR-0006).
+    ListMods,
     Ping,
 }
 
@@ -205,6 +210,12 @@ pub enum ServerMessage {
     },
     Error {
         message: String,
+    },
+    /// Reply to `ListMods`: the mod ids available on this server, sorted.
+    /// Ids only - a client that wants the content resolves it by creating a
+    /// room with them (ADR-0006); this is just enough to fill a picker.
+    Mods {
+        ids: Vec<String>,
     },
     Pong,
 }
@@ -313,6 +324,17 @@ mod tests {
         .unwrap();
         assert!(
             matches!(create, ClientMessage::Create { mods: Some(m), .. } if m == ["base", "x"])
+        );
+
+        // Mod discovery for the client's picker: bare request, id-list reply.
+        let list: ClientMessage = serde_json::from_str(r#"{"type":"list_mods"}"#).unwrap();
+        assert!(matches!(list, ClientMessage::ListMods));
+        let mods = ServerMessage::Mods {
+            ids: vec!["base".into(), "highroller".into()],
+        };
+        assert_eq!(
+            serde_json::to_string(&mods).unwrap(),
+            r#"{"type":"mods","ids":["base","highroller"]}"#
         );
     }
 }

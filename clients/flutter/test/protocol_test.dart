@@ -183,6 +183,49 @@ void main() {
     expect(find.text('Connect'), findsOneWidget);
   });
 
+  testWidgets('the language picker switches the UI locale', (tester) async {
+    final s = GameSession();
+    // The preference is persisted to a real profile file, so this test must
+    // neither depend on nor clobber whatever is saved there: force a known
+    // start without writing, and put the saved value back afterwards.
+    final saved = s.localeTag.value;
+    addTearDown(() => s.setLocaleTag(saved));
+    s.localeTag.value = '';
+
+    await tester.pumpWidget(ParcelloApp(session: s));
+    await tester.pumpAndSettle();
+    expect(find.text('Connect'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.language));
+    await tester.pumpAndSettle();
+    // Language names are endonyms: "Français", never "French".
+    await tester.tap(find.text('Français'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect'), findsNothing);
+    expect(find.text('Se connecter'), findsWidgets);
+  });
+
+  testWidgets('private-table card is one tile tall until a sub-action opens',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: MenuScreen(s: GameSession()),
+    ));
+    await tester.pumpAndSettle();
+
+    final card =
+        find.ancestor(of: find.text('Private table'), matching: find.byType(Card));
+    // Collapsed it matches a menu tile exactly, so the grid row lines up.
+    expect(tester.getSize(card.first).height, 150);
+
+    // Opening a sub-action grows the card in place - it is not a modal.
+    await tester.tap(find.text('Join'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(card.first).height, greaterThan(150));
+  });
+
   testWidgets('rules screen lists the core sections', (tester) async {
     await tester.pumpWidget(MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,

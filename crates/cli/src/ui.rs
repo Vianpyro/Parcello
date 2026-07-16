@@ -111,6 +111,7 @@ impl Ctx {
             }
             ServerMessage::Rejected { error } => println!("! rejected: {error}"),
             ServerMessage::Error { message } => println!("! error: {message}"),
+            ServerMessage::Mods { ids } => println!("* mods: {}", ids.join(", ")),
             ServerMessage::Pong => println!("* pong"),
         }
     }

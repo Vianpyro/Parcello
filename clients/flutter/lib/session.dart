@@ -34,6 +34,7 @@ class GameSession extends ChangeNotifier {
 
   GameSession() {
     _reconnectTokens.addAll(loadReconnectTokens());
+    localeTag.value = _reconnectTokens['_locale'] ?? '';
   }
 
   void _saveToken(String code, String token) {
@@ -46,6 +47,19 @@ class GameSession extends ChangeNotifier {
   // split into a prefs file if more settings ever appear.
   String get savedIssuer => _reconnectTokens['_issuer'] ?? '';
   void saveIssuer(String url) => _saveToken('_issuer', url);
+
+  /// Chosen UI language tag, '' = follow the system. Persisted beside the
+  /// issuer under another reserved key. It carries its own notifier instead of
+  /// riding `notifyListeners()`: the locale sits on `MaterialApp`, and this
+  /// session notifies on every server update - rebuilding the whole app tree
+  /// that often would undo the care taken to keep the board's centre panel
+  /// alive across updates.
+  final ValueNotifier<String> localeTag = ValueNotifier('');
+
+  void setLocaleTag(String tag) {
+    localeTag.value = tag;
+    _saveToken('_locale', tag);
+  }
 
   int? seat;
   String? code;
@@ -230,6 +244,19 @@ class GameSession extends ChangeNotifier {
         if (_reconnectTokens[code] != null) 'reconnect': _reconnectTokens[code],
       };
 
+  /// Mod ids the connected server can resolve; null until it answers
+  /// `list_mods`. Feeds the create-room mod picker so nobody types ids.
+  List<String>? availableMods;
+
+  /// Ask the server for its mod ids (connection-scoped, like ping). Cleared
+  /// first so the picker shows a fresh loading state per request - and an
+  /// old server that ignores the message simply leaves this null, which the
+  /// menu degrades to "default mods only".
+  void requestMods() {
+    availableMods = null;
+    _ws?.sink.add(jsonEncode({'type': 'list_mods'}));
+  }
+
   /// Host a new private room. `mods` picks its mod set (ADR-0006).
   void createGame({List<String> mods = const []}) {
     _ws?.sink.add(jsonEncode({
@@ -347,6 +374,8 @@ class GameSession extends ChangeNotifier {
 
   void _handle(Map<String, dynamic> msg) {
     switch (msg['type']) {
+      case 'mods':
+        availableMods = (msg['ids'] as List).cast<String>();
       case 'room_created':
         code = msg['code'] as String;
       case 'joined':

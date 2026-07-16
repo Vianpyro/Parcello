@@ -125,6 +125,18 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         match (msg, &session) {
             (ClientMessage::Ping, _) => send(&tx, ServerMessage::Pong),
 
+            // Mod discovery for the client's create-room picker (ADR-0006).
+            // Connection-scoped like Ping: the answer feeds room *creation*,
+            // so it must work before any room exists.
+            (ClientMessage::ListMods, _) => {
+                send(
+                    &tx,
+                    ServerMessage::Mods {
+                        ids: list_mods(&app).await,
+                    },
+                );
+            }
+
             (ClientMessage::Create { auth, mods }, None) => {
                 session = handle_create(&app, auth, mods, &tx).await;
             }
@@ -239,6 +251,7 @@ fn relay(msg: ClientMessage, player_id: &str) -> RoomCmd {
         // Connection-scoped messages are consumed by `handle_socket`'s
         // earlier arms and can never reach the relay.
         ClientMessage::Ping
+        | ClientMessage::ListMods
         | ClientMessage::Create { .. }
         | ClientMessage::Join { .. }
         | ClientMessage::Leave => unreachable!("connection-scoped message reached relay"),
@@ -335,6 +348,31 @@ async fn resolve_room_mods(
         .map_err(|_| "mod resolution task failed".to_string())?
         .map(std::sync::Arc::new)
         .map_err(|e| format!("mod resolution failed: {e}"))
+}
+
+/// The mod ids this server can resolve: the subdirectories of `mods_dir`,
+/// filtered through the same `valid_mod_id` allowlist a Create is held to
+/// (never advertise an id we would then refuse), sorted for a stable wire
+/// shape. Read from disk per request rather than cached at boot on purpose:
+/// room creation also resolves from disk, so a mod dropped in while the
+/// server runs is already creatable - the picker must see it too. A readdir
+/// is still filesystem I/O, so it stays off the async executor threads.
+async fn list_mods(app: &AppState) -> Vec<String> {
+    let dir = std::sync::Arc::clone(&app.mods_dir);
+    tokio::task::spawn_blocking(move || {
+        let mut ids: Vec<String> = std::fs::read_dir(&*dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|id| valid_mod_id(id))
+            .collect();
+        ids.sort();
+        ids
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Directory-name charset only: no separators, no dots, so a wire-supplied

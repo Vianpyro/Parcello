@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'back_on_escape.dart';
 import 'session.dart';
 import 'sfx.dart';
 
@@ -101,7 +102,8 @@ class _LanBrowserState extends State<LanBrowser> {
   Widget build(BuildContext context) {
     final list = _servers.values.toList()
       ..sort((a, b) => (b['ts'] as int).compareTo(a['ts'] as int));
-    return Scaffold(
+    return BackOnEscape(
+        child: Scaffold(
       appBar: AppBar(title: const Text('LAN servers')),
       body: Padding(
         padding: const EdgeInsets.all(12),
@@ -136,6 +138,6 @@ class _LanBrowserState extends State<LanBrowser> {
           ),
         ]),
       ),
-    );
+    ));
   }
 }

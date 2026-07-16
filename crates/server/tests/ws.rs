@@ -243,3 +243,25 @@ async fn guest_seat_rejoin_requires_the_reconnect_token() {
     .await;
     assert_eq!(recv_until(&mut back, "joined").await["seat"], 0);
 }
+
+#[tokio::test]
+async fn list_mods_answers_before_any_room_exists() {
+    let url = spawn_server().await;
+
+    // Connection-scoped like ping: no create/join first.
+    let mut client = connect(&url).await;
+    send(&mut client, json!({"type": "list_mods"})).await;
+    let reply = recv(&mut client).await;
+    assert_eq!(reply["type"], "mods");
+    let ids: Vec<&str> = reply["ids"]
+        .as_array()
+        .expect("ids array")
+        .iter()
+        .map(|v| v.as_str().expect("string id"))
+        .collect();
+    // The repo mods dir ships `base` (+ `highroller`); sorted wire shape.
+    assert!(ids.contains(&"base"), "bundled base mod must be listed");
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    assert_eq!(ids, sorted, "ids arrive sorted");
+}

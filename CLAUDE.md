@@ -247,8 +247,9 @@ architecture doc section 5; dependencies point downward only):
   boot if the directory has no `index.html`, same idiom as
   `parcello_mods::resolve`'s `?` propagation - ADR-0025).
 - `crates/cli` - terminal test harness; keep it in sync with new commands
-  (it is the cheapest end-to-end protocol check; `addbot`/`rmbot` and
-  `set <field> <value>` stdin commands too, ADR-0015; the `discover` bin
+  (it is the cheapest end-to-end protocol check; `addbot`/`rmbot`,
+  `set <field> <value>`, and `mods` (prints the server's `list_mods`
+  answer) stdin commands too, ADR-0015; the `discover` bin
   is a headless listener to validate `--lan` announcements). `--bot` turns it into an autopilot seat using the shared
   `parcello_engine::bot::decide` (bid/build/jail card > bribe > Legal
   Route, declines trades) so games can be playtested without volunteers;
@@ -272,7 +273,12 @@ architecture doc section 5; dependencies point downward only):
   surfaced as `AppLocalizations.of(context)` - never a literal in a widget.
   The generated `lib/l10n/app_localizations*.dart` is gitignored (rebuilt by
   `flutter pub get`; CI runs it explicitly, flutter.yml). Config in
-  `l10n.yaml`. The main menu is a card grid (`_MenuTile`) with a static
+  `l10n.yaml`. The main menu is a card grid: a `_PrivateTableCard` whose
+  split footer holds Create (one tap, server-default mods) / Modded / Join -
+  the latter two expand *inline* in the card, never a modal; the mod picker
+  is fed by `list_mods` (tap-to-order chips, same pattern as the Legal Route
+  builder, order matters per ADR-0006; empty selection sends no `mods`
+  field) - plus `_MenuTile`s and a static
   `RulesScreen`; the three OFL fonts (Inter/Fraunces/SourceSerif4) are
   bundled offline under `assets/fonts/` (SHA256SUMS + README there), Inter
   wired as the theme family and their licences registered via

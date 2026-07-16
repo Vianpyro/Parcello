@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'back_on_escape.dart';
 import 'board.dart';
 import 'l10n/app_localizations.dart';
 import 'motion.dart';
@@ -46,7 +47,18 @@ class ParcelloApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Only a language change rebuilds MaterialApp - deliberately NOT the
+    // session's own notifier, which fires on every server update.
+    return ValueListenableBuilder<String>(
+      valueListenable: session.localeTag,
+      builder: (context, tag, _) => _app(tag),
+    );
+  }
+
+  /// `tag` empty = no override, so Flutter resolves the system locale.
+  Widget _app(String tag) {
     return MaterialApp(
+      locale: tag.isEmpty ? null : Locale(tag),
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
@@ -189,6 +201,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Align(
+                      alignment: Alignment.centerRight,
+                      child: _LanguageButton(s: s)),
                   Text(t.appTitle,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -253,74 +268,6 @@ class MenuScreen extends StatefulWidget {
 }
 
 class _MenuScreenState extends State<MenuScreen> {
-  final _code = TextEditingController();
-  final _mods = TextEditingController();
-
-  @override
-  void dispose() {
-    _code.dispose();
-    _mods.dispose();
-    super.dispose();
-  }
-
-  /// Optional comma-separated mod ids for a created room.
-  List<String> _parseMods() => _mods.text
-      .split(',')
-      .map((m) => m.trim())
-      .where((m) => m.isNotEmpty)
-      .toList();
-
-  Future<void> _createDialog() async {
-    final t = AppLocalizations.of(context);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(t.createDialogTitle),
-        content: TextField(
-          controller: _mods,
-          decoration: InputDecoration(labelText: t.modsHint),
-        ),
-        actions: [
-          hoverSfx(TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(t.cancel))),
-          hoverSfx(FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(t.create))),
-        ],
-      ),
-    );
-    if (ok == true) widget.s.createGame(mods: _parseMods());
-  }
-
-  Future<void> _joinDialog() async {
-    final t = AppLocalizations.of(context);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(t.menuJoinTitle),
-        content: TextField(
-          controller: _code,
-          autofocus: true,
-          maxLength: 5,
-          textCapitalization: TextCapitalization.characters,
-          onSubmitted: (_) => Navigator.pop(ctx, true),
-          decoration: InputDecoration(labelText: t.roomCode),
-        ),
-        actions: [
-          hoverSfx(TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(t.cancel))),
-          hoverSfx(FilledButton(
-              onPressed: () => Navigator.pop(ctx, true), child: Text(t.join))),
-        ],
-      ),
-    );
-    if (ok == true && _code.text.trim().isNotEmpty) {
-      widget.s.joinGame(_code.text);
-    }
-  }
-
   void _push(Widget screen) => Navigator.push(
       context, MaterialPageRoute<void>(builder: (_) => screen));
 
@@ -332,17 +279,7 @@ class _MenuScreenState extends State<MenuScreen> {
     // (no raw sockets, no process spawn in a sandbox) - drop those tiles on
     // the web build rather than shipping dead ends.
     final tiles = <Widget>[
-      _MenuTile(
-          icon: Icons.add_circle_outline,
-          title: t.menuCreateTitle,
-          subtitle: t.menuCreateSubtitle,
-          autofocus: true,
-          onTap: _createDialog),
-      _MenuTile(
-          icon: Icons.tag,
-          title: t.menuJoinTitle,
-          subtitle: t.menuJoinSubtitle,
-          onTap: _joinDialog),
+      _PrivateTableCard(s: s),
       if (!kIsWeb)
         _MenuTile(
             icon: Icons.wifi_find_outlined,
@@ -371,6 +308,7 @@ class _MenuScreenState extends State<MenuScreen> {
                 color: Pc.gold)),
         backgroundColor: Pc.surface2,
         actions: [
+          _LanguageButton(s: s),
           TextButton.icon(
             onPressed: s.disconnectFromServer,
             icon: const Icon(Icons.logout, size: 18),
@@ -391,8 +329,8 @@ class _MenuScreenState extends State<MenuScreen> {
                 FocusTraversalGroup(
                   policy: ReadingOrderTraversalPolicy(),
                   child: Wrap(
-                    spacing: 16,
-                    runSpacing: 16,
+                    spacing: _menuGap,
+                    runSpacing: _menuGap,
                     alignment: WrapAlignment.center,
                     children: tiles,
                   ),
@@ -410,7 +348,261 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 }
 
-/// One large action card in the main menu.
+/// Language names are endonyms - a language is always named in its own
+/// language, never translated - so they are data here rather than ARB strings.
+/// Keyed by the codes in `AppLocalizations.supportedLocales`; a locale added
+/// without an entry falls back to its code rather than disappearing.
+const _languageNames = {'en': 'English', 'fr': 'Français'};
+
+/// Picks the UI language: system default, or a forced locale. Available before
+/// connecting (the very place someone whose OS is in another language needs it)
+/// and from the menu.
+class _LanguageButton extends StatelessWidget {
+  final GameSession s;
+  const _LanguageButton({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
+    return hoverSfx(PopupMenuButton<String>(
+      icon: const Icon(Icons.language, size: 18, color: Pc.textMuted),
+      tooltip: t.language,
+      initialValue: s.localeTag.value,
+      onSelected: s.setLocaleTag,
+      itemBuilder: (_) => [
+        PopupMenuItem(value: '', child: Text(t.languageSystem)),
+        for (final l in AppLocalizations.supportedLocales)
+          PopupMenuItem(
+            value: l.languageCode,
+            child: Text(_languageNames[l.languageCode] ?? l.languageCode),
+          ),
+      ],
+    ));
+  }
+}
+
+// Menu grid geometry. The small tiles are fixed cards; the private-table card
+// spans exactly two of them plus the gap, and its *collapsed* body is pinned to
+// one tile height so the row lines up. The header flexes to absorb whatever the
+// footer leaves rather than being computed: a button's real height depends on
+// Material's tap target and the platform's visual density, so arithmetic here
+// would be wrong on some platform. Expanding a sub-action grows the card past
+// the pinned body.
+const double _menuGap = 16;
+const double _menuTileW = 200;
+const double _menuTileH = 150;
+const double _footerBtnMinH = 44;
+
+/// Which sub-action the private-table card has expanded inline, if any.
+enum _TableAction { none, modded, join }
+
+/// The private-table card: one Business-Tour-style card whose split footer
+/// carries the three room actions. Create is a single tap (server-default
+/// mods - the common case must stay one click); Modded and Join expand
+/// *inside* the card, no modal. The mod picker is fed by the server's
+/// `list_mods` answer so nobody ever types a mod id; picking order is kept
+/// because later mods override earlier ones (ADR-0006) - same tap-to-order
+/// chips as the Legal Route builder.
+class _PrivateTableCard extends StatefulWidget {
+  final GameSession s;
+  const _PrivateTableCard({required this.s});
+
+  @override
+  State<_PrivateTableCard> createState() => _PrivateTableCardState();
+}
+
+class _PrivateTableCardState extends State<_PrivateTableCard> {
+  final _code = TextEditingController();
+  _TableAction _open = _TableAction.none;
+  /// Picked mod ids, in pick order (the order sent on the wire).
+  final List<String> _picked = [];
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  void _toggle(_TableAction a) {
+    setState(() => _open = _open == a ? _TableAction.none : a);
+    // Lazy: ask for the list only when the picker opens without an answer.
+    if (_open == _TableAction.modded && widget.s.availableMods == null) {
+      widget.s.requestMods();
+    }
+  }
+
+  void _join() {
+    if (_code.text.trim().isNotEmpty) widget.s.joinGame(_code.text);
+  }
+
+  Widget _footerBtn(String label,
+      {required VoidCallback onTap,
+      bool selected = false,
+      bool autofocus = false}) {
+    return Expanded(
+      child: hoverSfx(TextButton(
+        autofocus: autofocus,
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          foregroundColor: selected ? Pc.gold : Pc.text,
+          backgroundColor:
+              selected ? Pc.gold.withValues(alpha: 0.12) : null,
+          shape: const RoundedRectangleBorder(borderRadius: Pc.radius),
+          minimumSize: const Size(0, _footerBtnMinH),
+        ),
+        child: Text(label,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+      )),
+    );
+  }
+
+  Widget _hairline() => Container(width: 1, height: 24, color: Pc.border);
+
+  /// One selectable mod chip; picked chips show their play position, tapping
+  /// again removes them (mirrors `_routeChip` on the board).
+  Widget _modChip(String id) {
+    final pos = _picked.indexOf(id);
+    final picked = pos >= 0;
+    return hoverSfx(OutlinedButton(
+      onPressed: () => setState(() {
+        if (picked) {
+          _picked.remove(id);
+        } else {
+          _picked.add(id);
+        }
+      }),
+      style: OutlinedButton.styleFrom(
+        shape: const RoundedRectangleBorder(borderRadius: Pc.radius),
+        backgroundColor: picked ? Pc.gold.withValues(alpha: 0.3) : null,
+        side: BorderSide(color: picked ? Pc.goldDark : Pc.textMuted),
+        minimumSize: const Size(0, 40),
+      ),
+      child: Text(picked ? '$id  #${pos + 1}' : id),
+    ));
+  }
+
+  Widget _modPicker(AppLocalizations t) {
+    final mods = widget.s.availableMods;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (mods == null)
+        Text(t.modsLoading,
+            style: const TextStyle(fontSize: 12, color: Pc.textMuted))
+      else if (mods.isEmpty)
+        Text(t.modsUnavailable,
+            style: const TextStyle(fontSize: 12, color: Pc.textMuted))
+      else ...[
+        Text(t.modsOrderHint,
+            style: const TextStyle(fontSize: 11, color: Pc.textFaint)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final id in mods) _modChip(id),
+        ]),
+      ],
+      const SizedBox(height: 10),
+      // Empty selection sends no `mods` field at all - the server default.
+      wideButton(t.create,
+          () => widget.s.createGame(mods: List.of(_picked))),
+    ]);
+  }
+
+  Widget _joinPanel(AppLocalizations t) {
+    return Row(children: [
+      Expanded(
+        child: TextField(
+          controller: _code,
+          autofocus: true,
+          maxLength: 5,
+          textCapitalization: TextCapitalization.characters,
+          onSubmitted: (_) => _join(),
+          decoration: InputDecoration(
+              labelText: t.roomCode, counterText: '', isDense: true),
+        ),
+      ),
+      const SizedBox(width: 8),
+      hoverSfx(FilledButton(onPressed: _join, child: Text(t.join))),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
+    return SizedBox(
+      width: _menuTileW * 2 + _menuGap,
+      child: Card(
+        // Zero margin so the card's box is exactly the body below - a default
+        // Card margin would push it past a tile and break the row.
+        margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
+        color: Pc.surface,
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: _menuTileH,
+                child: Column(children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(children: [
+                        const Icon(Icons.casino_outlined,
+                            size: 40, color: Pc.gold),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(t.menuPrivateTitle,
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                        color: Pc.text)),
+                                const SizedBox(height: 4),
+                                Text(t.menuPrivateSubtitle,
+                                    style: const TextStyle(
+                                        fontSize: 13, color: Pc.textMuted)),
+                              ]),
+                        ),
+                      ]),
+                    ),
+                  ),
+                  const Divider(height: 1, color: Pc.border),
+                  Row(children: [
+                    _footerBtn(t.create,
+                        autofocus: true, onTap: () => widget.s.createGame()),
+                    _hairline(),
+                    _footerBtn(t.createModded,
+                        selected: _open == _TableAction.modded,
+                        onTap: () => _toggle(_TableAction.modded)),
+                    _hairline(),
+                    _footerBtn(t.join,
+                        selected: _open == _TableAction.join,
+                        onTap: () => _toggle(_TableAction.join)),
+                  ]),
+                ]),
+              ),
+              // The sub-action grows the card in place - never a modal.
+              AnimatedSize(
+                duration: Motion.establish,
+                curve: Motion.deliberate,
+                alignment: Alignment.topCenter,
+                child: switch (_open) {
+                  _TableAction.none => const SizedBox(width: double.infinity),
+                  _TableAction.modded => Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                      child: _modPicker(t)),
+                  _TableAction.join => Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                      child: _joinPanel(t)),
+                },
+              ),
+            ]),
+      ),
+    );
+  }
+}
+
 /// One large action card in the main menu. Stateful so it can paint a visible
 /// focus ring: on a controller / Steam Deck the player navigates these with
 /// the D-pad (arrow keys) and activates with A (Enter/Space, handled by the
@@ -420,13 +612,11 @@ class _MenuTile extends StatefulWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
-  final bool autofocus;
   const _MenuTile({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
-    this.autofocus = false,
   });
 
   @override
@@ -439,8 +629,8 @@ class _MenuTileState extends State<_MenuTile> {
   @override
   Widget build(BuildContext context) {
     return hoverSfx(SizedBox(
-      width: 200,
-      height: 150,
+      width: _menuTileW,
+      height: _menuTileH,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         decoration: BoxDecoration(
@@ -455,7 +645,6 @@ class _MenuTileState extends State<_MenuTile> {
           clipBehavior: Clip.antiAlias,
           color: Pc.surface,
           child: InkWell(
-            autofocus: widget.autofocus,
             onFocusChange: (f) => setState(() => _focused = f),
             focusColor: Pc.gold.withValues(alpha: 0.12),
             onTap: widget.onTap,
@@ -467,15 +656,26 @@ class _MenuTileState extends State<_MenuTile> {
                 children: [
                   Icon(widget.icon, size: 40, color: Pc.gold),
                   const Spacer(),
-                  Text(widget.title,
-                      style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Pc.text)),
+                  // The tile is a fixed height, so the labels must be bounded:
+                  // a longer translation (French runs longer than English) has
+                  // to ellipsize, never overflow the card.
+                  Flexible(
+                    child: Text(widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Pc.text)),
+                  ),
                   const SizedBox(height: 4),
-                  Text(widget.subtitle,
-                      style:
-                          const TextStyle(fontSize: 13, color: Pc.textMuted)),
+                  Flexible(
+                    child: Text(widget.subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, color: Pc.textMuted)),
+                  ),
                 ],
               ),
             ),
@@ -502,48 +702,38 @@ class RulesScreen extends StatelessWidget {
       (t.rulesJailTitle, t.rulesJailBody),
       (t.rulesWinTitle, t.rulesWinBody),
     ];
-    // Escape pops the screen - Steam Input maps the controller's B button to
-    // Escape, so "back" works from the couch. Focus(autofocus) gives the
-    // shortcut a place to fire from.
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            Navigator.of(context).maybePop(),
-      },
-      child: Focus(
-        autofocus: true,
-        child: Scaffold(
-          appBar:
-              AppBar(title: Text(t.rulesTitle), backgroundColor: Pc.surface2),
-          body: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 640),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(t.rulesTagline,
+    // Escape (controller B via Steam Input) pops back to the menu.
+    return BackOnEscape(
+      child: Scaffold(
+        appBar: AppBar(title: Text(t.rulesTitle), backgroundColor: Pc.surface2),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(t.rulesTagline,
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontStyle: FontStyle.italic,
+                          color: Pc.gold)),
+                  const SizedBox(height: 20),
+                  for (final (title, body) in sections) ...[
+                    Text(title,
                         style: const TextStyle(
-                            fontSize: 16,
-                            fontStyle: FontStyle.italic,
-                            color: Pc.gold)),
+                            fontFamily: 'Fraunces',
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: Pc.text)),
+                    const SizedBox(height: 6),
+                    Text(body,
+                        style: const TextStyle(
+                            fontSize: 15, height: 1.4, color: Pc.text)),
                     const SizedBox(height: 20),
-                    for (final (title, body) in sections) ...[
-                      Text(title,
-                          style: const TextStyle(
-                              fontFamily: 'Fraunces',
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                              color: Pc.text)),
-                      const SizedBox(height: 6),
-                      Text(body,
-                          style: const TextStyle(
-                              fontSize: 15, height: 1.4, color: Pc.text)),
-                      const SizedBox(height: 20),
-                    ],
                   ],
-                ),
+                ],
               ),
             ),
           ),
@@ -1853,6 +2043,10 @@ class _SidePanel extends StatelessWidget {
                       primary: false),
                 ),
               if (s.settings != null) _SettingsPanel(s: s),
+              // Cancel: leave the room (dissolves it for the host) and return
+              // to the main menu. Keyboard/controller reachable like any button.
+              const SizedBox(height: 6),
+              wideButton(t.backToMenu, s.leaveRoom, primary: false),
             ],
           ]),
         ),

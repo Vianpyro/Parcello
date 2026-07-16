@@ -15,6 +15,7 @@ pub fn parse_command(ctx: &Ctx, line: &str) -> Option<ClientMessage> {
         ("leave", None) => return Some(ClientMessage::Leave),
         ("addbot", None) => return Some(ClientMessage::AddBot),
         ("rmbot", None) => return Some(ClientMessage::RemoveBot),
+        ("mods", None) => return Some(ClientMessage::ListMods),
         ("set", Some(field)) => {
             let value = parts.next()?;
             let mut settings = ctx.settings.clone()?;

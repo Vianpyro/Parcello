@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'back_on_escape.dart';
 import 'sfx.dart';
 
 /// Best-effort default path to the bundled server binary.
@@ -120,7 +121,8 @@ class _ServerManagerState extends State<ServerManager> {
   @override
   Widget build(BuildContext context) {
     final running = _process != null;
-    return Scaffold(
+    return BackOnEscape(
+        child: Scaffold(
       appBar: AppBar(title: const Text('Server Manager')),
       body: Padding(
         padding: const EdgeInsets.all(12),
@@ -156,6 +158,6 @@ class _ServerManagerState extends State<ServerManager> {
           ),
         ]),
       ),
-    );
+    ));
   }
 }

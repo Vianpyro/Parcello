@@ -261,14 +261,18 @@ comment, stored in the server history; one per player per game, fully
 optional and never blocking), `animation_done {through_seq}` (this client
 finished rendering every update through `through_seq`, ADR-0028 - the
 server's animation-sensitive timers wait for these acks, bounded by a 6s
-hard cap; clients with no animations send it immediately), `ping`.
+hard cap; clients with no animations send it immediately), `list_mods`
+(connection-scoped like ping: ask which mod ids this server can resolve, so
+clients can offer a picker instead of free-text ids - the answer feeds room
+creation, ADR-0006), `ping`.
 Server -> client: `room_created`, `joined`
 (includes the resolved mod bundle, a per-seat reconnect token - present it
 in `auth.reconnect` to re-take a guest seat, ADR-0008 - and, mid-game, a
 state snapshot), `lobby`,
 `game_started`, `update {seq, events, view}` (`seq` is the monotonic
 per-room counter the ack above refers to), `rejected {error}` (sent only to
-the offending player), `error`, `pong`. Shapes live in `parcello-protocol`;
+the offending player), `error`, `mods {ids}` (sorted reply to `list_mods`),
+`pong`. Shapes live in `parcello-protocol`;
 commands and events are the engine's own serialized types, so the wire
 format is the replay format.
 

@@ -4,7 +4,7 @@
 //! Stdin commands (`<n>` values, `|` alternatives):
 //!
 //! ```text
-//! start | addbot | rmbot | set <field> <value>
+//! start | addbot | rmbot | mods (list server mod ids) | set <field> <value>
 //! play <n> (movement card) | route <n,n,...> (Legal Route, a full
 //!   permutation of the hand) | bribe <amount> | vote yes|no (5s window,
 //!   ADR-0024) | card (jail card) | bid <amount> (0 abstains; landing on
