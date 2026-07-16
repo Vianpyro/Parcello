@@ -35,6 +35,7 @@ async fn spawn_server() -> String {
         turn_timeout: None,
         time_bank: None,
         game_timeout: None,
+        connections: AppState::connection_limiter(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

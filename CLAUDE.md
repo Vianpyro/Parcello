@@ -172,7 +172,11 @@ architecture doc section 5; dependencies point downward only):
   compilation there; inbound frame + message size are capped at
   `MAX_WS_MESSAGE_BYTES` = 64 KiB so an untrusted client cannot force a
   large allocation before a message is parsed/validated - a *read* limit,
-  so it never truncates the larger server -> client snapshots), `room.rs` (one Tokio task per room; state
+  so it never truncates the larger server -> client snapshots; a global
+  `AppState.connections` semaphore caps concurrent sockets at
+  `MAX_CONNECTIONS` = 1024 and a per-connection token-bucket `RateLimiter`
+  (`MSG_BURST` = 32, `MSG_REFILL_PER_SEC` = 16) closes a flooding client -
+  per-IP throttling is delegated to the deployment's reverse proxy), `room.rs` (one Tokio task per room; state
   machine Lobby -> Active -> Finished; `PlayAgain` restarts a Finished room
   for the still-connected seats via the shared `start_game`; `Leave` drops
   the room but keeps the socket open (ws.rs clears the session so the same

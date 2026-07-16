@@ -10,6 +10,16 @@ use std::sync::Arc;
 use axum::Router;
 use axum::routing::get;
 use parcello_mods::ResolvedContent;
+use tokio::sync::Semaphore;
+
+/// Global ceiling on concurrent WebSocket connections.
+///
+/// A community-hosted server is reachable by untrusted clients; this bounds
+/// how many sockets (memory + file descriptors) one server process will ever
+/// hold at once. Generous vs. real play (a room is 2..=6 seats); per-IP
+/// throttling is left to the reverse proxy the deployment guide puts in front
+/// (docs/deployment.md).
+pub const MAX_CONNECTIONS: usize = 1024;
 
 pub mod auth;
 pub mod eddsa;
@@ -38,6 +48,18 @@ pub struct AppState {
     /// Default personal time bank for new rooms (ADR-0023). `None` = off.
     pub time_bank: Option<std::time::Duration>,
     pub game_timeout: Option<std::time::Duration>,
+    /// Global concurrent-connection limiter (`MAX_CONNECTIONS` permits); a
+    /// socket holds one permit for its whole life (ws.rs).
+    pub connections: Arc<Semaphore>,
+}
+
+impl AppState {
+    /// A fresh connection limiter sized to `MAX_CONNECTIONS`. Every
+    /// `AppState` constructor uses this so the cap is defined in one place.
+    #[must_use]
+    pub fn connection_limiter() -> Arc<Semaphore> {
+        Arc::new(Semaphore::new(MAX_CONNECTIONS))
+    }
 }
 
 /// The game-facing routes (`/healthz`, `/ws`). The binary layers the

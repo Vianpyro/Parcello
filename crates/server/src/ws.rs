@@ -26,6 +26,46 @@ use crate::room::{ClientTx, RoomCmd, create_room};
 /// truncates what the server sends.
 const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
 
+/// Per-connection message-rate cap (token bucket): burst of `MSG_BURST`
+/// messages, refilled at `MSG_REFILL_PER_SEC`. A client that sustains more
+/// than this is flooding and gets closed. Generous vs. real play - moves are
+/// seconds apart and even animation acks are bounded - so a legitimate client
+/// never trips it; this only stops abuse.
+const MSG_BURST: f64 = 32.0;
+const MSG_REFILL_PER_SEC: f64 = 16.0;
+
+/// Token-bucket message-rate limiter for one connection. Pure and clock-free
+/// (the caller passes `now`), so its budget/refill behavior is unit-tested
+/// without sockets or real time.
+struct RateLimiter {
+    tokens: f64,
+    last: std::time::Instant,
+}
+
+impl RateLimiter {
+    const fn new(now: std::time::Instant) -> Self {
+        Self {
+            tokens: MSG_BURST,
+            last: now,
+        }
+    }
+
+    /// Refill by elapsed time, then try to spend one token. Returns `false`
+    /// when the connection is over budget and should be closed.
+    fn allow(&mut self, now: std::time::Instant) -> bool {
+        let elapsed = now.duration_since(self.last).as_secs_f64();
+        self.tokens = elapsed
+            .mul_add(MSG_REFILL_PER_SEC, self.tokens)
+            .min(MSG_BURST);
+        self.last = now;
+        if self.tokens < 1.0 {
+            return false;
+        }
+        self.tokens -= 1.0;
+        true
+    }
+}
+
 pub async fn ws_handler(ws: WebSocketUpgrade, State(app): State<AppState>) -> Response {
     ws.max_frame_size(MAX_WS_MESSAGE_BYTES)
         .max_message_size(MAX_WS_MESSAGE_BYTES)
@@ -39,13 +79,31 @@ struct Session {
 }
 
 async fn handle_socket(socket: WebSocket, app: AppState) {
+    // Global connection cap: refuse (and immediately close) once the server is
+    // saturated, so a flood of sockets cannot exhaust memory or descriptors.
+    // The permit is held for the whole connection and released on return.
+    let Ok(_permit) = app.connections.clone().try_acquire_owned() else {
+        warn!(
+            cap = crate::MAX_CONNECTIONS,
+            "connection cap reached; refusing socket"
+        );
+        return;
+    };
+
     let (sink, mut stream) = socket.split();
     let (tx, rx) = mpsc::unbounded_channel::<ServerMessage>();
     let writer = spawn_writer(sink, rx);
 
     let mut session: Option<Session> = None;
+    let mut limiter = RateLimiter::new(std::time::Instant::now());
 
     while let Some(frame) = stream.next().await {
+        // A client that outruns the refill is flooding and gets disconnected.
+        if !limiter.allow(std::time::Instant::now()) {
+            warn!("message rate limit exceeded; closing connection");
+            break;
+        }
+
         let text = match frame {
             Ok(Message::Text(text)) => text,
             Ok(Message::Close(_)) | Err(_) => break,
@@ -353,7 +411,24 @@ fn send(tx: &ClientTx, msg: ServerMessage) {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_mod_id;
+    use super::{MSG_BURST, MSG_REFILL_PER_SEC, RateLimiter, valid_mod_id};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn rate_limiter_allows_a_burst_then_blocks_then_refills() {
+        let t0 = Instant::now();
+        let mut rl = RateLimiter::new(t0);
+        // The whole burst passes with no time elapsed...
+        for _ in 0..MSG_BURST as usize {
+            assert!(rl.allow(t0));
+        }
+        // ...the very next frame (still t0) is over budget.
+        assert!(!rl.allow(t0));
+        // One second later exactly MSG_REFILL_PER_SEC frames are allowed again.
+        let t1 = t0 + Duration::from_secs(1);
+        let allowed = (0..100).filter(|_| rl.allow(t1)).count();
+        assert_eq!(allowed, MSG_REFILL_PER_SEC as usize);
+    }
 
     #[test]
     fn mod_ids_cannot_escape_the_mods_dir() {

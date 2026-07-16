@@ -219,5 +219,6 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
         turn_timeout: timeout(args.turn_timeout, "per-turn AFK timeout"),
         time_bank: timeout(args.time_bank_seconds, "personal time bank"),
         game_timeout: timeout(args.game_timeout, "time-boxed games (richest wins)"),
+        connections: AppState::connection_limiter(),
     })
 }
