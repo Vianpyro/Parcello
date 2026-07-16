@@ -169,7 +169,10 @@ architecture doc section 5; dependencies point downward only):
   the app boundary). `ws.rs` (transport: parse, authenticate once at
   create/join, relay - the room-scoped messages funnel through one
   exhaustive `relay` fn, so a new `ClientMessage` variant fails
-  compilation there), `room.rs` (one Tokio task per room; state
+  compilation there; inbound frame + message size are capped at
+  `MAX_WS_MESSAGE_BYTES` = 64 KiB so an untrusted client cannot force a
+  large allocation before a message is parsed/validated - a *read* limit,
+  so it never truncates the larger server -> client snapshots), `room.rs` (one Tokio task per room; state
   machine Lobby -> Active -> Finished; `PlayAgain` restarts a Finished room
   for the still-connected seats via the shared `start_game`; `Leave` drops
   the room but keeps the socket open (ws.rs clears the session so the same
@@ -214,8 +217,12 @@ architecture doc section 5; dependencies point downward only):
   `ANIM_ACK_CAP` = 10s - bots/disconnected seats/the CLI settle instantly,
   the game clock is never gated; post-game
   survey `feedback` message:
-  Finished phase only, once per seat, rating 1-5 + comment capped at 500
-  chars, stored via `GameHistory::record_feedback` - the client UI must
+  Finished phase only, once per seat, rating 1-5 + comment run through
+  `sanitize_comment` (strip control chars + Unicode bidi/zero-width format
+  chars, cap `COMMENT_MAX_CHARS` = 500 scalar values) before it is stored
+  via `GameHistory::record_feedback` (parameterized SQL, no injection) -
+  the untrusted comment can never carry a terminal-escape/log-injection or
+  display-spoofing payload; the client UI must
   stay non-blocking, side card not modal; the room's clocks live in
   `room/clock.rs` and the play-for-absent-humans logic - AFK canonical
   action, silent-bid/vote injection, bot turns - in `room/autoplay.rs`),
@@ -255,6 +262,17 @@ architecture doc section 5; dependencies point downward only):
   `session_storage.dart` (a file on desktop, `localStorage` on web). When
   adding an Event or CommandKind, update it too (protocol.dart +
   main.dart), same drill as the CLI.
+
+  **Localization** (gen-l10n, `flutter: generate: true`): every user-facing
+  string is an ARB key in `lib/l10n/app_en.arb` (template) + `app_fr.arb`,
+  surfaced as `AppLocalizations.of(context)` - never a literal in a widget.
+  The generated `lib/l10n/app_localizations*.dart` is gitignored (rebuilt by
+  `flutter pub get`; CI runs it explicitly, flutter.yml). Config in
+  `l10n.yaml`. The main menu is a card grid (`_MenuTile`) with a static
+  `RulesScreen`; the three OFL fonts (Inter/Fraunces/SourceSerif4) are
+  bundled offline under `assets/fonts/` (SHA256SUMS + README there), Inter
+  wired as the theme family and their licences registered via
+  `LicenseRegistry`.
 
   **Motion / game feel** is specified in `docs/motion-language.md` (the
   reference doc: philosophy, tiers, visual grammar, the full event

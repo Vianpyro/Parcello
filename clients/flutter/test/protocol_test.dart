@@ -1,7 +1,9 @@
 // Wire-format compatibility checks against the server's serde output
 // (snake_case, type-tagged). If these fail, the protocol drifted.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parcello_client/l10n/app_localizations.dart';
 import 'package:parcello_client/main.dart';
 import 'package:parcello_client/protocol.dart';
 import 'package:parcello_client/session.dart';
@@ -176,5 +178,19 @@ void main() {
     await tester.tap(find.text('Connect'));
     await tester.pump();
     expect(find.text('Connect'), findsOneWidget);
+  });
+
+  testWidgets('rules screen lists the core sections', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: const RulesScreen(),
+    ));
+    await tester.pumpAndSettle();
+    // Every section heading renders (EN is the default locale in the test).
+    expect(find.text('Goal'), findsOneWidget);
+    expect(find.text('Sealed-bid auctions'), findsOneWidget);
+    expect(find.text('Jail'), findsOneWidget);
+    expect(find.text('Winning'), findsOneWidget);
   });
 }

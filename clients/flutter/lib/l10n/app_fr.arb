@@ -1,0 +1,51 @@
+{
+  "@@locale": "fr",
+
+  "appTitle": "Parcello",
+
+  "connectSubtitle": "Se connecter à un serveur",
+  "serverUrl": "URL du serveur",
+  "displayName": "Nom affiché",
+  "signInOptional": "Se connecter avec un compte (facultatif)",
+  "signedInAs": "Connecté en tant que {name}",
+  "account": "compte",
+  "connect": "Se connecter",
+  "signIn": "Connexion",
+  "identityProviderUrl": "URL du fournisseur d'identité",
+  "cancel": "Annuler",
+  "openBrowser": "Ouvrir le navigateur",
+  "signInFailed": "Échec de la connexion : {error}",
+
+  "disconnect": "Se déconnecter",
+
+  "menuCreateTitle": "Créer une partie",
+  "menuCreateSubtitle": "Héberger une salle privée",
+  "menuJoinTitle": "Rejoindre une partie",
+  "menuJoinSubtitle": "Entrez un code à 5 lettres",
+  "menuLanTitle": "Parties LAN",
+  "menuLanSubtitle": "Trouver des serveurs sur le réseau",
+  "menuServerTitle": "Serveur",
+  "menuServerSubtitle": "Lancer un serveur local",
+  "menuRulesSubtitle": "Comment jouer à Parcello",
+
+  "createDialogTitle": "Créer une partie",
+  "create": "Créer",
+  "join": "Rejoindre",
+  "modsHint": "Mods (facultatif, séparés par des virgules)",
+  "roomCode": "Code de la salle",
+
+  "rulesTitle": "Règles",
+  "rulesTagline": "Négoce immobilier rapide et dynamique — pas d'accumulation lente.",
+  "rulesGoalTitle": "Objectif",
+  "rulesGoalBody": "Course à 20 points de victoire : complétez des groupes de couleur, possédez des tuiles de conglomérat et des services, et gardez le plus de liquidités à chaque manche. Atteignez l'objectif et la partie s'arrête aussitôt.",
+  "rulesMoveTitle": "Se déplacer",
+  "rulesMoveBody": "Pas de dés. Jouez une valeur de votre main de vélocité pour avancer ; elle se recharge une fois vide. Passer la case Départ verse un salaire.",
+  "rulesAuctionTitle": "Enchères scellées",
+  "rulesAuctionBody": "En arrivant sur une case libre, tous les joueurs enchérissent en même temps dans une courte fenêtre à enchère scellée. La plus haute enchère l'emporte ; le découvreur est avantagé en cas d'égalité. Enchérissez 0 pour vous abstenir.",
+  "rulesBuildTitle": "Construction & loyers",
+  "rulesBuildBody": "Construisez des maisons de façon équilibrée sur un groupe de couleur complet pour augmenter les loyers ; un groupe complet non amélioré double déjà le loyer. Hypothéquez pour des liquidités rapides — mais une tuile hypothéquée devient une cible de rachat bon marché pour vos rivaux.",
+  "rulesJailTitle": "Prison",
+  "rulesJailBody": "On s'échappe par choix, pas aux dés : jouez une Route légale (une main fraîche et ordonnée), corrompez pour sortir (les adversaires votent), ou utilisez une carte de sortie. Tant que dure votre Route légale, vos tuiles ne font payer aucun loyer.",
+  "rulesWinTitle": "Gagner",
+  "rulesWinBody": "Gagnez aux points, en étant le dernier joueur encore solvable, ou — en partie chronométrée — en étant le plus riche à la fin du temps."
+}

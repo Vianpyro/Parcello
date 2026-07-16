@@ -1,0 +1,60 @@
+{
+  "@@locale": "en",
+
+  "appTitle": "Parcello",
+  "@appTitle": { "description": "Application name and window title." },
+
+  "connectSubtitle": "Connect to a server",
+  "serverUrl": "Server URL",
+  "displayName": "Display name",
+  "signInOptional": "Sign in with account (optional)",
+  "signedInAs": "Signed in as {name}",
+  "@signedInAs": {
+    "description": "Button label once an OIDC account is signed in.",
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "account": "account",
+  "connect": "Connect",
+  "signIn": "Sign in",
+  "identityProviderUrl": "Identity provider URL",
+  "cancel": "Cancel",
+  "openBrowser": "Open browser",
+  "signInFailed": "Sign-in failed: {error}",
+  "@signInFailed": {
+    "description": "Snackbar shown when the OIDC login flow throws.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "disconnect": "Disconnect",
+
+  "menuCreateTitle": "Create a game",
+  "menuCreateSubtitle": "Host a private room",
+  "menuJoinTitle": "Join a game",
+  "menuJoinSubtitle": "Enter a 5-letter code",
+  "menuLanTitle": "LAN games",
+  "menuLanSubtitle": "Find servers on your network",
+  "menuServerTitle": "Server",
+  "menuServerSubtitle": "Run a local server",
+  "menuRulesSubtitle": "How Parcello is played",
+
+  "createDialogTitle": "Create a game",
+  "create": "Create",
+  "join": "Join",
+  "modsHint": "Mods (optional, comma-separated)",
+  "roomCode": "Room code",
+
+  "rulesTitle": "Rules",
+  "rulesTagline": "Fast, dynamic property trading - not slow accumulation.",
+  "rulesGoalTitle": "Goal",
+  "rulesGoalBody": "Race to 20 victory points: complete colour groups, own conglomerate tiles and utilities, and hold the most cash each round. Reach the target and the game ends at once.",
+  "rulesMoveTitle": "Moving",
+  "rulesMoveBody": "No dice. Play a value from your velocity hand to advance; it refills when empty. Passing Go still pays a salary.",
+  "rulesAuctionTitle": "Sealed-bid auctions",
+  "rulesAuctionBody": "Land on an unowned tile and every player bids at once in a short sealed-bid window. The highest bid wins; the discoverer has the edge on ties. Bid 0 to abstain.",
+  "rulesBuildTitle": "Building & rent",
+  "rulesBuildBody": "Build houses evenly across a full colour group to raise rent; a full unimproved group already charges double. Mortgage tiles for quick cash - but a mortgaged tile is a cheap buyout target for rivals.",
+  "rulesJailTitle": "Jail",
+  "rulesJailBody": "Escape by choice, not dice: play a Legal Route (a fresh ordered hand), bribe your way out (opponents vote), or spend a jail card. While your Legal Route lasts, your tiles charge no rent.",
+  "rulesWinTitle": "Winning",
+  "rulesWinBody": "Win by points, by being the last player still solvent, or - in timed games - by being the richest when the clock runs out."
+}

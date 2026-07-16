@@ -39,6 +39,11 @@ jobs:
         with:
           channel: stable
           cache: true
+      # Resolve deps AND run gen-l10n (flutter: generate: true) so the
+      # generated AppLocalizations exists before analyze/test - it is
+      # gitignored (derived from lib/l10n/*.arb), so a clean runner must
+      # produce it explicitly rather than rely on an implicit pub get.
+      - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
       # The web target is what the server ships (--web-dir); make sure it

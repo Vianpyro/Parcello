@@ -1,0 +1,9 @@
+# Flutter gen-l10n config (see `flutter: generate: true` in pubspec.yaml).
+# EN is the template that defines the key set; every other locale mirrors it.
+# Output lands in lib/l10n next to the ARBs (the default now), so widgets
+# import 'l10n/app_localizations.dart'.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false

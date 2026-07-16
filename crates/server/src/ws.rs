@@ -16,8 +16,20 @@ use tracing::{debug, warn};
 use crate::AppState;
 use crate::room::{ClientTx, RoomCmd, create_room};
 
+/// Inbound frame/message ceiling. Every client -> server message in this JSON
+/// protocol is small (commands, a <=500-char feedback comment); the default
+/// tungstenite limits are 16 MiB/64 MiB. Capping both means a malicious client
+/// cannot force a large allocation before the message is even parsed and
+/// validated (this is what bounds the post-game comment path in particular).
+/// Server -> client snapshots may exceed this; the cap is a *read* limit, and
+/// tungstenite splits larger outbound messages into frames, so it never
+/// truncates what the server sends.
+const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
+
 pub async fn ws_handler(ws: WebSocketUpgrade, State(app): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, app))
+    ws.max_frame_size(MAX_WS_MESSAGE_BYTES)
+        .max_message_size(MAX_WS_MESSAGE_BYTES)
+        .on_upgrade(move |socket| handle_socket(socket, app))
 }
 
 /// Sender half plus the identity bound to this connection.

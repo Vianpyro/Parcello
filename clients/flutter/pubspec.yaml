@@ -11,7 +11,10 @@ dependencies:
   crypto: ^3.0.7
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   http: ^1.2.0
+  intl: any
   web: ^1.1.0
   web_socket_channel: ^3.0.3
   # audioplayers: sound-effect playback (assets/sfx/). Present but not wired
@@ -27,5 +30,27 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Generate the typed AppLocalizations from lib/l10n/*.arb (config in
+  # l10n.yaml). EN is the template; FR ships alongside. Author every new
+  # user-facing string as an ARB key, never a literal in a widget.
+  generate: true
   assets:
     - assets/sfx/
+    # OFL licence texts, bundled so they ship with the fonts (OFL requirement)
+    # and can be surfaced in-app via LicenseRegistry (see main.dart).
+    - assets/fonts/Inter-OFL.txt
+    - assets/fonts/Fraunces-OFL.txt
+    - assets/fonts/SourceSerif4-OFL.txt
+  # Typography from docs/visual-identity.md, bundled for offline use. All
+  # three are variable fonts (one file spans every weight), OFL 1.1. See
+  # assets/fonts/README.md for provenance + SHA256SUMS.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf
+    - family: Fraunces
+      fonts:
+        - asset: assets/fonts/Fraunces.ttf
+    - family: SourceSerif4
+      fonts:
+        - asset: assets/fonts/SourceSerif4.ttf

@@ -300,6 +300,41 @@ fn clamp_settings(mut s: RoomSettings) -> RoomSettings {
     s
 }
 
+/// Max length of a stored post-game comment, in Unicode scalar values (which
+/// also bounds the byte length, since a `char` is at most 4 bytes).
+const COMMENT_MAX_CHARS: usize = 500;
+
+/// Sanitize an untrusted post-game comment before it is stored in history and
+/// possibly rendered later (a dashboard, a future web view). serde already
+/// guarantees valid UTF-8 and `ws.rs` caps the inbound message size, so this
+/// closes the remaining content risks: it strips control characters (terminal
+/// escape / log-injection defense) and Unicode bidi/zero-width format
+/// characters (display-spoofing defense), then bounds the length. The result
+/// may be empty - the caller drops empty comments to `None`.
+fn sanitize_comment(raw: &str) -> String {
+    raw.chars()
+        .filter(|&c| !c.is_control() && !is_unsafe_format(c))
+        .take(COMMENT_MAX_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
+/// Unicode format code points that render as nothing but can spoof or reorder
+/// displayed text: bidi overrides/isolates, zero-width joiners/spaces, BOM.
+/// `char::is_control` covers the C0/C1 control ranges but not these (category
+/// Cf), so they are listed explicitly - no Unicode-table dependency needed.
+const fn is_unsafe_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}'   // zero-width space..RLM
+            | '\u{202A}'..='\u{202E}' // bidi embeddings + overrides
+            | '\u{2060}'..='\u{2064}' // word joiner + invisible operators
+            | '\u{2066}'..='\u{2069}' // bidi isolates
+            | '\u{FEFF}'              // BOM / zero-width no-break space
+    )
+}
+
 struct Seat {
     identity: Identity,
     /// `None` while disconnected; the seat survives for rejoin. Bot seats
@@ -1001,7 +1036,7 @@ impl Room {
             return self.send_error(player_id, "feedback already recorded");
         }
         let comment = comment
-            .map(|c| c.trim().chars().take(500).collect::<String>())
+            .map(|c| sanitize_comment(&c))
             .filter(|c| !c.is_empty());
         self.seats[seat].feedback_given = true;
         self.history

@@ -33,6 +33,10 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# gen-l10n output (flutter: generate: true). Derived deterministically from
+# lib/l10n/*.arb on `flutter pub get`; the .arb files are the source of truth.
+lib/l10n/app_localizations*.dart
+
 # Symbolication related
 app.*.symbols
 

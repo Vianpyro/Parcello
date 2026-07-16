@@ -4,11 +4,13 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, LicenseRegistry, LicenseEntryWithLineBreaks;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'board.dart';
+import 'l10n/app_localizations.dart';
 import 'motion.dart';
 import 'oidc.dart';
 import 'overlay.dart';
@@ -20,7 +22,23 @@ import 'tokens.dart';
 import 'lan_discovery.dart';
 import 'server_manager.dart';
 
-void main() => runApp(ParcelloApp(session: GameSession()));
+void main() {
+  _registerFontLicenses();
+  runApp(ParcelloApp(session: GameSession()));
+}
+
+/// Make the bundled OFL font licences discoverable in-app (showLicensePage),
+/// as the SIL Open Font License asks when a font is redistributed. The texts
+/// ship as assets (see pubspec.yaml); this appends them to Flutter's registry
+/// without replacing the framework's own entries.
+void _registerFontLicenses() {
+  LicenseRegistry.addLicense(() async* {
+    for (final family in ['Inter', 'Fraunces', 'SourceSerif4']) {
+      final text = await rootBundle.loadString('assets/fonts/$family-OFL.txt');
+      yield LicenseEntryWithLineBreaks(['Parcello fonts', family], text);
+    }
+  });
+}
 
 class ParcelloApp extends StatelessWidget {
   final GameSession session;
@@ -29,9 +47,15 @@ class ParcelloApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Parcello',
+      onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: ThemeData(
         brightness: Brightness.dark,
+        // Inter is the body/UI family (docs/visual-identity.md); Fraunces
+        // (wordmark) and SourceSerif4 (tile labels) are applied at their
+        // specific use sites. Bundled offline - assets/fonts/.
+        fontFamily: 'Inter',
         scaffoldBackgroundColor: Pc.bg,
         colorScheme: ColorScheme.fromSeed(
           seedColor: Pc.gold,
@@ -106,25 +130,26 @@ class _ConnectScreenState extends State<ConnectScreen> {
   /// PKCE flow, and drops the id_token into the token field.
   Future<void> _signIn() async {
     final s = widget.s;
+    final t = AppLocalizations.of(context);
     final issuer = TextEditingController(
         text: s.savedIssuer.isEmpty ? 'https://' : s.savedIssuer);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Sign in'),
+        title: Text(t.signIn),
         content: TextField(
           controller: issuer,
-          decoration: const InputDecoration(
-              labelText: 'Identity provider URL',
+          decoration: InputDecoration(
+              labelText: t.identityProviderUrl,
               hintText: 'https://auth.example.com'),
         ),
         actions: [
           hoverSfx(TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'))),
+              child: Text(t.cancel))),
           hoverSfx(FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Open browser'))),
+              child: Text(t.openBrowser))),
         ],
       ),
     );
@@ -134,12 +159,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
       final token = await loginWithOidc(issuer.text.trim(), 'parcello');
       setState(() {
         _token.text = token;
-        _signedInAs = jwtDisplayName(token) ?? 'account';
+        _signedInAs = jwtDisplayName(token) ?? t.account;
       });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Sign-in failed: $e')));
+            .showSnackBar(SnackBar(content: Text(t.signInFailed(e.toString()))));
       }
     }
   }
@@ -147,6 +172,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   @override
   Widget build(BuildContext context) {
     final s = widget.s;
+    final t = AppLocalizations.of(context);
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -158,36 +184,35 @@ class _ConnectScreenState extends State<ConnectScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('Parcello',
+                  Text(t.appTitle,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                           fontSize: 30,
                           fontWeight: FontWeight.bold,
                           color: Pc.gold)),
                   const SizedBox(height: 2),
-                  const Text('Connect to a server',
+                  Text(t.connectSubtitle,
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Pc.textMuted)),
+                      style: const TextStyle(color: Pc.textMuted)),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _url,
-                    decoration: const InputDecoration(labelText: 'Server URL'),
+                    decoration: InputDecoration(labelText: t.serverUrl),
                   ),
                   TextField(
                     controller: _name,
                     maxLength: 24,
-                    decoration:
-                        const InputDecoration(labelText: 'Display name'),
+                    decoration: InputDecoration(labelText: t.displayName),
                   ),
                   const SizedBox(height: 8),
                   wideButton(
                       _signedInAs == null
-                          ? 'Sign in with account (optional)'
-                          : 'Signed in as $_signedInAs',
+                          ? t.signInOptional
+                          : t.signedInAs(_signedInAs!),
                       _signIn,
                       primary: false),
                   const SizedBox(height: 10),
-                  wideButton('Connect', () {
+                  wideButton(t.connect, () {
                     if (_name.text.trim().isEmpty &&
                         _token.text.trim().isEmpty) {
                       return;
@@ -211,8 +236,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
 // -- menu ----------------------------------------------------------------------
 
-/// Step 2 (connected): create a private game, join one by code, or (soon)
-/// browse public games.
+/// Step 2 (connected): a grid of large action cards - create or join a
+/// private game, browse LAN games / run a server (desktop only), or read the
+/// rules. Business-Tour-style tiles, not a form.
 class MenuScreen extends StatefulWidget {
   final GameSession s;
   const MenuScreen({super.key, required this.s});
@@ -226,108 +252,141 @@ class _MenuScreenState extends State<MenuScreen> {
   final _mods = TextEditingController();
 
   @override
+  void dispose() {
+    _code.dispose();
+    _mods.dispose();
+    super.dispose();
+  }
+
+  /// Optional comma-separated mod ids for a created room.
+  List<String> _parseMods() => _mods.text
+      .split(',')
+      .map((m) => m.trim())
+      .where((m) => m.isNotEmpty)
+      .toList();
+
+  Future<void> _createDialog() async {
+    final t = AppLocalizations.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t.createDialogTitle),
+        content: TextField(
+          controller: _mods,
+          decoration: InputDecoration(labelText: t.modsHint),
+        ),
+        actions: [
+          hoverSfx(TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t.cancel))),
+          hoverSfx(FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(t.create))),
+        ],
+      ),
+    );
+    if (ok == true) widget.s.createGame(mods: _parseMods());
+  }
+
+  Future<void> _joinDialog() async {
+    final t = AppLocalizations.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t.menuJoinTitle),
+        content: TextField(
+          controller: _code,
+          autofocus: true,
+          maxLength: 5,
+          textCapitalization: TextCapitalization.characters,
+          onSubmitted: (_) => Navigator.pop(ctx, true),
+          decoration: InputDecoration(labelText: t.roomCode),
+        ),
+        actions: [
+          hoverSfx(TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(t.cancel))),
+          hoverSfx(FilledButton(
+              onPressed: () => Navigator.pop(ctx, true), child: Text(t.join))),
+        ],
+      ),
+    );
+    if (ok == true && _code.text.trim().isNotEmpty) {
+      widget.s.joinGame(_code.text);
+    }
+  }
+
+  void _push(Widget screen) => Navigator.push(
+      context, MaterialPageRoute<void>(builder: (_) => screen));
+
+  @override
   Widget build(BuildContext context) {
     final s = widget.s;
+    final t = AppLocalizations.of(context);
+    // LAN discovery and local server management have no browser equivalent
+    // (no raw sockets, no process spawn in a sandbox) - drop those tiles on
+    // the web build rather than shipping dead ends.
+    final tiles = <Widget>[
+      _MenuTile(
+          icon: Icons.add_circle_outline,
+          title: t.menuCreateTitle,
+          subtitle: t.menuCreateSubtitle,
+          onTap: _createDialog),
+      _MenuTile(
+          icon: Icons.tag,
+          title: t.menuJoinTitle,
+          subtitle: t.menuJoinSubtitle,
+          onTap: _joinDialog),
+      if (!kIsWeb)
+        _MenuTile(
+            icon: Icons.wifi_find_outlined,
+            title: t.menuLanTitle,
+            subtitle: t.menuLanSubtitle,
+            onTap: () => _push(LanBrowser(session: s))),
+      if (!kIsWeb)
+        _MenuTile(
+            icon: Icons.dns_outlined,
+            title: t.menuServerTitle,
+            subtitle: t.menuServerSubtitle,
+            onTap: () => _push(const ServerManager())),
+      _MenuTile(
+          icon: Icons.menu_book_outlined,
+          title: t.rulesTitle,
+          subtitle: t.menuRulesSubtitle,
+          onTap: () => _push(const RulesScreen())),
+    ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Parcello'),
+        // Wordmark in Fraunces (display face, visual-identity.md).
+        title: Text(t.appTitle,
+            style: const TextStyle(
+                fontFamily: 'Fraunces',
+                fontWeight: FontWeight.w700,
+                color: Pc.gold)),
         backgroundColor: Pc.surface2,
         actions: [
           TextButton.icon(
             onPressed: s.disconnectFromServer,
             icon: const Icon(Icons.logout, size: 18),
-            label: const Text('Disconnect'),
+            label: Text(t.disconnect),
           ),
         ],
       ),
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: 420,
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text('PRIVATE GAME',
-                            style: TextStyle(
-                                fontSize: 12,
-                                letterSpacing: 1,
-                                color: Pc.textMuted)),
-                        const SizedBox(height: 10),
-                        wideButton('Create a game',
-                            () => s.createGame(mods: _parseMods())),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: TextField(
-                            controller: _mods,
-                            decoration: const InputDecoration(
-                                isDense: true,
-                                labelText: 'Mods (optional, comma-separated)'),
-                          ),
-                        ),
-                        const Divider(height: 24),
-                        TextField(
-                          controller: _code,
-                          maxLength: 5,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration:
-                              const InputDecoration(labelText: 'Room code'),
-                        ),
-                        wideButton('Join by code', () {
-                          if (_code.text.trim().isEmpty) return;
-                          s.joinGame(_code.text);
-                        }, primary: false),
-                      ],
-                    ),
-                  ),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
+                  alignment: WrapAlignment.center,
+                  children: tiles,
                 ),
-                // LAN discovery and local server management have no
-                // browser equivalent (no raw sockets, no process spawn in
-                // a sandbox) - hide the whole card on the web build rather
-                // than shipping dead-end buttons.
-                if (!kIsWeb) ...[
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Text('PUBLIC GAMES',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  letterSpacing: 1,
-                                  color: Pc.textMuted)),
-                          const SizedBox(height: 10),
-                          wideButton('Browse public games', () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => LanBrowser(session: s)));
-                          }),
-                          const SizedBox(height: 6),
-                          wideButton('Server Manager', () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ServerManager()));
-                          }, primary: false),
-                          const SizedBox(height: 6),
-                          const Text('Coming soon.',
-                              style: TextStyle(
-                                  fontSize: 12, color: Pc.textMuted)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 10),
+                const SizedBox(height: 16),
                 Text(s.loginMessage,
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Pc.oxblood)),
@@ -338,12 +397,108 @@ class _MenuScreenState extends State<MenuScreen> {
       ),
     );
   }
+}
 
-  List<String> _parseMods() => _mods.text
-      .split(',')
-      .map((m) => m.trim())
-      .where((m) => m.isNotEmpty)
-      .toList();
+/// One large action card in the main menu.
+class _MenuTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _MenuTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return hoverSfx(SizedBox(
+      width: 200,
+      height: 150,
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        color: Pc.surface,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 40, color: Pc.gold),
+                const Spacer(),
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Pc.text)),
+                const SizedBox(height: 4),
+                Text(subtitle,
+                    style: const TextStyle(fontSize: 13, color: Pc.textMuted)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ));
+  }
+}
+
+/// Static rules reference reached from the menu. Deliberately concise: the
+/// Business-Tour differences a new player needs, not the full engine spec.
+class RulesScreen extends StatelessWidget {
+  const RulesScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
+    final sections = <(String, String)>[
+      (t.rulesGoalTitle, t.rulesGoalBody),
+      (t.rulesMoveTitle, t.rulesMoveBody),
+      (t.rulesAuctionTitle, t.rulesAuctionBody),
+      (t.rulesBuildTitle, t.rulesBuildBody),
+      (t.rulesJailTitle, t.rulesJailBody),
+      (t.rulesWinTitle, t.rulesWinBody),
+    ];
+    return Scaffold(
+      appBar: AppBar(title: Text(t.rulesTitle), backgroundColor: Pc.surface2),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.rulesTagline,
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontStyle: FontStyle.italic,
+                        color: Pc.gold)),
+                const SizedBox(height: 20),
+                for (final (title, body) in sections) ...[
+                  Text(title,
+                      style: const TextStyle(
+                          fontFamily: 'Fraunces',
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Pc.text)),
+                  const SizedBox(height: 6),
+                  Text(body,
+                      style: const TextStyle(
+                          fontSize: 15, height: 1.4, color: Pc.text)),
+                  const SizedBox(height: 20),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // -- game ----------------------------------------------------------------------

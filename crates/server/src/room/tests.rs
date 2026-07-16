@@ -1577,3 +1577,24 @@ async fn bribe_vote_window_resolves_early_once_everyone_has_voted() {
     .expect("must resolve immediately, not after the fallback timer");
     assert!(resolved);
 }
+
+#[test]
+fn sanitize_comment_strips_dangerous_content_and_bounds_length() {
+    // Control chars (incl. ESC 0x1b and newlines) are removed - a stored
+    // comment can never carry a terminal-escape or log-injection payload.
+    assert_eq!(
+        sanitize_comment("good\x1b[31mgame\ngg\r\n\0"),
+        "good[31mgamegg"
+    );
+    // Unicode bidi override + zero-width joiner are stripped (display spoof).
+    assert_eq!(sanitize_comment("a\u{202E}b\u{200B}c"), "abc");
+    // Surrounding whitespace is trimmed; a comment that is only junk collapses
+    // to empty (the caller then drops it to None).
+    assert_eq!(sanitize_comment("  hi  "), "hi");
+    assert_eq!(sanitize_comment("\u{200B}\x1b\n"), "");
+    // Length is bounded to COMMENT_MAX_CHARS scalar values.
+    let long = "x".repeat(COMMENT_MAX_CHARS + 50);
+    assert_eq!(sanitize_comment(&long).chars().count(), COMMENT_MAX_CHARS);
+    // Plain multibyte text survives intact (non-ASCII is not "unsafe").
+    assert_eq!(sanitize_comment("bien joue !"), "bien joue !");
+}
