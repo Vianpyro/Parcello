@@ -11,6 +11,25 @@ import 'package:flutter/material.dart';
 
 import 'sfx.dart';
 
+/// Best-effort default path to the bundled server binary.
+///
+/// In the packaged all-in-one layout the server sits in `./server` next to
+/// the client executable, so resolve against the executable's own directory
+/// (robust to whatever working directory Steam / the OS launches us from).
+/// Falls back to a bare name - resolved via `PATH`, or edited by hand - for
+/// dev builds and custom installs, where the binary lives elsewhere.
+String defaultServerBinary() {
+  final name = Platform.isWindows ? 'parcello-server.exe' : 'parcello-server';
+  try {
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final bundled = File('$exeDir/server/$name');
+    if (bundled.existsSync()) return bundled.path;
+  } catch (_) {
+    // resolvedExecutable can throw on exotic hosts; the bare name is fine.
+  }
+  return name;
+}
+
 /// Local server controller: spawns a `parcello-server` binary, streams its
 /// logs, and stops/restarts it by killing the process. Local-only by design
 /// (no remote admin control plane; see ADR-0016 / server main.rs).
@@ -22,7 +41,7 @@ class ServerManager extends StatefulWidget {
 }
 
 class _ServerManagerState extends State<ServerManager> {
-  final _bin = TextEditingController(text: 'parcello-server');
+  final _bin = TextEditingController(text: defaultServerBinary());
   final _args = TextEditingController();
 
   Process? _process;

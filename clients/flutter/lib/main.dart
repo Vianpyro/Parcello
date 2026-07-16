@@ -331,6 +331,7 @@ class _MenuScreenState extends State<MenuScreen> {
           icon: Icons.add_circle_outline,
           title: t.menuCreateTitle,
           subtitle: t.menuCreateSubtitle,
+          autofocus: true,
           onTap: _createDialog),
       _MenuTile(
           icon: Icons.tag,
@@ -380,11 +381,16 @@ class _MenuScreenState extends State<MenuScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 16,
-                  alignment: WrapAlignment.center,
-                  children: tiles,
+                // Grouped so D-pad / arrow keys traverse the tiles directionally
+                // (controller + Steam Deck navigation).
+                FocusTraversalGroup(
+                  policy: ReadingOrderTraversalPolicy(),
+                  child: Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    alignment: WrapAlignment.center,
+                    children: tiles,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text(s.loginMessage,
@@ -400,45 +406,73 @@ class _MenuScreenState extends State<MenuScreen> {
 }
 
 /// One large action card in the main menu.
-class _MenuTile extends StatelessWidget {
+/// One large action card in the main menu. Stateful so it can paint a visible
+/// focus ring: on a controller / Steam Deck the player navigates these with
+/// the D-pad (arrow keys) and activates with A (Enter/Space, handled by the
+/// InkWell), so which tile is selected must be unmistakable.
+class _MenuTile extends StatefulWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final bool autofocus;
   const _MenuTile({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.autofocus = false,
   });
+
+  @override
+  State<_MenuTile> createState() => _MenuTileState();
+}
+
+class _MenuTileState extends State<_MenuTile> {
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     return hoverSfx(SizedBox(
       width: 200,
       height: 150,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        color: Pc.surface,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 40, color: Pc.gold),
-                const Spacer(),
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Pc.text)),
-                const SizedBox(height: 4),
-                Text(subtitle,
-                    style: const TextStyle(fontSize: 13, color: Pc.textMuted)),
-              ],
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          borderRadius: Pc.radius,
+          border: Border.all(
+            color: _focused ? Pc.gold : Pc.border,
+            width: _focused ? 2 : 1,
+          ),
+        ),
+        child: Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          color: Pc.surface,
+          child: InkWell(
+            autofocus: widget.autofocus,
+            onFocusChange: (f) => setState(() => _focused = f),
+            focusColor: Pc.gold.withValues(alpha: 0.12),
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(widget.icon, size: 40, color: Pc.gold),
+                  const Spacer(),
+                  Text(widget.title,
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Pc.text)),
+                  const SizedBox(height: 4),
+                  Text(widget.subtitle,
+                      style:
+                          const TextStyle(fontSize: 13, color: Pc.textMuted)),
+                ],
+              ),
             ),
           ),
         ),
@@ -463,36 +497,49 @@ class RulesScreen extends StatelessWidget {
       (t.rulesJailTitle, t.rulesJailBody),
       (t.rulesWinTitle, t.rulesWinBody),
     ];
-    return Scaffold(
-      appBar: AppBar(title: Text(t.rulesTitle), backgroundColor: Pc.surface2),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(t.rulesTagline,
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontStyle: FontStyle.italic,
-                        color: Pc.gold)),
-                const SizedBox(height: 20),
-                for (final (title, body) in sections) ...[
-                  Text(title,
-                      style: const TextStyle(
-                          fontFamily: 'Fraunces',
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: Pc.text)),
-                  const SizedBox(height: 6),
-                  Text(body,
-                      style: const TextStyle(
-                          fontSize: 15, height: 1.4, color: Pc.text)),
-                  const SizedBox(height: 20),
-                ],
-              ],
+    // Escape pops the screen - Steam Input maps the controller's B button to
+    // Escape, so "back" works from the couch. Focus(autofocus) gives the
+    // shortcut a place to fire from.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.of(context).maybePop(),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          appBar:
+              AppBar(title: Text(t.rulesTitle), backgroundColor: Pc.surface2),
+          body: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(t.rulesTagline,
+                        style: const TextStyle(
+                            fontSize: 16,
+                            fontStyle: FontStyle.italic,
+                            color: Pc.gold)),
+                    const SizedBox(height: 20),
+                    for (final (title, body) in sections) ...[
+                      Text(title,
+                          style: const TextStyle(
+                              fontFamily: 'Fraunces',
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              color: Pc.text)),
+                      const SizedBox(height: 6),
+                      Text(body,
+                          style: const TextStyle(
+                              fontSize: 15, height: 1.4, color: Pc.text)),
+                      const SizedBox(height: 20),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
