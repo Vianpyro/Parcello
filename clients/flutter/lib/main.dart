@@ -811,7 +811,18 @@ class GameScreen extends StatelessWidget {
                   ]),
                 ),
                 const SizedBox(width: 12),
-                SizedBox(width: 340, child: _SidePanel(s: s)),
+                // The panel grows with the room - open trade offers (up to
+                // four per proposer), the post-game survey, the settings
+                // expander - so it has to scroll. Not a small-screen nicety:
+                // six offers already overflow a 1280x800 Steam Deck.
+                // The panel grows with the room - open trade offers (up to
+                // four per proposer), the post-game survey, the settings
+                // expander - so it has to scroll. Not a small-screen nicety:
+                // six offers already overflow a 1280x800 Steam Deck.
+                SizedBox(
+                  width: 340,
+                  child: SingleChildScrollView(child: _SidePanel(s: s)),
+                ),
               ]),
             ),
             // Chits crossing from the board to the side panel, and the P1
@@ -971,12 +982,18 @@ class _CenterPanel extends StatelessWidget {
         style: const TextStyle(color: Pc.text, fontSize: 13),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            const Text('PARCELLO',
-                style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 3,
-                    color: Pc.gold)),
+            // The wordmark yields first when the board's centre gets tight:
+            // the clocks and toggles beside it are functional, it is not.
+            const Flexible(
+              child: Text('PARCELLO',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 3,
+                      color: Pc.gold)),
+            ),
             const Spacer(),
             // Shown for the whole game, end included: the final time left is
             // part of the result (a bankruptcy win keeps time on the clock).
@@ -1167,8 +1184,14 @@ class _CenterPanel extends StatelessWidget {
             ),
           ),
         const SizedBox(width: 4),
-        Text(t.roundHandsCycled(done.length, alive.length),
-            style: const TextStyle(fontSize: 10, color: Pc.textFaint)),
+        // The pips already say who the table waits on; the count is the part
+        // that can be clipped when the centre is tight.
+        Flexible(
+          child: Text(t.roundHandsCycled(done.length, alive.length),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10, color: Pc.textFaint)),
+        ),
       ]),
       const SizedBox(height: 2),
       Text(

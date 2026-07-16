@@ -287,6 +287,15 @@ architecture doc section 5; dependencies point downward only):
   context-free `ChangeNotifier`) is handed one each frame by `ParcelloApp`'s
   builder so log lines localize before any server message is processed.
 
+  **Layout headroom** (`test/layout_test.dart`): the game screen is rendered at
+  the sizes we ship to - Steam Deck 1280x800, the 1280x720 default window, and
+  a measured 1024x600 floor - with a *loaded* room (six open trades, six seats,
+  a running clock), because an overflow is a layout error in a pumped frame.
+  The side panel scrolls for exactly this reason: it grows with the room, and
+  six offers overflowed it by 527px on a Deck - resolution had nothing to do
+  with it. Below 1024x600 the board's centre cannot hold the HUD; that is the
+  floor, not a bug to chase.
+
   **Controller / Steam Deck**: keyboard-focus navigation, which Steam Input
   maps onto a gamepad. Menu tiles (`_MenuTile`) and board tiles carry a
   visible gold focus ring; board tiles are focusable ONLY when actionable
