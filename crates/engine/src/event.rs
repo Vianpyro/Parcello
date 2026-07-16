@@ -58,6 +58,15 @@ pub enum Event {
         amount: i64,
         bids: Vec<i64>,
     },
+    /// The discoverer won its own auction and the bank rebates part of what
+    /// it just paid (ADR-0018 amended). Always follows the
+    /// `BlindAuctionResolved` that charged the full price: the rebate is a
+    /// second, visible motion rather than a quieter number on the first.
+    DiscovererRefunded {
+        player: usize,
+        tile: usize,
+        amount: i64,
+    },
     /// Offer details live in the view's `pending_trades`.
     TradeProposed {
         trade: u32,

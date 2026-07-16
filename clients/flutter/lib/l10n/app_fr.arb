@@ -211,6 +211,7 @@
   "evtBidSubmitted": "{player} a soumis une enchère",
   "evtAuctionUnsold": "{tile} reste invendue",
   "evtAuctionWon": "{winner} remporte {tile} pour ${amount}",
+  "evtDiscovererRefunded": "La banque rembourse ${amount} à {player} pour avoir atterri sur {tile}",
   "evtRentPaid": "{from} paie ${amount} de loyer à {to} pour {tile}",
   "evtTaxPaid": "{player} paie ${amount} de taxe",
   "evtCardDrawn": "{player} pioche : {text}",

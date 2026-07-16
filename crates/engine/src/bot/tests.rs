@@ -126,6 +126,38 @@ fn advanced_view(cash: i64, turn: TurnPhase) -> ClientView {
 }
 
 #[test]
+fn high_bids_are_rare_not_impossible() {
+    // The jitter is a descending triangle (like the Audit's brackets): a bot
+    // mostly bids near list price and only occasionally reaches high. Without
+    // the weighting this was uniform, which made bots relentless bidders.
+    let c = content();
+    let mut low = 0; // 100-150% of the 100 price
+    let mut high = 0; // >150%
+    for noise in 0..512u64 {
+        let mut v = view(
+            1000,
+            TurnPhase::BlindAuction {
+                tile: 1,
+                bids: vec![None, None],
+            },
+        );
+        v.current = 1;
+        if let Some(CommandKind::SubmitBlindBid { amount }) = decide(&c, &v, 0, noise) {
+            if amount <= 150 {
+                low += 1;
+            } else {
+                high += 1;
+            }
+        }
+    }
+    assert!(
+        low > high * 2,
+        "expected the low half to dominate a descending triangle, got low={low} high={high}"
+    );
+    assert!(high > 0, "high bids must stay possible, just rare");
+}
+
+#[test]
 fn discoverer_bids_at_least_the_floor_when_affordable_else_abstains() {
     let c = content();
     let auction = |bids| TurnPhase::BlindAuction { tile: 1, bids };
@@ -153,8 +185,10 @@ fn discoverer_bids_at_least_the_floor_when_affordable_else_abstains() {
 #[test]
 fn non_discoverer_bids_jittered_or_abstains_then_stays_quiet_once_bid() {
     let c = content();
-    // The jittered bid stays in [price/2, cash - RESERVE] (price 100),
-    // whatever the noise word.
+    // A bidder never goes under the list price: a sub-floor bid cannot beat
+    // the discoverer's implicit floor, but WOULD win against an insolvent one
+    // and buy the tile under list. So the bid stays in [price, cash - RESERVE]
+    // (price 100), whatever the noise word.
     for noise in 0..64u64 {
         let mut v = view(
             1000,
@@ -167,8 +201,8 @@ fn non_discoverer_bids_jittered_or_abstains_then_stays_quiet_once_bid() {
         match decide(&c, &v, 0, noise) {
             Some(CommandKind::SubmitBlindBid { amount }) => {
                 assert!(
-                    (50..=900).contains(&amount),
-                    "bid {amount} outside [price/2, cash - reserve] for noise {noise}"
+                    (100..=900).contains(&amount),
+                    "bid {amount} outside [price, cash - reserve] for noise {noise}"
                 );
             }
             other => panic!("expected a bid, got {other:?}"),
@@ -183,7 +217,7 @@ fn non_discoverer_bids_jittered_or_abstains_then_stays_quiet_once_bid() {
         },
     );
     v.current = 1;
-    // cash - RESERVE = 20 < price/2 = 50: abstain regardless of noise.
+    // cash - RESERVE = 20 < price = 100: abstain rather than lowball.
     assert!(matches!(
         decide(&c, &v, 0, 7),
         Some(CommandKind::SubmitBlindBid { amount: 0 })

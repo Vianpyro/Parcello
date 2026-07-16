@@ -42,8 +42,18 @@ fn discoverer_wins_at_floor_when_uncontested_then_pays_rent() {
             ..
         }
     )));
+    // Winning its own auction rebates 10% of what it paid (ADR-0018 amended):
+    // charged in full above, handed back here, as its own event.
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::DiscovererRefunded {
+            player: 0,
+            tile: 3,
+            amount: 6, // 10% of the 60 paid
+        }
+    )));
     assert_eq!(st.tiles[3].owner, Some(0));
-    assert_eq!(st.players[0].cash, 1500 - 60);
+    assert_eq!(st.players[0].cash, 1500 - 60 + 6);
 
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::EndTurn));
     assert_eq!(st.current, 1);
@@ -59,7 +69,7 @@ fn discoverer_wins_at_floor_when_uncontested_then_pays_rent() {
         }
     )));
     assert_eq!(st.players[1].cash, 1500 - 4);
-    assert_eq!(st.players[0].cash, 1500 - 60 + 4);
+    assert_eq!(st.players[0].cash, 1500 - 60 + 6 + 4);
 }
 
 #[test]
@@ -114,7 +124,7 @@ fn seat_view_shows_only_own_trade_offers() {
 }
 
 #[test]
-fn discoverer_wins_above_floor_with_discount_after_a_contest() {
+fn discoverer_pays_its_winning_bid_in_full_then_gets_the_rebate() {
     let engine = engine_with(plain_board());
     let st = two_players(&engine);
 
@@ -161,14 +171,59 @@ fn discoverer_wins_above_floor_with_discount_after_a_contest() {
         Event::BlindAuctionResolved {
             tile: 2,
             winner: Some(0),
-            amount: 72, // 90% of the 80 winning bid, floored
+            amount: 80, // the winning bid, charged in full - no discount
             ..
         }
     )));
+    // The reward is a separate, visible rebate, not a quieter price.
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::DiscovererRefunded {
+            player: 0,
+            tile: 2,
+            amount: 8, // 10% of the 80 paid
+        }
+    )));
     assert_eq!(st.tiles[2].owner, Some(0));
-    assert_eq!(st.players[0].cash, 1500 - 72);
+    assert_eq!(st.players[0].cash, 1500 - 80 + 8);
     assert_eq!(st.turn, TurnPhase::AwaitEnd);
     assert_eq!(st.current, 0);
+}
+
+#[test]
+fn a_rival_winning_the_auction_gets_no_rebate() {
+    // The rebate rewards having LANDED there, so it is the discoverer's and
+    // nobody else's - a rival outbidding them pays every last unit.
+    let engine = engine_with(plain_board());
+    let mut st = two_players(&engine);
+    st.players[0].cash = 10; // broke discoverer: no implicit floor bid
+    let (st, _) = play(&engine, &st, "p0", 2);
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 70 }),
+    );
+
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::BlindAuctionResolved {
+            tile: 2,
+            winner: Some(1),
+            amount: 70,
+            ..
+        }
+    )));
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, Event::DiscovererRefunded { .. })),
+        "only the discoverer is rebated"
+    );
+    assert_eq!(st.players[1].cash, 1500 - 70);
 }
 
 #[test]

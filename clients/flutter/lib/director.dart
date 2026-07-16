@@ -579,9 +579,11 @@ List<Beat> _beatsFor(
           bids: bids,
           winner: winner,
           amount: amount,
-          // Won above the floor after a contest: the 90% discount shows as the
-          // chit shrinking mid-flight - the discount is a thing that happens to
-          // the money on its way.
+          // Paying less than the top bid can now only mean a market event
+          // moved acquisition costs (the discoverer's edge is a rebate after
+          // the fact, not a quieter price - ADR-0018 amended): still shown as
+          // the chit shrinking mid-flight, because it is a thing that happens
+          // to the money on its way.
           discounted: winner != null && top > 0 && amount < top,
         )),
       ];
@@ -594,6 +596,19 @@ List<Beat> _beatsFor(
         beats.add(BandSweepBeat({tile: winner}));
       }
       return beats;
+
+    case 'discoverer_refunded':
+      // The reward for having landed there, as its own motion: the full price
+      // left on the beat above, and the bank hands part of it straight back.
+      // Two chits, because it is two things happening (ADR-0018 amended).
+      final p = e['player'] as int;
+      return [
+        cash(e['amount'] as int,
+            from: TileAnchor(e['tile'] as int),
+            to: SeatAnchor(p),
+            payer: -1, // the bank
+            payee: p),
+      ];
 
     // -- aggression ---------------------------------------------------------
 

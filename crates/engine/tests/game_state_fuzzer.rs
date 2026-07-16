@@ -502,7 +502,11 @@ fn assert_money_delta(
     let mut max_expected = 0i64;
     for event in events {
         let (lo, hi) = match event {
-            Event::SalaryPaid { amount, .. } => (*amount, *amount),
+            // The bank paying out: a salary, or the discoverer's rebate handed
+            // back on top of the full price charged below (ADR-0018 amended).
+            Event::SalaryPaid { amount, .. } | Event::DiscovererRefunded { amount, .. } => {
+                (*amount, *amount)
+            }
             Event::BlindAuctionResolved {
                 winner: Some(_),
                 amount,

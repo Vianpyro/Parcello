@@ -26,12 +26,14 @@ use crate::tuning::MAX_RENT_BOOSTS;
 /// Minimum trade edge before the bot accepts an offer.
 const TRADE_MARGIN: i64 = 25;
 /// Sealed-bid jitter bounds, as percent of list price (2026-07: bots got
-/// unpredictable on purpose - fixed formulas were trivial to outbid).
-const BID_JITTER_MIN_PCT: i64 = 50;
+/// unpredictable on purpose - fixed formulas were trivial to outbid). The
+/// floor is the list price: a bot never bids under it. The range used to
+/// start at 50%, which was meant to let humans win, but a sub-floor bid can
+/// still WIN when the discoverer is insolvent - so it quietly bought tiles
+/// under list instead. A bot that does not want to compete abstains, which
+/// leaves the tile to the humans without that side effect.
+const BID_JITTER_MIN_PCT: i64 = 100;
 const BID_JITTER_MAX_PCT: i64 = 200;
-/// Below this fraction of list price the bot abstains instead of
-/// lowballing a bid that could never win against the discoverer floor.
-const MIN_BID_PCT: i64 = 50;
 /// Landing-score weights for movement-card choice (heuristic, not rules).
 const SCORE_GO_TO_JAIL: i64 = -1000;
 const SCORE_BUYABLE_UNOWNED: i64 = 20;
@@ -89,6 +91,25 @@ pub fn decide(
         }
         TurnPhase::AwaitEnd => bot.asset_action().or(Some(CommandKind::EndTurn)),
     }
+}
+
+/// Draws a percent in `min..=max` on a descending triangle: each step up is
+/// one weight rarer, so a bot mostly bids near the list price and only
+/// occasionally reaches high. Same shape as the Audit's bracket draw
+/// (ADR-0029) - "higher is simply rarer" - but on the caller's noise, since
+/// the bot never touches `GameState.rng`.
+fn weighted_pct(noise: &mut u64, min: i64, max: i64) -> i64 {
+    let n = (max - min + 1) as u64;
+    let total: u64 = (1..=n).sum();
+    let mut r = rng::below(noise, total);
+    for pct in min..=max {
+        let weight = (max - pct + 1) as u64;
+        if r < weight {
+            return pct;
+        }
+        r -= weight;
+    }
+    min // unreachable with a correct total; safe fallback
 }
 
 /// Just the movement-card choice for `seat` (the tile-scoring heuristic
@@ -165,12 +186,7 @@ impl Bot<'_> {
         }
         let price = self.content.property(tile)?.price;
         let mut noise = self.noise;
-        let pct = BID_JITTER_MIN_PCT
-            + rng::below(
-                &mut noise,
-                (BID_JITTER_MAX_PCT - BID_JITTER_MIN_PCT + 1) as u64,
-            ) as i64;
-        let roll = price * pct / 100;
+        let roll = price * weighted_pct(&mut noise, BID_JITTER_MIN_PCT, BID_JITTER_MAX_PCT) / 100;
         let amount = if self.view.current == self.me {
             if self.cash_after(price) >= 0 {
                 roll.max(price).min(self.cash())
@@ -178,9 +194,11 @@ impl Bot<'_> {
                 0
             }
         } else {
-            let bid = roll.min(self.cash_after(RESERVE));
-            if bid >= price * MIN_BID_PCT / 100 {
-                bid
+            // Can't cover the list price with the reserve intact? Abstain -
+            // never lowball (see BID_JITTER_MIN_PCT).
+            let affordable = self.cash_after(RESERVE);
+            if affordable >= price {
+                roll.min(affordable)
             } else {
                 0
             }

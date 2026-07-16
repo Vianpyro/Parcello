@@ -382,6 +382,15 @@ impl Ctx {
                 ),
                 None => format!("{} stays unsold", self.tile_name(*tile)),
             },
+            Event::DiscovererRefunded {
+                player,
+                tile,
+                amount,
+            } => format!(
+                "the bank refunds ${amount} to {} for landing on {}",
+                self.player(*player),
+                self.tile_name(*tile)
+            ),
             Event::TradeProposed { trade, from, to } => format!(
                 "{} proposed trade #{trade} to {}",
                 self.player(*from),

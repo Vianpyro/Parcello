@@ -386,6 +386,9 @@ String describeEvent(
       return e['winner'] == null
           ? loc.evtAuctionUnsold(t(e['tile']))
           : loc.evtAuctionWon(p(e['winner']), t(e['tile']), e['amount']);
+    case 'discoverer_refunded':
+      return loc.evtDiscovererRefunded(
+          p(e['player']), e['amount'], t(e['tile']));
     case 'rent_paid':
       return loc.evtRentPaid(
           p(e['from']), e['amount'], p(e['to']), t(e['tile']));

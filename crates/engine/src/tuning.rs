@@ -15,9 +15,12 @@ pub const MAX_OPEN_TRADES_PER_PLAYER: usize = 4;
 pub const MAX_RENT_BOOSTS: u8 = 3;
 pub const RENT_BOOST_STEP_PCT: i64 = 50;
 
-/// A discoverer winning ABOVE its own floor after a contest pays this
-/// percent of the bid (ADR-0018) - the reward for having landed there.
-pub const CONTESTED_WIN_PAY_PCT: i64 = 90;
+/// A discoverer that wins its own auction pays in full, then the bank hands
+/// back this percent of what it paid (ADR-0018 amended 2026-07) - the reward
+/// for having landed there, and its only one. Paid back rather than discounted
+/// so the table sees both halves: the full price leaving, then the rebate
+/// arriving.
+pub const DISCOVERER_REFUND_PCT: i64 = 10;
 
 /// A mortgage advances this percent of list price - and it is also what a
 /// mortgaged tile is worth (net worth), sells back at, and buys out at on

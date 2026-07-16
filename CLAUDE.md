@@ -141,7 +141,7 @@ architecture doc section 5; dependencies point downward only):
   (movement, jail, trade, auction, estate, landing, cash, turn - all
   `pub(super)`, the pipeline stays the only entry point); `tuning.rs`
   gathers the fixed game-policy numbers that are NOT mod-configurable
-  (VP weights, mortgage/refund percents, the 90% contested-win discount
+  (VP weights, mortgage/refund percents, the 10% discoverer rebate
   - promote to `RuleParams` with an ADR before making one moddable);
   `state.rs` (GameState, TurnPhase incl. `BlindAuction` and
   `BribeVote` variants, TradeOffer; the public market layer - forecast +
@@ -356,10 +356,15 @@ Sealed-bid auctions on every landing (ADR-0018): a 12s
 `TurnPhase::BlindAuction` window (raised from 5s after playtests), every
 living seat bids at once via
 `SubmitBlindBid` (0 abstains), the discoverer gets an implicit list-price
-floor bid if silent and solvent, wins at the floor pay full price, wins
-above it after a contest pay 90% floored, ties favour the discoverer then
+floor bid if silent and solvent, ties favour the discoverer then
 the lowest seat, an all-zero result leaves the tile unsold - no plain
-decline any more. Rent models per tile (`houses` default with full-group
+decline any more. Every winner pays their bid IN FULL; a discoverer that
+wins is then rebated `DISCOVERER_REFUND_PCT` = 10% of what it paid, as its
+own `Event::DiscovererRefunded` (ADR-0018 amended 2026-07: the old "90% on
+a contested win above the floor" was invisible - a discount never happens
+on screen - and conditional in a way nobody could hold in their head; the
+rebate is the discoverer's whole edge on price, and the two motions are
+what the table watches). Do not fold it back into the settlement. Rent models per tile (`houses` default with full-group
 x2 unimproved - a singleton group counts as full; `group_scaled` stations
 - scaled models reject Build). Build/sell with the even rule (forced
 liquidation follows it too). Shared building pools (ADR-0019,

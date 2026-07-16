@@ -341,10 +341,11 @@ plain decline anymore. The window resolves the instant every living seat
 has bid (or the server auto-abstains whoever's left silent at the
 deadline): highest effective bid wins, ties go to the discoverer then the
 lowest seat, and an all-zero result (only possible when the discoverer is
-also broke) leaves the tile unsold. The discoverer pays list price in
-full when winning at the floor, but only 90% (floored) of their bid when
-winning above it after a contest; any other winner always pays their bid
-in full. Bids are private while the window is open - a view shows only
+also broke) leaves the tile unsold. Every winner pays their bid in full -
+then, if the winner is the discoverer, the bank hands back 10% (floored)
+of what they paid: the reward for having landed there, and their only one.
+You watch the full price leave and the rebate come back, as two separate
+messages. Bids are private while the window is open - a view shows only
 your own - and revealed together once it resolves. Cash is frozen for the
 whole window, same invariant as the old open auction. Trading
 (asynchronous offers of cash and/or house-free-group tiles between any

@@ -263,10 +263,41 @@ void main() {
       final reveal = plan.beats.whereType<BidRevealBeat>().single.reveal;
       expect(reveal.bids, [140, 200, 0]);
       expect(reveal.winner, 1);
-      // Won above the floor after a contest: the 90% discount shows as the
-      // chit shrinking on its way to the tile.
+      // Paying under the top bid now only means a market event moved the
+      // acquisition cost; it still shrinks the chit on its way to the tile.
       expect(reveal.discounted, isTrue);
       expect(plan.beats.whereType<BandSweepBeat>().single.tiles, {6: 1});
+    });
+
+    test('the discoverer rebate is its own chit, from the bank', () {
+      // The point of the rule (ADR-0018 amended): the table sees the full
+      // price leave, then sees it come part-way back - two motions, because
+      // it is two things.
+      final plan = compile([
+        {
+          'type': 'blind_auction_resolved',
+          'tile': 6,
+          'discoverer': 0,
+          'winner': 0,
+          'amount': 200,
+          'bids': [200, 0, 0],
+        },
+        {'type': 'discoverer_refunded', 'player': 0, 'tile': 6, 'amount': 20},
+      ], ctx());
+      final chits = plan.beats.whereType<ChitBeat>().toList();
+      expect(chits, hasLength(2), reason: 'the price out, then the rebate in');
+      // Paid in full first: no shrinking chit, the rebate is not a discount.
+      expect(plan.beats.whereType<BidRevealBeat>().single.reveal.discounted,
+          isFalse);
+      // The full price leaves the winner's marker for the tile...
+      expect(chits.first.text, r'-$200');
+      expect((chits.first.to as TileAnchor).tile, 6);
+      // ...then the rebate comes back off the tile, and reads as a gain.
+      final rebate = chits.last;
+      expect(rebate.text, r'+$20');
+      expect(rebate.kind, ChitKind.gain);
+      expect((rebate.from as TileAnchor).tile, 6);
+      expect((rebate.to as SeatAnchor).seat, 0);
     });
 
     test('an unsold tile reveals the bids and transfers nothing', () {

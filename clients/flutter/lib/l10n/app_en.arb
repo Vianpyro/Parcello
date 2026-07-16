@@ -343,6 +343,14 @@
       "amount": { "type": "int" }
     }
   },
+  "evtDiscovererRefunded": "The bank refunds {player} ${amount} for landing on {tile}",
+  "@evtDiscovererRefunded": {
+    "placeholders": {
+      "player": { "type": "String" },
+      "amount": { "type": "int" },
+      "tile": { "type": "String" }
+    }
+  },
   "evtRentPaid": "{from} paid ${amount} rent to {to} for {tile}",
   "@evtRentPaid": {
     "placeholders": {

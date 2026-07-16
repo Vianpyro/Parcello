@@ -1,11 +1,11 @@
 //! Sealed-bid auctions on every landing (ADR-0018): bid collection
-//! and window resolution (floors, contested-win discount, ties).
+//! and window resolution (floors, the discoverer's rebate, ties).
 //!
 //! Split from `apply.rs` (2026-07) purely for module size; all methods
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::{CONTESTED_WIN_PAY_PCT, CommandError, Event, Exec, MarketEffect, TurnPhase};
+use super::{CommandError, DISCOVERER_REFUND_PCT, Event, Exec, MarketEffect, TurnPhase};
 
 impl Exec<'_> {
     pub(super) fn submit_blind_bid(&mut self, p: usize, amount: i64) -> Result<(), CommandError> {
@@ -74,14 +74,11 @@ impl Exec<'_> {
             .max_by_key(|&s| (effective(s), s == discoverer, std::cmp::Reverse(s)));
         match winner {
             Some(w) => {
-                let win_amount = effective(w);
-                let raw_settlement = if w == discoverer && win_amount > floor {
-                    win_amount * CONTESTED_WIN_PAY_PCT / 100
-                } else {
-                    win_amount
-                };
-                let settlement = self
-                    .apply_market_multiplier(MarketEffect::AcquisitionMultiplier, raw_settlement);
+                // Everyone pays their winning bid in full, discoverer included
+                // (ADR-0018 amended): the reward is a rebate afterwards, not a
+                // quieter price, so the table watches the full amount leave.
+                let settlement =
+                    self.apply_market_multiplier(MarketEffect::AcquisitionMultiplier, effective(w));
                 self.st.players[w].cash -= settlement;
                 self.st.tiles[tile].owner = Some(w);
                 self.ev.push(Event::BlindAuctionResolved {
@@ -91,6 +88,17 @@ impl Exec<'_> {
                     amount: settlement,
                     bids: raw,
                 });
+                if w == discoverer {
+                    let refund = settlement * DISCOVERER_REFUND_PCT / 100;
+                    if refund > 0 {
+                        self.st.players[w].cash += refund;
+                        self.ev.push(Event::DiscovererRefunded {
+                            player: w,
+                            tile,
+                            amount: refund,
+                        });
+                    }
+                }
             }
             None => {
                 self.ev.push(Event::BlindAuctionResolved {

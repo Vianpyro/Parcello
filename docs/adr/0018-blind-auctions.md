@@ -27,11 +27,24 @@ uncontested list-price purchase exists any more.
   discoverer, then the lowest seat (the house convention); if every
   recorded bid is 0 the tile stays unsold - exactly today's
   "no bids = unsold".
-- Discoverer discount: if the discoverer wins at an amount strictly
-  above list price - proof a real auction happened - they pay
-  `amount * 90 / 100`, floored. Winning at exactly the floor pays full
-  list price: finders keepers, no discount. Any other winner pays their
-  bid. Market events (ADR-0021) may scale the settled price.
+- Discoverer rebate (amended 2026-07; superseded the original discount):
+  every winner, discoverer included, pays their winning bid **in full**.
+  A discoverer that wins is then handed back `settlement * 10 / 100`,
+  floored, by the bank, as a separate `DiscovererRefunded` event. Any
+  other winner gets nothing back. Market events (ADR-0021) may scale the
+  settled price, and the rebate follows what was actually paid.
+
+  Superseded: the discoverer used to pay `amount * 90 / 100` when winning
+  strictly above the floor, and full price at the floor. Two reasons to
+  change. It was invisible - a discount is a number that never happens on
+  screen, so the reward for landing there was never *seen*; paying in full
+  and being paid back is two motions the table can watch. And it was
+  conditional in a way nobody could hold in their head: the reward
+  appeared only after a contest, and vanished if you won at your own
+  floor. The rebate is now the discoverer's whole edge on price, and it
+  applies whenever they win. The implicit floor bid and the tiebreak above
+  are unchanged - those are structural, not rewards: without the implicit
+  bid, landing on a tile and staying silent would leave it unsold.
 - Secrecy: pending bids are hidden state. `ClientView` masks other
   seats' bids while the phase is open (a seat sees only its own), and
   the acceptance event carries no amount. The resolution event then
