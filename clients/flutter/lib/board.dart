@@ -72,6 +72,12 @@ class _BoardWidgetState extends State<BoardWidget> {
   /// not moved.
   int? _hoveredTile;
 
+  /// Tile currently holding keyboard/controller focus, so a gamepad / Steam
+  /// Deck player can see which actionable tile is selected before pressing A.
+  /// Only actionable tiles (canAct) are ever focusable, so the D-pad traverses
+  /// just those rather than all 32 squares.
+  int? _focusedTile;
+
   final _ringKey = GlobalKey();
 
   List<PawnData> _pawns() {
@@ -205,6 +211,7 @@ class _BoardWidgetState extends State<BoardWidget> {
     final ts = widget.view?.tiles.elementAtOrNull(i);
     final spotlit = widget.view?.spotlight?.tile == i;
     final hovering = _hoveredTile == i && widget.canAct(i);
+    final focused = _focusedTile == i;
     final dest = widget.highlightTile == i;
     final fullGroup = ts?.owner != null && _ownsFullGroup(ts!.owner!, def.group);
 
@@ -260,12 +267,33 @@ class _BoardWidgetState extends State<BoardWidget> {
                   ? Border.all(color: Pc.gold, width: 3)
                   : hovering
                       ? Border.all(color: Pc.gold, width: 1.5)
-                      : null,
+                      : focused
+                          ? Border.all(color: Pc.gold, width: 2)
+                          : null,
               borderRadius: Pc.radius,
             ),
-            child: GestureDetector(
-              onTap: () => widget.onTileTap(i),
-              child: AnimatedContainer(
+            // Focusable only when actionable, so a controller / Steam Deck
+            // D-pad steps through the tiles the player can act on and A
+            // (Enter/Space -> ActivateIntent) opens the same tile menu as a
+            // tap. GestureDetector still handles the pointer path.
+            child: FocusableActionDetector(
+              enabled: widget.canAct(i),
+              onShowFocusHighlight: (f) {
+                if (f) {
+                  setState(() => _focusedTile = i);
+                } else if (_focusedTile == i) {
+                  setState(() => _focusedTile = null);
+                }
+              },
+              actions: {
+                ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+                  widget.onTileTap(i);
+                  return null;
+                }),
+              },
+              child: GestureDetector(
+                onTap: () => widget.onTileTap(i),
+                child: AnimatedContainer(
                 duration: Motion.refuse,
                 curve: Motion.threat, // snaps in, lingers
                 margin: const EdgeInsets.all(1),
@@ -388,6 +416,7 @@ class _BoardWidgetState extends State<BoardWidget> {
                   if (staticPawns) _staticPawns(i),
                 ]),
               ),
+            ),
             ),
           ),
         ),

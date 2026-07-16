@@ -276,7 +276,18 @@ architecture doc section 5; dependencies point downward only):
   `RulesScreen`; the three OFL fonts (Inter/Fraunces/SourceSerif4) are
   bundled offline under `assets/fonts/` (SHA256SUMS + README there), Inter
   wired as the theme family and their licences registered via
-  `LicenseRegistry`.
+  `LicenseRegistry`. The event log is localized too: `describeEvent`
+  (protocol.dart) takes an `AppLocalizations`, and `GameSession` (a
+  context-free `ChangeNotifier`) is handed one each frame by `ParcelloApp`'s
+  builder so log lines localize before any server message is processed.
+
+  **Controller / Steam Deck**: keyboard-focus navigation, which Steam Input
+  maps onto a gamepad. Menu tiles (`_MenuTile`) and board tiles carry a
+  visible gold focus ring; board tiles are focusable ONLY when actionable
+  (`canAct`), via `FocusableActionDetector` (D-pad traverses, A =
+  `ActivateIntent` opens the tile menu). `FocusTraversalGroup`s scope the menu
+  grid and the `_Actions` buttons; `RulesScreen` pops on Escape (controller
+  B). No autofocus on frequently-rebuilt panels (it would steal focus).
 
   **Motion / game feel** is specified in `docs/motion-language.md` (the
   reference doc: philosophy, tiers, visual grammar, the full event
