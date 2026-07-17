@@ -13,7 +13,6 @@ import 'back_on_escape.dart';
 import 'board.dart';
 import 'l10n/app_localizations.dart';
 import 'motion.dart';
-import 'oidc.dart';
 import 'overlay.dart';
 import 'protocol.dart';
 import 'session.dart';
@@ -21,6 +20,8 @@ import 'sfx.dart';
 import 'stage.dart';
 import 'tokens.dart';
 import 'ui/common.dart';
+import 'ui/connect_screen.dart';
+import 'ui/language_button.dart';
 import 'lan_discovery.dart';
 import 'server_manager.dart';
 
@@ -105,135 +106,6 @@ class ParcelloApp extends StatelessWidget {
 }
 
 
-// -- connect -------------------------------------------------------------------
-
-/// Step 1: connect to a server with an identity. The connection is kept open
-/// so the menu (step 2) can create/join without reconnecting.
-class ConnectScreen extends StatefulWidget {
-  final GameSession s;
-  const ConnectScreen({super.key, required this.s});
-
-  @override
-  State<ConnectScreen> createState() => _ConnectScreenState();
-}
-
-class _ConnectScreenState extends State<ConnectScreen> {
-  final _url = TextEditingController(text: 'ws://127.0.0.1:7878/ws');
-  final _name = TextEditingController();
-  final _token = TextEditingController();
-  String? _signedInAs;
-
-  /// OIDC login (ADR-0009): asks for the issuer URL, runs the browser
-  /// PKCE flow, and drops the id_token into the token field.
-  Future<void> _signIn() async {
-    final s = widget.s;
-    final t = AppLocalizations.of(context);
-    final issuer = TextEditingController(
-        text: s.savedIssuer.isEmpty ? 'https://' : s.savedIssuer);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(t.signIn),
-        content: TextField(
-          controller: issuer,
-          decoration: InputDecoration(
-              labelText: t.identityProviderUrl,
-              hintText: 'https://auth.example.com'),
-        ),
-        actions: [
-          hoverSfx(TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(t.cancel))),
-          hoverSfx(FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(t.openBrowser))),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    try {
-      s.saveIssuer(issuer.text.trim());
-      final token = await loginWithOidc(issuer.text.trim(), 'parcello');
-      setState(() {
-        _token.text = token;
-        _signedInAs = jwtDisplayName(token) ?? t.account;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(t.signInFailed(e.toString()))));
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.s;
-    final t = AppLocalizations.of(context);
-    return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          child: Card(
-            child: Container(
-              width: 380,
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Align(
-                      alignment: Alignment.centerRight,
-                      child: _LanguageButton(s: s)),
-                  Text(t.appTitle,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                          color: Pc.gold)),
-                  const SizedBox(height: 2),
-                  Text(t.connectSubtitle,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Pc.textMuted)),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _url,
-                    decoration: InputDecoration(labelText: t.serverUrl),
-                  ),
-                  TextField(
-                    controller: _name,
-                    maxLength: 24,
-                    decoration: InputDecoration(labelText: t.displayName),
-                  ),
-                  const SizedBox(height: 8),
-                  wideButton(
-                      _signedInAs == null
-                          ? t.signInOptional
-                          : t.signedInAs(_signedInAs!),
-                      _signIn,
-                      primary: false),
-                  const SizedBox(height: 10),
-                  wideButton(t.connect, () {
-                    if (_name.text.trim().isEmpty &&
-                        _token.text.trim().isEmpty) {
-                      return;
-                    }
-                    s.connect(_url.text.trim(), _name.text.trim(),
-                        token: _token.text.trim());
-                  }),
-                  const SizedBox(height: 8),
-                  Text(s.loginMessage,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Pc.textMuted)),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // -- menu ----------------------------------------------------------------------
 
 /// Step 2 (connected): a grid of large action cards - create or join a
@@ -288,7 +160,7 @@ class _MenuScreenState extends State<MenuScreen> {
                 color: Pc.gold)),
         backgroundColor: Pc.surface2,
         actions: [
-          _LanguageButton(s: s),
+          LanguageButton(s: s),
           TextButton.icon(
             onPressed: s.disconnectFromServer,
             icon: const Icon(Icons.logout, size: 18),
@@ -325,39 +197,6 @@ class _MenuScreenState extends State<MenuScreen> {
         ),
       ),
     );
-  }
-}
-
-/// Language names are endonyms - a language is always named in its own
-/// language, never translated - so they are data here rather than ARB strings.
-/// Keyed by the codes in `AppLocalizations.supportedLocales`; a locale added
-/// without an entry falls back to its code rather than disappearing.
-const _languageNames = {'en': 'English', 'fr': 'Français'};
-
-/// Picks the UI language: system default, or a forced locale. Available before
-/// connecting (the very place someone whose OS is in another language needs it)
-/// and from the menu.
-class _LanguageButton extends StatelessWidget {
-  final GameSession s;
-  const _LanguageButton({required this.s});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = AppLocalizations.of(context);
-    return hoverSfx(PopupMenuButton<String>(
-      icon: const Icon(Icons.language, size: 18, color: Pc.textMuted),
-      tooltip: t.language,
-      initialValue: s.localeTag.value,
-      onSelected: s.setLocaleTag,
-      itemBuilder: (_) => [
-        PopupMenuItem(value: '', child: Text(t.languageSystem)),
-        for (final l in AppLocalizations.supportedLocales)
-          PopupMenuItem(
-            value: l.languageCode,
-            child: Text(_languageNames[l.languageCode] ?? l.languageCode),
-          ),
-      ],
-    ));
   }
 }
 
