@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:parcello_client/l10n/app_localizations.dart';
 import 'package:parcello_client/l10n/app_localizations_en.dart';
 import 'package:parcello_client/main.dart';
+import 'package:parcello_client/ui/menu/menu_screen.dart';
+import 'package:parcello_client/ui/menu/rules_screen.dart';
 import 'package:parcello_client/protocol.dart';
 import 'package:parcello_client/session.dart';
 
