@@ -2,7 +2,6 @@
 /// codebase. The server stays the only authority.
 library;
 
-import 'dart:async';
 
 import 'package:flutter/foundation.dart'
     show LicenseRegistry, LicenseEntryWithLineBreaks;
@@ -16,9 +15,12 @@ import 'overlay.dart';
 import 'protocol.dart';
 import 'session.dart';
 import 'sfx.dart';
-import 'stage.dart';
 import 'tokens.dart';
 import 'ui/common.dart';
+import 'ui/game/countdown.dart';
+import 'ui/game/event_log.dart';
+import 'ui/game/flashes.dart';
+import 'ui/game/toggles.dart';
 import 'ui/connect_screen.dart';
 import 'ui/menu/menu_screen.dart';
 
@@ -156,13 +158,13 @@ class GameScreen extends StatelessWidget {
                           Stack(alignment: Alignment.center, children: [
                         // The played movement card. The one action a player
                         // takes every turn, so it is the one that gets weight.
-                        _CardFlash(
+                        CardFlash(
                             seq: s.stage.cardSeq, value: s.stage.cardValue),
                         // Card reveals, spotlight and market announcements all
                         // share one banner: same shape, same place, every time.
                         // A player should never have to work out *where* the
                         // game is about to tell them something.
-                        _BannerFlash(
+                        BannerFlash(
                             seq: s.stage.bannerSeq,
                             text: s.stage.bannerText,
                             kind: s.stage.bannerKind),
@@ -358,11 +360,11 @@ class _CenterPanel extends StatelessWidget {
             // Shown for the whole game, end included: the final time left is
             // part of the result (a bankruptcy win keeps time on the clock).
             if (s.gameEndsAt != null) ...[
-              _Countdown(endsAt: s.gameEndsAt!),
+              Countdown(endsAt: s.gameEndsAt!),
               const SizedBox(width: 8),
             ],
-            _MotionButton(s: s),
-            const _MuteButton(),
+            MotionButton(s: s),
+            const MuteButton(),
           ]),
         const SizedBox(height: 4),
         Row(children: [
@@ -371,7 +373,7 @@ class _CenterPanel extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w600))),
           if (s.turnEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
-            _Countdown(
+            Countdown(
                 endsAt: s.turnEndsAt!,
                 icon: Icons.hourglass_bottom,
                 warnSecs: 10,
@@ -385,7 +387,7 @@ class _CenterPanel extends StatelessWidget {
           // refilled.
           if (s.bankEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
-            _Countdown(
+            Countdown(
                 endsAt: s.bankEndsAt!,
                 holdUntil: s.turnEndsAt,
                 icon: Icons.account_balance,
@@ -398,7 +400,7 @@ class _CenterPanel extends StatelessWidget {
           // (ADR-0028).
           if (s.bidEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
-            _Countdown(
+            Countdown(
                 endsAt: s.bidEndsAt!,
                 icon: Icons.gavel,
                 warnSecs: 3,
@@ -407,7 +409,7 @@ class _CenterPanel extends StatelessWidget {
           // Corruption bribe vote window (ADR-0024): same pattern.
           if (s.voteEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: 6),
-            _Countdown(
+            Countdown(
                 endsAt: s.voteEndsAt!,
                 icon: Icons.how_to_vote,
                 warnSecs: 2,
@@ -436,7 +438,7 @@ class _CenterPanel extends StatelessWidget {
           const SizedBox(height: 6),
           _Actions(s: s),
           const SizedBox(height: 6),
-          Expanded(child: _EventLog(log: s.log)),
+          Expanded(child: EventLog(log: s.log)),
         ]),
       ),
     );
@@ -650,320 +652,6 @@ class _CenterPanel extends StatelessWidget {
   }
 }
 
-/// Ticking countdown to a deadline. Used for the timed-game clock
-/// (ADR-0010), the per-turn AFK timer, and the personal time bank
-/// (ADR-0023); turns red under `warnSecs`.
-class _Countdown extends StatefulWidget {
-  final DateTime endsAt;
-  final IconData icon;
-  final int warnSecs;
-  /// While now is before `holdUntil`, the displayed value freezes at
-  /// `endsAt - holdUntil` instead of ticking down from `endsAt - now` - the
-  /// personal time bank must read as a flat reserve for the whole plain
-  /// turn window and only start draining once that window is spent
-  /// (ADR-0023), not from the moment the turn begins.
-  final DateTime? holdUntil;
-  /// While true, freezes the display at whatever it last showed instead of
-  /// ticking down (ADR-0028): none of these server timers are actually
-  /// running while the table is still rendering an Update, so the display
-  /// must not look like it is - a fresh deadline always follows once the
-  /// animation settles, at which point this naturally shows the full
-  /// duration again rather than jumping.
-  final bool paused;
-  const _Countdown(
-      {required this.endsAt,
-      this.icon = Icons.timer,
-      this.warnSecs = 60,
-      this.holdUntil,
-      this.paused = false});
-
-  @override
-  State<_Countdown> createState() => _CountdownState();
-}
-
-class _CountdownState extends State<_Countdown> {
-  // Seconds-remaining values worth a countdown cue: the final stretch plus
-  // the "heads up" marks further out.
-  static const _milestones = {60, 30, 10, 5, 4, 3, 2, 1, 0};
-
-  Timer? _timer;
-  int? _lastTicked;
-  int? _frozenSecs;
-
-  int _secsLeft() {
-    if (widget.paused) return _frozenSecs ?? _liveSecsLeft();
-    return _frozenSecs = _liveSecsLeft();
-  }
-
-  int _liveSecsLeft() {
-    final now = DateTime.now();
-    final holdUntil = widget.holdUntil;
-    final reference =
-        (holdUntil != null && now.isBefore(holdUntil)) ? holdUntil : now;
-    final left = widget.endsAt.difference(reference);
-    return left.isNegative ? 0 : left.inSeconds;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (widget.paused) return; // no tick cue while frozen
-      final secs = _secsLeft();
-      if (secs != _lastTicked && _milestones.contains(secs)) {
-        _lastTicked = secs;
-        sfx.timerTick();
-      }
-      setState(() {});
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _Countdown old) {
-    super.didUpdateWidget(old);
-    // A new deadline (next turn, restarted game clock) resets the cues.
-    if (old.endsAt != widget.endsAt) {
-      _lastTicked = null;
-      _frozenSecs = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final secs = _secsLeft();
-    final mmss =
-        '${(secs ~/ 60).toString().padLeft(2, '0')}:${(secs % 60).toString().padLeft(2, '0')}';
-    final warn = secs <= widget.warnSecs;
-    final color =
-        warn ? Pc.oxblood : Pc.text;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(widget.icon, size: 18, color: color),
-      const SizedBox(width: 4),
-      Text(mmss,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontFeatures: const [FontFeature.tabularFigures()],
-            color: color,
-          )),
-    ]);
-  }
-}
-
-/// Toggles sound effects on/off (`sfx.enabled`).
-class _MuteButton extends StatefulWidget {
-  const _MuteButton();
-
-  @override
-  State<_MuteButton> createState() => _MuteButtonState();
-}
-
-class _MuteButtonState extends State<_MuteButton> {
-  @override
-  Widget build(BuildContext context) {
-    return hoverSfx(IconButton(
-      iconSize: 18,
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints(),
-      tooltip: sfx.enabled
-          ? AppLocalizations.of(context).muteSound
-          : AppLocalizations.of(context).unmuteSound,
-      icon: Icon(sfx.enabled ? Icons.volume_up : Icons.volume_off,
-          color: Pc.textMuted),
-      onPressed: () => setState(() => sfx.enabled = !sfx.enabled),
-    ));
-  }
-}
-
-/// The accessibility knob (ADR-0030): full -> reduced -> instant.
-///
-/// `instant` is not a degraded mode. It is the same "I do not animate" path the
-/// CLI and bot seats already take under ADR-0028, which is why the server needs
-/// no change to tolerate it - and why nothing in the game is ever conveyed by
-/// motion alone. Pause on any frame and the game is still playable.
-class _MotionButton extends StatefulWidget {
-  final GameSession s;
-  const _MotionButton({required this.s});
-
-  @override
-  State<_MotionButton> createState() => _MotionButtonState();
-}
-
-class _MotionButtonState extends State<_MotionButton> {
-  static const _icons = {
-    MotionProfile.full: Icons.animation,
-    MotionProfile.reduced: Icons.slow_motion_video,
-    MotionProfile.instant: Icons.bolt,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final stage = widget.s.stage;
-    return hoverSfx(IconButton(
-      iconSize: 18,
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints(),
-      tooltip: 'Motion: ${stage.profile.name}',
-      icon: Icon(_icons[stage.profile], color: Pc.textMuted),
-      onPressed: () => setState(() {
-        const cycle = MotionProfile.values;
-        stage.profile = cycle[(stage.profile.index + 1) % cycle.length];
-      }),
-    ));
-  }
-}
-
-/// The played movement card value, shown big in the middle of the board for
-/// a moment after each play, then faded out (ADR-0017; like a physical board
-/// game's dice result, replaced by a card since movement no longer rolls).
-class _CardFlash extends StatefulWidget {
-  final int seq, value;
-  const _CardFlash({required this.seq, required this.value});
-
-  @override
-  State<_CardFlash> createState() => _CardFlashState();
-}
-
-class _CardFlashState extends State<_CardFlash> {
-  bool _visible = false;
-  Timer? _timer;
-
-  @override
-  void didUpdateWidget(_CardFlash old) {
-    super.didUpdateWidget(old);
-    if (widget.seq != old.seq && widget.seq > 0) {
-      setState(() => _visible = true);
-      _timer?.cancel();
-      _timer = Timer(const Duration(milliseconds: 1500), () {
-        if (mounted) setState(() => _visible = false);
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: AnimatedOpacity(
-        opacity: _visible ? 1 : 0,
-        duration: Motion.cardPlay,
-        curve: Motion.arrive,
-        child: Container(
-          width: 66,
-          height: 66,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: Pc.parchment,
-            borderRadius: Pc.radius,
-            border: Border.all(color: Pc.goldDark, width: 1.5),
-            boxShadow: Pc.hairShadow,
-          ),
-          child: Text(
-            '${widget.value}',
-            style: const TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: Pc.parchmentInk,
-                fontFeatures: [FontFeature.tabularFigures()]),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A one-shot banner over the board: a drawn card, a spotlight, a market event.
-/// One shape, one place, every time - a player should never have to work out
-/// *where* the game is going to tell them something.
-class _BannerFlash extends StatefulWidget {
-  final int seq;
-  final String text;
-  final BannerKind kind;
-  const _BannerFlash({
-    required this.seq,
-    required this.text,
-    required this.kind,
-  });
-
-  @override
-  State<_BannerFlash> createState() => _BannerFlashState();
-}
-
-class _BannerFlashState extends State<_BannerFlash> {
-  bool _visible = false;
-  Timer? _timer;
-
-  @override
-  void didUpdateWidget(_BannerFlash old) {
-    super.didUpdateWidget(old);
-    if (widget.seq != old.seq && widget.seq > 0) {
-      setState(() => _visible = true);
-      _timer?.cancel();
-      // Held for as long as the beat the director paid for - the two must agree,
-      // or the banner outlives the pause that exists to let it be read.
-      final hold = widget.kind == BannerKind.card
-          ? Motion.cardReveal
-          : Motion.banner;
-      _timer = Timer(hold, () {
-        if (mounted) setState(() => _visible = false);
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Paper for a card read; a dark plate for a world event. The register tells
-    // you which kind of thing just happened before you read a word of it.
-    final paper = widget.kind == BannerKind.card;
-    return IgnorePointer(
-      child: AnimatedOpacity(
-        opacity: _visible ? 1 : 0,
-        duration: Motion.ambient,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 320),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          decoration: BoxDecoration(
-            color: paper ? Pc.parchment : Pc.surface,
-            borderRadius: Pc.radius,
-            border: Border.all(color: Pc.goldDark, width: 1.5),
-            boxShadow: Pc.hairShadow,
-          ),
-          child: Text(
-            widget.text,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: paper ? Pc.parchmentInk : Pc.text,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Caps a numeric text field at `max`, clamping down any edit that would
-/// exceed it (used for the sealed-bid amount, bounded by the seat's cash).
-/// Empty input passes through so the field can be cleared and retyped.
 class _MaxValueFormatter extends TextInputFormatter {
   final int max;
   const _MaxValueFormatter(this.max);
@@ -1303,31 +991,6 @@ class _ActionsState extends State<_Actions> {
       ),
       child: Text(picked ? '$value  #${pos + 1}' : '$value'),
     ));
-  }
-}
-
-class _EventLog extends StatelessWidget {
-  final List<String> log;
-  const _EventLog({required this.log});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Pc.bg,
-        border: Border.all(color: Pc.border),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: ListView.builder(
-        reverse: true, // newest visible without scroll management
-        itemCount: log.length,
-        itemBuilder: (ctx, i) => Text(
-          log[log.length - 1 - i],
-          style: const TextStyle(fontSize: 11, color: Pc.textMuted),
-        ),
-      ),
-    );
   }
 }
 
