@@ -15,7 +15,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parcello_client/l10n/app_localizations.dart';
-import 'package:parcello_client/main.dart';
+import 'package:parcello_client/ui/game/game_screen.dart';
 import 'package:parcello_client/ui/menu/menu_screen.dart';
 import 'package:parcello_client/protocol.dart';
 import 'package:parcello_client/session.dart';
