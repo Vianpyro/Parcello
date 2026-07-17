@@ -20,6 +20,7 @@ import 'session.dart';
 import 'sfx.dart';
 import 'stage.dart';
 import 'tokens.dart';
+import 'ui/common.dart';
 import 'lan_discovery.dart';
 import 'server_manager.dart';
 
@@ -103,27 +104,6 @@ class ParcelloApp extends StatelessWidget {
   }
 }
 
-/// Copies a room code and confirms with a brief snackbar.
-void copyCode(BuildContext context, String code) {
-  Clipboard.setData(ClipboardData(text: code));
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(AppLocalizations.of(context).roomCodeCopied(code)),
-    duration: const Duration(seconds: 1),
-  ));
-}
-
-/// A tall, full-width button so every screen ports to touch with minimal
-/// change. Primary = filled, secondary = outlined.
-Widget wideButton(String label, VoidCallback? onPressed, {bool primary = true}) {
-  final style = ButtonStyle(
-    minimumSize: WidgetStateProperty.all(const Size.fromHeight(52)),
-    textStyle: WidgetStateProperty.all(
-        const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-  );
-  return hoverSfx(primary
-      ? FilledButton(onPressed: onPressed, style: style, child: Text(label))
-      : OutlinedButton(onPressed: onPressed, style: style, child: Text(label)));
-}
 
 // -- connect -------------------------------------------------------------------
 

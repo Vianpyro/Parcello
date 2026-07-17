@@ -105,7 +105,7 @@ void main() {
       supportedLocales: AppLocalizations.supportedLocales,
       home: ListenableBuilder(
         listenable: s,
-        builder: (_, __) => GameScreen(s: s),
+        builder: (_, _) => GameScreen(s: s),
       ),
     ));
     await tester.pump(const Duration(milliseconds: 400));
