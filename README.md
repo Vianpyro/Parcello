@@ -434,7 +434,10 @@ seat (`Event::WonByPoolExhaustion`, the "doom clock"). Public market
 forecast (ADR-0021, `data/events.toml`):
 a seeded, rolling queue of the next 3 scheduled market events plus whichever
 one is currently active - `rent_multiplier` (composes with the rent boost
-step above), `acquisition_multiplier` (scales takeover cost), and
+step above), `acquisition_multiplier` (moves the price of every property:
+the auction floor, the discoverer's implicit bid and the takeover cost all
+follow it, so a crash makes the tile genuinely cheaper to enter and the
+price printed on the board is one you can bid), and
 `wealth_tax` (one-shot: every alive player pays a percent of net worth
 through the normal bankruptcy machinery). The whole queue is public in every
 view - the draws already made, never the generator (seed/deck order stay

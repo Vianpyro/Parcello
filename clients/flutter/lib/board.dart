@@ -462,16 +462,13 @@ class _BoardWidgetState extends State<BoardWidget> {
   /// forecast strip promised a consequence three turns ago; the board is where
   /// that promise has to be kept. Mirrors the engine's `apply_market_multiplier`
   /// exactly, including its truncating division.
+  /// The current price when the market is actually moving it, `null` when it
+  /// is not - the caller colours a moved price as a gain or a loss, so "no
+  /// change" has to be distinguishable from "unchanged number".
   int? _marketPrice(TileDef def) {
-    final active = widget.view?.forecast.active;
-    if (!def.isProperty ||
-        active == null ||
-        active.effect != 'acquisition_multiplier') {
-      return null;
-    }
-    final base = def.price ?? 0;
-    final scaled = base * (100 + active.magnitudePct) ~/ 100;
-    return scaled == base ? null : (scaled < 0 ? 0 : scaled);
+    if (!def.isProperty) return null;
+    final now = marketPrice(def, widget.view);
+    return now == (def.price ?? 0) ? null : now;
   }
 
   String _meta(

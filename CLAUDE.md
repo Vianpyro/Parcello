@@ -443,7 +443,13 @@ lander's net worth, heavier brackets linearly rarer. Public market forecast
 (ADR-0021, `data/events.toml`): a seeded rolling queue of the next 3
 scheduled events plus whichever is active - `rent_multiplier`,
 `acquisition_multiplier`, one-shot `wealth_tax` - `gap_turns` apart,
-public in every view (draws already made, never the generator). The
+public in every view (draws already made, never the generator).
+`acquisition_multiplier` moves the PRICE, not the settlement (ADR-0021
+amended 2026-07): `Exec::market_price` is the ONE reference - auction floor,
+the discoverer's implicit bid, `BidBelowFloor`, takeover cost, and the
+client's `marketPrice` (protocol.dart) all read it. Settlement pays the bid
+as-is; re-applying the multiplier there would compound (-20% settling at
+-36%). The bot bids against it too, or it would overbid a crashed floor. The
 Exposition corner (`TileKind::Spotlight`, ADR-0026, replaces the old
 no-op `free_parking` in `mods/base`): landing there draws one random
 property tile via the seeded RNG and puts it in the spotlight -

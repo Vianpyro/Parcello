@@ -5,7 +5,7 @@
 //! stay on `Exec` and are `pub(super)` - the command pipeline in
 //! `apply.rs` is still the only entry point.
 
-use super::{CommandError, DISCOVERER_REFUND_PCT, Event, Exec, MarketEffect, TurnPhase};
+use super::{CommandError, DISCOVERER_REFUND_PCT, Event, Exec, TurnPhase};
 
 impl Exec<'_> {
     pub(super) fn submit_blind_bid(&mut self, p: usize, amount: i64) -> Result<(), CommandError> {
@@ -18,11 +18,10 @@ impl Exec<'_> {
         if !(0..=self.st.players[p].cash).contains(&amount) {
             return Err(CommandError::InsufficientFunds);
         }
-        let floor = self
-            .content
-            .property(tile)
-            .expect("BlindAuction always targets a property")
-            .price;
+        // The floor is the price *right now* (ADR-0021 amended): during a
+        // crash the tile is cheaper to enter, and the number printed on the
+        // board is one a discoverer may legally bid.
+        let floor = self.market_price(tile);
         if p == self.st.current && amount != 0 && amount < floor {
             return Err(CommandError::BidBelowFloor);
         }
@@ -47,11 +46,7 @@ impl Exec<'_> {
             return;
         }
         let discoverer = self.st.current;
-        let floor = self
-            .content
-            .property(tile)
-            .expect("BlindAuction always targets a property")
-            .price;
+        let floor = self.market_price(tile);
         let raw: Vec<i64> = {
             let TurnPhase::BlindAuction { bids, .. } = &self.st.turn else {
                 unreachable!()
@@ -77,8 +72,11 @@ impl Exec<'_> {
                 // Everyone pays their winning bid in full, discoverer included
                 // (ADR-0018 amended): the reward is a rebate afterwards, not a
                 // quieter price, so the table watches the full amount leave.
-                let settlement =
-                    self.apply_market_multiplier(MarketEffect::AcquisitionMultiplier, effective(w));
+                //
+                // No market multiplier here: it is already baked into the floor
+                // the bids were made against (ADR-0021 amended). Re-applying it
+                // would compound - a -20% crash would settle at -36%.
+                let settlement = effective(w);
                 self.st.players[w].cash -= settlement;
                 self.st.tiles[tile].owner = Some(w);
                 self.ev.push(Event::BlindAuctionResolved {

@@ -354,6 +354,19 @@ class ClientView {
             : null;
 }
 
+/// What a property costs to take right now: its list price moved by an active
+/// acquisition event (ADR-0021 amended). The engine holds the auction floor to
+/// exactly this number, so the client must print it and seed bids from it -
+/// quoting the raw list price during a crash would offer a bid the engine
+/// rejects. Non-properties and an inert market simply give the list price.
+int marketPrice(TileDef def, ClientView? view) {
+  final base = def.price ?? 0;
+  final active = view?.forecast.active;
+  if (active == null || active.effect != 'acquisition_multiplier') return base;
+  final scaled = base * (100 + active.magnitudePct) ~/ 100;
+  return scaled < 0 ? 0 : scaled;
+}
+
 String _identityEventName(String id) => id;
 
 /// Human-readable line for one engine event (the animation/log feed).

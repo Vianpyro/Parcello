@@ -1700,11 +1700,13 @@ class _ActionsState extends State<_Actions> {
           v.players[seat].bankrupt) {
         return const SizedBox.shrink();
       }
-      final price = s.content!.board[t.tile!].price ?? 0;
+      // The price right now, not the list price: it IS the floor the engine
+      // holds bids to (ADR-0021 amended), and the number printed on the tile.
+      final price = marketPrice(s.content!.board[t.tile!], v);
       final cash = v.players[seat].cash;
       final isDiscoverer = v.current == seat;
       if (_bidInitTile != t.tile) {
-        // Seed at the list price, but never above what you can actually
+        // Seed at that price, but never above what you can actually
         // bid (the sealed-bid invariant validates against cash, ADR-0018).
         _bid.text = '${price.clamp(0, cash)}';
         _bidInitTile = t.tile;

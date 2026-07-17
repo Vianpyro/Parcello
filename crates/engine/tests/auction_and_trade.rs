@@ -191,6 +191,60 @@ fn discoverer_pays_its_winning_bid_in_full_then_gets_the_rebate() {
 }
 
 #[test]
+fn a_crash_moves_the_floor_itself_and_never_compounds() {
+    // ADR-0021 amended: the market moves the PRICE, not the settlement. The
+    // number on the board is the floor, and the floor is what you pay - a
+    // -40% crash must not also discount the bid a second time (that would
+    // settle at -64%).
+    let engine = engine_with(plain_board());
+    let mut st = two_players(&engine);
+    st.forecast.active = Some(ActiveMarketEvent {
+        event_id: "crash".into(),
+        effect: MarketEffect::AcquisitionMultiplier,
+        magnitude_pct: -40,
+        ends_at_turn: 10,
+    });
+
+    // ave_a lists at 60; right now it costs 36.
+    let (st, ev) = play(&engine, &st, "p0", 2);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, Event::BlindAuctionOpened { floor: 36, .. })),
+        "the window announces the crashed price, not the list price"
+    );
+
+    // The crashed price is now a legal discoverer bid - the list price used to
+    // be the floor, so bidding what the board said was rejected.
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::SubmitBlindBid { amount: 36 }),
+    );
+    let (st, ev) = step(
+        &engine,
+        &st,
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 0 }),
+    );
+    assert!(
+        ev.iter().any(|e| matches!(
+            e,
+            Event::BlindAuctionResolved {
+                winner: Some(0),
+                amount: 36, // exactly the bid: NOT 36 * 0.6 = 21
+                ..
+            }
+        )),
+        "the bid is settled as-is; the crash already lives in the floor"
+    );
+    // ...and the rebate is 10% of what was actually paid.
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        Event::DiscovererRefunded { amount: 3, .. } // 10% of 36
+    )));
+    assert_eq!(st.players[0].cash, 1500 - 36 + 3);
+}
+
+#[test]
 fn a_rival_winning_the_auction_gets_no_rebate() {
     // The rebate rewards having LANDED there, so it is the discoverer's and
     // nobody else's - a rival outbidding them pays every last unit.

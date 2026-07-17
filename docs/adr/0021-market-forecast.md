@@ -18,8 +18,21 @@ public queue of upcoming market events players can plan around.
 - Effects, initially the pitch trio:
   - `rent_multiplier`: scales rent in `resolve_landing` (composes with
     ADR-0012 boosts) - e.g. a crash at -50% for N turns;
-  - `acquisition_multiplier`: scales sealed-bid settlement prices
-    (ADR-0018) and takeover cost (ADR-0022) - e.g. a bubble discount;
+  - `acquisition_multiplier`: moves the PRICE of a property (amended
+    2026-07) - `Exec::market_price` is the single reference, and the
+    sealed-bid floor (ADR-0018), the discoverer's implicit bid, the
+    `BidBelowFloor` check, the takeover cost (ADR-0022) and the price the
+    client prints on the tile all read it - e.g. a bubble discount.
+
+    Superseded: it used to scale the *settlement* instead, leaving the
+    floor at list price. That made the board lie - a tile printed "$80"
+    during a -20% crash while the engine rejected any discoverer bid under
+    $100, then charged $80 anyway. Moving it to the price means the number
+    on the tile is the number you may bid, and the crash reads as "the
+    ticket got cheaper" rather than as an invisible rebate. The multiplier
+    must now be applied in exactly one place: settlement pays the bid
+    as-is, because re-applying it would compound (a -20% crash settling at
+    -36%).
   - `wealth_tax`: one-shot on activation (`duration_turns = 0`), every
     player pays `net_worth * pct / 100` through the normal
     tax/partial-payment machinery.

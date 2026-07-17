@@ -126,6 +126,50 @@ fn advanced_view(cash: i64, turn: TurnPhase) -> ClientView {
 }
 
 #[test]
+fn bids_follow_the_crashed_price_not_the_list_price() {
+    // ADR-0021 amended: the floor moves with the market, so the bot must bid
+    // against the price right now. Against the list price it would overbid the
+    // floor by miles during a crash - and hand the tile away in a boom.
+    let c = content(); // property price 100
+    let crashed = |pct: i64| {
+        let mut v = view(
+            1000,
+            TurnPhase::BlindAuction {
+                tile: 1,
+                bids: vec![None, None],
+            },
+        );
+        v.current = 1; // seat 0 is a plain bidder
+        v.forecast.active = Some(crate::ActiveMarketEvent {
+            event_id: "crash".into(),
+            effect: MarketEffect::AcquisitionMultiplier,
+            magnitude_pct: pct,
+            ends_at_turn: 9,
+        });
+        v
+    };
+
+    for noise in 0..64u64 {
+        // -50%: the tile costs 50 now, so bids live in [50, 100], never above.
+        match decide(&c, &crashed(-50), 0, noise) {
+            Some(CommandKind::SubmitBlindBid { amount }) => assert!(
+                (50..=100).contains(&amount),
+                "bid {amount} ignores the crashed price for noise {noise}"
+            ),
+            other => panic!("expected a bid, got {other:?}"),
+        }
+        // +100%: the tile costs 200 now; the bot must reach for that floor.
+        match decide(&c, &crashed(100), 0, noise) {
+            Some(CommandKind::SubmitBlindBid { amount }) => assert!(
+                (200..=400).contains(&amount),
+                "bid {amount} ignores the boom price for noise {noise}"
+            ),
+            other => panic!("expected a bid, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn high_bids_are_rare_not_impossible() {
     // The jitter is a descending triangle (like the Audit's brackets): a bot
     // mostly bids near list price and only occasionally reaches high. Without

@@ -31,6 +31,20 @@ impl Exec<'_> {
         }
     }
 
+    /// What a property costs to take *right now*: its list price moved by an
+    /// active acquisition event (ADR-0021, amended 2026-07). This is the one
+    /// reference for the price - the auction floor, the discoverer's implicit
+    /// bid, and the takeover cost all read it, and the client prints it on the
+    /// tile. A crash lowers the ticket itself rather than quietly discounting
+    /// the settlement, so the number on the board is the number you can bid.
+    ///
+    /// Do NOT re-apply the multiplier to whatever this returns: the effect
+    /// lives here and nowhere else, or a -20% crash silently compounds.
+    pub(super) fn market_price(&self, tile: usize) -> i64 {
+        let base = self.content.property(tile).map_or(0, |p| p.price);
+        self.apply_market_multiplier(MarketEffect::AcquisitionMultiplier, base)
+    }
+
     /// Applies the active spotlight's bonus to `base` if it targets `tile`
     /// (ADR-0026); a no-op otherwise, including while nothing is spotlit.
     /// Composes with `boosted_rent` and `apply_market_multiplier` as the
@@ -134,12 +148,16 @@ impl Exec<'_> {
                 self.charge(p, None, amount);
                 self.st.turn = TurnPhase::AwaitEnd;
             }
-            TileKind::Property(prop) => match self.st.tiles[tile].owner {
+            TileKind::Property(_) => match self.st.tiles[tile].owner {
                 None => {
                     self.ev.push(Event::BlindAuctionOpened {
                         tile,
                         discoverer: p,
-                        floor: prop.price,
+                        // The price right now, which is the floor the window
+                        // will actually hold bids to (ADR-0021 amended) - the
+                        // announcement must not quote a number the engine
+                        // would then reject.
+                        floor: self.market_price(tile),
                     });
                     self.st.turn = TurnPhase::BlindAuction {
                         tile,

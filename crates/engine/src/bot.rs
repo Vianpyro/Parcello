@@ -14,7 +14,9 @@
 
 use crate::rng;
 use crate::tuning::{MORTGAGE_INTEREST_PCT, MORTGAGE_VALUE_PCT};
-use crate::{ClientView, CommandKind, GameContent, GamePhase, RentModel, TileKind, TurnPhase};
+use crate::{
+    ClientView, CommandKind, GameContent, GamePhase, MarketEffect, RentModel, TileKind, TurnPhase,
+};
 
 /// Cash the bot refuses to dip under when buying or bidding.
 const RESERVE: i64 = 100;
@@ -159,6 +161,21 @@ impl Bot<'_> {
         self.cash() - cost
     }
 
+    /// What `tile` costs to take right now: list price moved by an active
+    /// acquisition event (ADR-0021 amended). The bot bids against the same
+    /// number the engine holds the floor to, and the same one the board
+    /// prints - bidding a percentage of the *list* price during a crash would
+    /// wildly overbid the actual floor.
+    fn market_price(&self, tile: usize) -> Option<i64> {
+        let base = self.content.property(tile)?.price;
+        Some(match &self.view.forecast.active {
+            Some(a) if a.effect == MarketEffect::AcquisitionMultiplier => {
+                (base * (100 + a.magnitude_pct) / 100).max(0)
+            }
+            _ => base,
+        })
+    }
+
     fn trade_response(&self) -> Option<CommandKind> {
         let offer = self.view.pending_trades.iter().find(|t| t.to == self.me)?;
         if !self.can_fulfill_trade_payment(offer.receive_cash, &offer.receive_tiles) {
@@ -184,7 +201,7 @@ impl Bot<'_> {
         if bids[self.me].is_some() {
             return None;
         }
-        let price = self.content.property(tile)?.price;
+        let price = self.market_price(tile)?;
         let mut noise = self.noise;
         let roll = price * weighted_pct(&mut noise, BID_JITTER_MIN_PCT, BID_JITTER_MAX_PCT) / 100;
         let amount = if self.view.current == self.me {

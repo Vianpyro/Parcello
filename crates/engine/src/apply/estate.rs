@@ -8,7 +8,7 @@
 
 use super::{
     CommandError, Event, Exec, GameContent, HOUSE_REFUND_PCT, MAX_RENT_BOOSTS,
-    MORTGAGE_INTEREST_PCT, MORTGAGE_VALUE_PCT, MarketEffect, PropertyDef, RentModel, TurnPhase,
+    MORTGAGE_INTEREST_PCT, MORTGAGE_VALUE_PCT, PropertyDef, RentModel, TurnPhase,
 };
 
 // The named lifetime is load-bearing here (unlike the sibling modules):
@@ -200,8 +200,11 @@ impl<'e> Exec<'e> {
             });
             return Ok(());
         }
-        let cost = self
-            .apply_market_multiplier(MarketEffect::AcquisitionMultiplier, prop.price * pct / 100);
+        // Same "price right now" the auction floor uses (ADR-0021 amended):
+        // a crash lowers every way of taking a tile, with no exception to
+        // remember. Scaling the price before the premium rather than after is
+        // the same arithmetic, and keeps one reference for the price.
+        let cost = self.market_price(tile) * pct / 100;
         if self.st.players[p].cash < cost {
             return Err(CommandError::InsufficientFunds);
         }
