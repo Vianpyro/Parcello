@@ -1,6 +1,7 @@
 /// Step 1 of the client: pick a server and an identity.
 library;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
@@ -10,6 +11,21 @@ import '../sfx.dart';
 import '../tokens.dart';
 import 'common.dart';
 import 'language_button.dart';
+
+/// The pre-filled server URL. A community server (ADR-0025) serves its own
+/// Flutter Web build, so on web the WebSocket lives at the page's own origin -
+/// derive it (http->ws, https->wss, keep any non-default port) so a hosted
+/// player connects with zero typing and no personal domain is baked into the
+/// repo. Desktop builds ship to LAN players, so they keep the loopback default.
+String defaultServerUrl() {
+  if (!kIsWeb) return 'ws://127.0.0.1:7878/ws';
+  final base = Uri.base;
+  final scheme = base.scheme == 'https' ? 'wss' : 'ws';
+  final defaultPort = base.scheme == 'https' ? 443 : 80;
+  final authority =
+      base.port == defaultPort ? base.host : '${base.host}:${base.port}';
+  return '$scheme://$authority/ws';
+}
 
 /// Step 1: connect to a server with an identity. The connection is kept open
 /// so the menu (step 2) can create/join without reconnecting.
@@ -22,7 +38,7 @@ class ConnectScreen extends StatefulWidget {
 }
 
 class _ConnectScreenState extends State<ConnectScreen> {
-  final _url = TextEditingController(text: 'ws://127.0.0.1:7878/ws');
+  final _url = TextEditingController(text: defaultServerUrl());
   final _name = TextEditingController();
   final _token = TextEditingController();
   String? _signedInAs;
