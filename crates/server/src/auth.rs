@@ -64,19 +64,27 @@ impl IdentityVerifier for CompositeVerifier {
         if let Some(token) = &auth.token {
             let header = token.split('.').next().unwrap_or_default();
             let alg: AlgOnly = decode_json(header)?;
-            return match alg.alg.as_str() {
+            let mut identity = match alg.alg.as_str() {
                 "EdDSA" => self
                     .eddsa
                     .as_ref()
                     .ok_or("this server has no identity provider configured (--identity-url)")?
-                    .verify(token),
+                    .verify(token)?,
                 "HS256" => self
                     .hs256
                     .as_ref()
                     .ok_or("this server does not accept HS256 tokens (no JWT secret)")?
-                    .verify(token),
-                other => Err(format!("unsupported token algorithm: {other}")),
+                    .verify(token)?,
+                other => return Err(format!("unsupported token algorithm: {other}")),
             };
+            // Optional chosen handle (ADR-0033): identity stays the token's
+            // `sub`; only the public name is overridden, re-sanitized so it can
+            // neither spoof nor leak an email. Invalid input is ignored (keep
+            // the token's own name) rather than failing an otherwise good login.
+            if let Some(handle) = auth.display_name.as_deref().and_then(sanitize_display_name) {
+                identity.name = handle;
+            }
+            return Ok(identity);
         }
         if let Some(name) = &auth.guest_name {
             if !self.allow_guests {
@@ -122,6 +130,28 @@ pub(crate) fn safe_display_name<'a>(
                 .to_string()
         });
     name.chars().take(24).collect()
+}
+
+/// Sanitize a token-authenticated player's chosen public handle (ADR-0033).
+/// Identity still comes from the token's `sub`; this only replaces the
+/// displayed name, so it gets the same hardening as any broadcast text:
+/// control chars and Unicode bidi/zero-width format chars stripped (no
+/// display-spoofing or log-injection), inner whitespace collapsed, capped at
+/// the 24-char name budget. An `@` means an email slipped in - the whole
+/// handle is rejected (never show a partial address), and `None` here makes
+/// the caller keep the token's own safe name rather than fail the login.
+pub(crate) fn sanitize_display_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .chars()
+        .filter(|&c| !c.is_control() && !crate::room::is_unsafe_format(c))
+        .collect();
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() || collapsed.contains('@') {
+        return None;
+    }
+    let capped: String = collapsed.chars().take(24).collect();
+    let handle = capped.trim();
+    (!handle.is_empty()).then(|| handle.to_string())
 }
 
 /// Guest names are identity in insecure mode: same name = same seat on
@@ -250,8 +280,7 @@ mod tests {
         let id = v
             .verify(&AuthPayload {
                 token: Some(token),
-                guest_name: None,
-                reconnect: None,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(id.player_id, "hs256:disc:42");
@@ -273,8 +302,7 @@ mod tests {
         assert!(
             v.verify(&AuthPayload {
                 token: Some(wrong_key),
-                guest_name: None,
-                reconnect: None,
+                ..Default::default()
             })
             .is_err()
         );
@@ -283,8 +311,7 @@ mod tests {
         assert!(
             v.verify(&AuthPayload {
                 token: Some(expired),
-                guest_name: None,
-                reconnect: None,
+                ..Default::default()
             })
             .is_err()
         );
@@ -292,8 +319,7 @@ mod tests {
         assert!(
             v.verify(&AuthPayload {
                 token: Some(good + "x"),
-                guest_name: None,
-                reconnect: None,
+                ..Default::default()
             })
             .is_err()
         );
@@ -304,18 +330,16 @@ mod tests {
         let open = CompositeVerifier::new(None, None, true);
         let id = open
             .verify(&AuthPayload {
-                token: None,
                 guest_name: Some("Vian_42".into()),
-                reconnect: None,
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(id.player_id, "guest:vian_42");
 
         assert!(
             open.verify(&AuthPayload {
-                token: None,
                 guest_name: Some("bad name!".into()),
-                reconnect: None,
+                ..Default::default()
             })
             .is_err()
         );
@@ -324,11 +348,74 @@ mod tests {
         assert!(
             closed
                 .verify(&AuthPayload {
-                    token: None,
                     guest_name: Some("Vian".into()),
-                    reconnect: None,
+                    ..Default::default()
                 })
                 .is_err()
         );
+    }
+
+    #[test]
+    fn sanitize_display_name_rules() {
+        assert_eq!(
+            sanitize_display_name("  xX_Vian_Xx  "),
+            Some("xX_Vian_Xx".into())
+        );
+        assert_eq!(
+            sanitize_display_name("Vian  the  Bold"),
+            Some("Vian the Bold".into()),
+            "inner whitespace collapses"
+        );
+        assert_eq!(sanitize_display_name("ada@x.com"), None, "email rejected");
+        assert_eq!(sanitize_display_name("   "), None, "blank rejected");
+        assert_eq!(
+            sanitize_display_name("\u{202E}\u{200B}"),
+            None,
+            "bidi/zero-width stripped to nothing"
+        );
+        assert_eq!(
+            sanitize_display_name(&"a".repeat(40))
+                .unwrap()
+                .chars()
+                .count(),
+            24,
+            "capped to the name budget"
+        );
+    }
+
+    #[test]
+    fn token_display_name_overrides_but_never_leaks_or_spoofs() {
+        let v = CompositeVerifier::new(None, Some("s3cret".into()), false);
+        let token = sign(
+            "s3cret",
+            &format!(
+                r#"{{"sub":"u1","name":"Real Name","exp":{}}}"#,
+                far_future()
+            ),
+        );
+
+        // A clean handle replaces the token name; identity stays the sub.
+        let id = v
+            .verify(&AuthPayload {
+                token: Some(token.clone()),
+                display_name: Some("xX_Vian_Xx".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(id.player_id, "hs256:u1");
+        assert_eq!(id.name, "xX_Vian_Xx");
+
+        // Email-shaped or spoofing handles are ignored: keep the token name,
+        // never fail the login and never surface the address.
+        for bad in ["ada@example.com", "\u{202E}\u{200B}", "   "] {
+            let id = v
+                .verify(&AuthPayload {
+                    token: Some(token.clone()),
+                    display_name: Some(bad.into()),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(id.name, "Real Name", "bad handle {bad:?} must not apply");
+        }
     }
 }

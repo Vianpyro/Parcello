@@ -123,7 +123,11 @@ settings, use `docker compose -f compose-example.yml up --build`.
 Accounts are optional and only exist for continuity/stats: guests can
 always play. The Flutter client has a "Sign in with account" button on
 both desktop and web (OIDC + PKCE against your identity provider,
-ADR-0025); only the CLI accepts a pasted token instead.
+ADR-0025); only the CLI accepts a pasted token instead. A signed-in player
+still picks a public in-game handle (the display-name field, defaulting to
+the account name); identity stays the token, only the shown name is chosen,
+and it is re-sanitised server-side so it can never spoof or leak an email
+(ADR-0033).
 
 ## Development & testing
 

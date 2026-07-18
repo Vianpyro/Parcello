@@ -85,6 +85,9 @@ async fn main() -> anyhow::Result<()> {
         // The server prefers the token when both are present.
         guest_name: args.name.clone(),
         reconnect: args.reconnect.clone(),
+        // The CLI's --name doubles as the chosen handle when a token is given
+        // (ADR-0033), so a bot/test seat isn't stuck with the token's name.
+        display_name: args.token.as_ref().and_then(|_| args.name.clone()),
     };
     let first = if args.create {
         ClientMessage::Create {

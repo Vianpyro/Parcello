@@ -120,7 +120,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
       final token = await loginWithOidc(issuer.text.trim(), 'parcello');
       setState(() {
         _token.text = token;
-        _signedInAs = jwtDisplayName(token) ?? t.account;
+        final handle = jwtDisplayName(token);
+        _signedInAs = handle ?? t.account;
+        // Seed the display-name field with the account's name as the default
+        // in-game handle (ADR-0033); the player can still edit it before
+        // connecting. Never clobber a name they already typed.
+        if (handle != null && _name.text.trim().isEmpty) _name.text = handle;
       });
     } catch (e) {
       if (mounted) {

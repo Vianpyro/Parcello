@@ -37,7 +37,7 @@ pub struct RoomSettings {
 
 /// Identity presented on connect. MVP (ADR-0003): guest names only unless
 /// the server is started with a JWT secret.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuthPayload {
     /// Global player JWT issued by the Identity Service (future work).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -45,6 +45,12 @@ pub struct AuthPayload {
     /// Guest display name, accepted only with `--insecure-guest`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guest_name: Option<String>,
+    /// Public in-game handle a *token*-authenticated player chooses to be
+    /// shown as (ADR-0033). Identity still comes from the token's `sub`; this
+    /// only overrides the displayed name, re-sanitized server-side. Ignored
+    /// for guests (their `guest_name` already is the display name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// Per-seat reconnect token issued in `Joined` (ADR-0008). Required to
     /// re-take a seat held by a spoofable (guest) identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,9 +235,8 @@ mod tests {
         let msg = ClientMessage::Join {
             code: "ABCDE".into(),
             auth: AuthPayload {
-                token: None,
                 guest_name: Some("vianney".into()),
-                reconnect: None,
+                ..Default::default()
             },
         };
         let json = serde_json::to_string(&msg).unwrap();

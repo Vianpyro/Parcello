@@ -237,9 +237,11 @@ class GameSession extends ChangeNotifier {
   }
 
   Map<String, dynamic> _auth(String code) => {
-        if (_authToken.isNotEmpty)
-          'token': _authToken
-        else
+        if (_authToken.isNotEmpty) ...{
+          'token': _authToken,
+          // Chosen in-game handle (ADR-0033); identity stays the token's sub.
+          if (_authName.isNotEmpty) 'display_name': _authName,
+        } else
           'guest_name': _authName,
         if (_reconnectTokens[code] != null) 'reconnect': _reconnectTokens[code],
       };

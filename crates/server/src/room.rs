@@ -324,7 +324,7 @@ fn sanitize_comment(raw: &str) -> String {
 /// displayed text: bidi overrides/isolates, zero-width joiners/spaces, BOM.
 /// `char::is_control` covers the C0/C1 control ranges but not these (category
 /// Cf), so they are listed explicitly - no Unicode-table dependency needed.
-const fn is_unsafe_format(c: char) -> bool {
+pub(crate) const fn is_unsafe_format(c: char) -> bool {
     matches!(
         c,
         '\u{200B}'..='\u{200F}'   // zero-width space..RLM
