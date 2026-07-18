@@ -28,6 +28,13 @@ void main() {
         'v2');
     expect(jwtDisplayName(mint({'sub': 'u_1'})), 'u_1');
     expect(jwtDisplayName('not-a-token'), isNull);
+    // Privacy: an email-shaped claim is never surfaced; skip to the next
+    // candidate (here the opaque sub).
+    expect(
+        jwtDisplayName(mint({'name': 'ada@example.com', 'sub': 'u_1'})), 'u_1');
+    expect(
+        jwtDisplayName(mint({'preferred_username': 'ada@x.com', 'sub': 'u_1'})),
+        'u_1');
   });
 
   test('full PKCE flow against a fake issuer', () async {

@@ -66,6 +66,17 @@ impl Aud {
     }
 }
 
+/// Public display name from a verified token. Prefers `name`, then
+/// `preferred_username`, then the opaque `sub` - through the shared
+/// `auth::safe_display_name` chokepoint, so an email claim never leaks to the
+/// table (see its docs; ADR-0009 privacy).
+fn display_name(claims: &Claims) -> String {
+    let candidates = [claims.name.as_deref(), claims.preferred_username.as_deref()]
+        .into_iter()
+        .flatten();
+    crate::auth::safe_display_name(candidates, &claims.sub)
+}
+
 #[derive(Deserialize)]
 struct Jwks {
     keys: Vec<Jwk>,
@@ -225,18 +236,9 @@ impl EdDsaVerifier {
             }
         }
 
-        // Display name: standard OIDC claims, then the opaque sub. Trimmed
-        // to the same budget as guest names.
-        let name = claims
-            .name
-            .or(claims.preferred_username)
-            .unwrap_or_else(|| claims.sub.clone())
-            .chars()
-            .take(24)
-            .collect();
         Ok(Identity {
             player_id: format!("id:{}", claims.sub),
-            name,
+            name: display_name(&claims),
             spoofable: false,
         })
     }
@@ -296,6 +298,48 @@ mod tests {
         assert_eq!(id.player_id, "id:u_9f2");
         assert_eq!(id.name, "Vian");
         assert!(!id.spoofable);
+    }
+
+    #[test]
+    fn display_name_never_leaks_an_email() {
+        let claims = |name: Option<&str>, pref: Option<&str>, sub: &str| Claims {
+            sub: sub.into(),
+            name: name.map(Into::into),
+            preferred_username: pref.map(Into::into),
+            exp: 0,
+            aud: None,
+        };
+        // An email in `name` is skipped in favour of the username handle.
+        assert_eq!(
+            display_name(&claims(Some("ada@example.com"), Some("ada"), "u1")),
+            "ada"
+        );
+        // Email in both name and preferred_username: fall back to opaque sub.
+        assert_eq!(
+            display_name(&claims(Some("ada@x.com"), Some("ada@x.com"), "u1")),
+            "u1"
+        );
+        // A normal display name is used as-is.
+        assert_eq!(display_name(&claims(Some("Ada"), None, "u1")), "Ada");
+        // Even an email-shaped subject yields only the local part - no domain.
+        let name = display_name(&claims(Some("ada@x.com"), None, "ada@x.com"));
+        assert!(!name.contains('@'), "no address may leak: {name}");
+    }
+
+    #[test]
+    fn verify_does_not_surface_an_email_display_name() {
+        let v = verifier_with_test_key();
+        let token = sign(
+            &test_key(),
+            r#"{"alg":"EdDSA","kid":"k1"}"#,
+            &format!(
+                r#"{{"sub":"u_9f2","name":"player@thevhome.com","exp":{}}}"#,
+                far_future()
+            ),
+        );
+        let id = v.verify(&token).expect("valid token");
+        assert!(!id.name.contains('@'), "email leaked as name: {}", id.name);
+        assert_eq!(id.name, "u_9f2", "falls back to the opaque sub");
     }
 
     #[test]

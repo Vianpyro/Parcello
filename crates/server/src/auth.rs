@@ -93,6 +93,37 @@ impl IdentityVerifier for CompositeVerifier {
     }
 }
 
+/// A public display name that never leaks an email address. This name is
+/// broadcast to every seat, but an OIDC provider (Rauthy included) commonly
+/// fills identity claims (`name`, `preferred_username`) with the account email
+/// when no separate display name is set - surfacing it would expose every
+/// signed-in player's address to the table. Returns the first candidate that
+/// is non-blank and not email-shaped (contains `@`); otherwise the opaque
+/// `sub`, and if even that is an address, only its local part - so no full
+/// email is ever shown. Trimmed to the same 24-char budget as guest names.
+/// The single privacy chokepoint for every token verifier (ADR-0009).
+pub(crate) fn safe_display_name<'a>(
+    candidates: impl IntoIterator<Item = &'a str>,
+    sub: &str,
+) -> String {
+    let usable = |s: &str| {
+        let s = s.trim();
+        (!s.is_empty() && !s.contains('@')).then(|| s.to_string())
+    };
+    let name = candidates
+        .into_iter()
+        .find_map(usable)
+        .or_else(|| usable(sub))
+        .unwrap_or_else(|| {
+            sub.split('@')
+                .next()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("player")
+                .to_string()
+        });
+    name.chars().take(24).collect()
+}
+
 /// Guest names are identity in insecure mode: same name = same seat on
 /// rejoin. Mid-game seats are shielded by reconnect tokens (ADR-0008),
 /// but names remain impersonable at first join. LAN/testing only.
@@ -170,7 +201,7 @@ impl Hs256Verifier {
 
         Ok(Identity {
             player_id: format!("hs256:{}", claims.sub),
-            name: claims.name,
+            name: safe_display_name([claims.name.as_str()], &claims.sub),
             spoofable: false,
         })
     }

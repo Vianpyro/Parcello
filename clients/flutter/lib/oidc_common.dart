@@ -22,15 +22,18 @@ String randomUrlSafe(int bytes) {
 }
 
 /// Display name from an (unverified) JWT payload - UI hint only, the
-/// server does the real verification.
+/// server does the real verification. Mirrors the server's privacy guard
+/// (server eddsa.rs `display_name`): an email-shaped claim (`@`) is skipped so the
+/// account address is never surfaced, even to the player themselves.
 String? jwtDisplayName(String token) {
   try {
     final payload = token.split('.')[1];
     final claims = jsonDecode(
             utf8.decode(base64Url.decode(base64Url.normalize(payload))))
         as Map<String, dynamic>;
-    return (claims['name'] ?? claims['preferred_username'] ?? claims['sub'])
-        as String?;
+    bool ok(Object? v) => v is String && v.trim().isNotEmpty && !v.contains('@');
+    return [claims['name'], claims['preferred_username'], claims['sub']]
+        .firstWhere(ok, orElse: () => null) as String?;
   } catch (_) {
     return null;
   }
