@@ -19,7 +19,11 @@ RUN curl -fsSLO "https://storage.googleapis.com/flutter_infra_release/releases/s
 ENV PATH="/opt/flutter/bin:${PATH}"
 WORKDIR /app/clients/flutter
 COPY clients/flutter .
-RUN flutter build web --release
+# Optional: bake a default OIDC issuer into the web build so hosted players see
+# it pre-filled. Empty leaves the generic 'https://' default (connect_screen.dart).
+ARG PARCELLO_DEFAULT_ISSUER=
+RUN flutter build web --release \
+      ${PARCELLO_DEFAULT_ISSUER:+--dart-define=PARCELLO_DEFAULT_ISSUER="${PARCELLO_DEFAULT_ISSUER}"}
 
 FROM rust:1.96-slim AS build
 WORKDIR /app

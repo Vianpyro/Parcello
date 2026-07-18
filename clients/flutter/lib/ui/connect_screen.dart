@@ -27,6 +27,15 @@ String defaultServerUrl() {
   return '$scheme://$authority/ws';
 }
 
+/// Pre-fill for the sign-in dialog's issuer field on a fresh browser (once a
+/// player signs in, `savedIssuer` remembers their provider). Overridable at
+/// build time so a community host bakes in its own provider without editing
+/// source - `flutter build web --dart-define=PARCELLO_DEFAULT_ISSUER=https://auth.example.com`
+/// (the Dockerfile forwards it as a build arg). The bare-scheme fallback keeps
+/// the repo generic for anyone else self-hosting.
+const _defaultIssuer =
+    String.fromEnvironment('PARCELLO_DEFAULT_ISSUER', defaultValue: 'https://');
+
 /// Step 1: connect to a server with an identity. The connection is kept open
 /// so the menu (step 2) can create/join without reconnecting.
 class ConnectScreen extends StatefulWidget {
@@ -49,7 +58,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     final s = widget.s;
     final t = AppLocalizations.of(context);
     final issuer = TextEditingController(
-        text: s.savedIssuer.isEmpty ? 'https://' : s.savedIssuer);
+        text: s.savedIssuer.isEmpty ? _defaultIssuer : s.savedIssuer);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

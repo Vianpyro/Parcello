@@ -101,6 +101,23 @@ if you keep registration closed). Test: Flutter client (desktop or
 `wss://game.example.com` in a browser) -> Login; only the CLI accepts a
 pasted token instead.
 
+Optionally pre-fill the issuer field so hosted players don't type it: the
+web build reads `PARCELLO_DEFAULT_ISSUER` at compile time (empty leaves the
+generic `https://`). It is a *build* knob, not a runtime env var - the
+published GHCR image ships the generic default, so to bake in your own you
+must build the image yourself with the build arg (or build the web bundle
+directly and serve it via `--web-dir`):
+
+```sh
+docker build --build-arg PARCELLO_DEFAULT_ISSUER=https://auth.example.com \
+  -t parcello-server:custom .
+# or, serving the bundle straight from --web-dir:
+flutter build web --release \
+  --dart-define=PARCELLO_DEFAULT_ISSUER=https://auth.example.com
+```
+
+Players who have signed in once get their provider remembered regardless.
+
 ### Day 2
 
 - **Update**: `docker compose -f compose-deploy.yml pull && docker
