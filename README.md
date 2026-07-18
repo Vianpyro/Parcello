@@ -104,6 +104,9 @@ refilled; default 45, 0 = off, ADR-0023), `--game-timeout <secs>`
 ADR-0010; 0 = off), `--identity-url <jwks-url>`
 (repeatable; accept EdDSA identity tokens from an OIDC provider such as
 Rauthy, ADR-0009) with optional `--identity-audience <client-id>`.
+`--default-issuer <url>` pre-fills the web client's sign-in dialog with your
+OIDC issuer, served at runtime via `GET /config.json` so no bundle rebuild is
+needed (ADR-0032; unset leaves a generic default).
 `PARCELLO_JWT_SECRET` (HS256, ADR-0003) still works but is deprecated.
 `--lan` announces the server on the LAN so clients can find it without a
 URL (multicast `239.255.0.1:55888` by default, override with `--lan-maddr`

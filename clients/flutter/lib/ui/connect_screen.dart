@@ -1,8 +1,11 @@
 /// Step 1 of the client: pick a server and an identity.
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../l10n/app_localizations.dart';
 import '../oidc.dart';
@@ -27,12 +30,13 @@ String defaultServerUrl() {
   return '$scheme://$authority/ws';
 }
 
-/// Pre-fill for the sign-in dialog's issuer field on a fresh browser (once a
-/// player signs in, `savedIssuer` remembers their provider). Overridable at
-/// build time so a community host bakes in its own provider without editing
-/// source - `flutter build web --dart-define=PARCELLO_DEFAULT_ISSUER=https://auth.example.com`
-/// (the Dockerfile forwards it as a build arg). The bare-scheme fallback keeps
-/// the repo generic for anyone else self-hosting.
+/// Compile-time fallback for the sign-in dialog's issuer field. The server's
+/// runtime `/config.json` (ADR-0032) overrides it when set, and a player's
+/// remembered provider (`savedIssuer`) overrides both. Baked at build time so
+/// a source-built or desktop client can still carry a default -
+/// `--dart-define=PARCELLO_DEFAULT_ISSUER=https://auth.example.com` (the
+/// Dockerfile forwards it as a build arg). The bare-scheme default keeps the
+/// repo generic for anyone else self-hosting.
 const _defaultIssuer =
     String.fromEnvironment('PARCELLO_DEFAULT_ISSUER', defaultValue: 'https://');
 
@@ -52,13 +56,44 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final _token = TextEditingController();
   String? _signedInAs;
 
+  /// Issuer default advertised by the server that served this web build
+  /// (ADR-0032, `/config.json`). Null until fetched, or when unset/native.
+  String? _runtimeIssuer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Only the web build is served by a Parcello server it can query for its
+    // configured issuer; a desktop client connects to arbitrary servers, so
+    // it keeps the compile-time default.
+    if (kIsWeb) _loadRuntimeConfig();
+  }
+
+  /// Best-effort: a missing/broken `/config.json` just leaves the sign-in
+  /// field on its compile-time default. Never blocks or surfaces an error.
+  Future<void> _loadRuntimeConfig() async {
+    try {
+      final resp = await http.get(Uri.base.resolve('/config.json'));
+      if (resp.statusCode != 200) return;
+      final issuer =
+          (jsonDecode(resp.body) as Map<String, dynamic>)['default_issuer'];
+      if (issuer is String && issuer.isNotEmpty && mounted) {
+        setState(() => _runtimeIssuer = issuer);
+      }
+    } catch (_) {
+      // ignored on purpose: the default issuer is a convenience, not required.
+    }
+  }
+
   /// OIDC login (ADR-0009): asks for the issuer URL, runs the browser
   /// PKCE flow, and drops the id_token into the token field.
   Future<void> _signIn() async {
     final s = widget.s;
     final t = AppLocalizations.of(context);
     final issuer = TextEditingController(
-        text: s.savedIssuer.isEmpty ? _defaultIssuer : s.savedIssuer);
+        text: s.savedIssuer.isNotEmpty
+            ? s.savedIssuer
+            : (_runtimeIssuer ?? _defaultIssuer));
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

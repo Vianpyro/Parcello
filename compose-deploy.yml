@@ -50,6 +50,10 @@ services:
       PARCELLO_IDENTITY_URLS: ${PARCELLO_IDENTITY_URLS:-http://rauthy:8080/auth/v1/oidc/certs}
       # Must match the Rauthy client id (docs/deployment.md, step 3).
       PARCELLO_IDENTITY_AUDIENCE: ${PARCELLO_IDENTITY_AUDIENCE:-parcello}
+      # Issuer URL the web client pre-fills in its sign-in dialog, served at
+      # runtime (ADR-0032) so no bundle rebuild is needed. Unset = generic
+      # default. Point it at your public Rauthy origin (proxied, with scheme).
+      PARCELLO_DEFAULT_ISSUER: ${PARCELLO_DEFAULT_ISSUER:-}
       # SQLite history (ADR-0005) on the named volume below.
       PARCELLO_HISTORY: data/parcello.db
       # Room defaults; hosts can change them per room (ADR-0015). 0 = off.

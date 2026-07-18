@@ -7,9 +7,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::Router;
+use axum::extract::State;
 use axum::routing::get;
+use axum::{Json, Router};
 use parcello_mods::ResolvedContent;
+use serde::Serialize;
 use tokio::sync::Semaphore;
 
 /// Global ceiling on concurrent WebSocket connections.
@@ -48,6 +50,11 @@ pub struct AppState {
     /// Default personal time bank for new rooms (ADR-0023). `None` = off.
     pub time_bank: Option<std::time::Duration>,
     pub game_timeout: Option<std::time::Duration>,
+    /// OIDC issuer URL the web client pre-fills in its sign-in dialog, served
+    /// at runtime via `/config.json` (ADR-0032) so an operator sets it per
+    /// deployment without rebuilding the Flutter bundle. `None` = the client
+    /// keeps its own generic default.
+    pub default_issuer: Option<String>,
     /// Global concurrent-connection limiter (`MAX_CONNECTIONS` permits); a
     /// socket holds one permit for its whole life (ws.rs).
     pub connections: Arc<Semaphore>,
@@ -62,11 +69,28 @@ impl AppState {
     }
 }
 
-/// The game-facing routes (`/healthz`, `/ws`). The binary layers the
-/// Flutter Web static service on top; tests use this bare router.
+/// Runtime configuration the web client reads once at startup (ADR-0032):
+/// per-deployment values an operator sets without recompiling the Flutter
+/// bundle. Unset fields are omitted so the client falls back to its own
+/// compile-time defaults.
+#[derive(Serialize)]
+struct ClientConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_issuer: Option<String>,
+}
+
+async fn client_config(State(state): State<AppState>) -> Json<ClientConfig> {
+    Json(ClientConfig {
+        default_issuer: state.default_issuer,
+    })
+}
+
+/// The game-facing routes (`/healthz`, `/ws`, `/config.json`). The binary
+/// layers the Flutter Web static service on top; tests use this bare router.
 pub fn game_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/config.json", get(client_config))
         .route("/ws", get(ws::ws_handler))
         .with_state(state)
 }

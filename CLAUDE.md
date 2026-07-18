@@ -15,13 +15,15 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0031` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0032` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
    0017-0024 are the v2 ruleset (implemented); 0026 the spotlight; 0028
    the animation-ack watermark (server timers wait for client rendering);
    0030 the client animation budget + motion profiles (paired with
    `docs/motion-language.md`, the game-feel reference doc); 0031 a
-   bankruptcy releases the estate to the bank (nobody inherits).
+   bankruptcy releases the estate to the bank (nobody inherits); 0032 the
+   server serves runtime client config at `GET /config.json` (operator-set
+   defaults like the sign-in issuer, no bundle rebuild).
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 

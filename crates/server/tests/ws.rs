@@ -35,6 +35,7 @@ async fn spawn_server() -> String {
         turn_timeout: None,
         time_bank: None,
         game_timeout: None,
+        default_issuer: None,
         connections: AppState::connection_limiter(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -264,4 +265,54 @@ async fn list_mods_answers_before_any_room_exists() {
     let mut sorted = ids.clone();
     sorted.sort_unstable();
     assert_eq!(ids, sorted, "ids arrive sorted");
+}
+
+#[tokio::test]
+async fn config_json_advertises_default_issuer() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mods_dir = manifest
+        .join("../../mods")
+        .canonicalize()
+        .expect("mods dir");
+    let resolved = parcello_mods::resolve(&mods_dir, &["base".to_string()]).expect("base resolves");
+    let state = AppState {
+        rooms: Rooms::default(),
+        content: Arc::new(resolved),
+        mods_dir: Arc::new(mods_dir),
+        verifier: Arc::new(CompositeVerifier::new(None, None, true)),
+        history: Arc::new(MemoryHistory::new()),
+        turn_timeout: None,
+        time_bank: None,
+        game_timeout: None,
+        default_issuer: Some("https://auth.example.com".to_string()),
+        connections: AppState::connection_limiter(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, game_router(state)).await.unwrap();
+    });
+
+    // Raw HTTP/1.1 GET: no HTTP client is in dev-deps, and the endpoint is
+    // small enough that a hand-rolled request is cheaper than adding one.
+    let mut stream = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    stream
+        .write_all(b"GET /config.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("write request");
+    let mut resp = String::new();
+    stream
+        .read_to_string(&mut resp)
+        .await
+        .expect("read response");
+
+    assert!(resp.starts_with("HTTP/1.1 200"), "status line: {resp}");
+    assert!(
+        resp.contains(r#""default_issuer":"https://auth.example.com""#),
+        "body should carry the configured issuer: {resp}"
+    );
 }

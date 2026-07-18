@@ -62,6 +62,13 @@ struct Args {
     #[arg(long, env = "PARCELLO_IDENTITY_AUDIENCE")]
     identity_audience: Option<String>,
 
+    /// OIDC issuer URL the web client pre-fills in its sign-in dialog. Served
+    /// at runtime via `/config.json` (ADR-0032), so changing it needs no
+    /// rebuild of the Flutter bundle. Unset leaves the client's generic
+    /// default; usually your own issuer, e.g. `https://auth.example.com`.
+    #[arg(long, env = "PARCELLO_DEFAULT_ISSUER")]
+    default_issuer: Option<String>,
+
     /// `SQLite` file for game history (seeds + accepted-command replay logs).
     /// Omit for in-memory history.
     #[arg(long, env = "PARCELLO_HISTORY")]
@@ -219,6 +226,7 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
         turn_timeout: timeout(args.turn_timeout, "per-turn AFK timeout"),
         time_bank: timeout(args.time_bank_seconds, "personal time bank"),
         game_timeout: timeout(args.game_timeout, "time-boxed games (richest wins)"),
+        default_issuer: args.default_issuer.clone(),
         connections: AppState::connection_limiter(),
     })
 }
