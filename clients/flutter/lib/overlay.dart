@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'motion.dart';
+import 'reveal.dart';
 import 'stage.dart';
 import 'tokens.dart';
 
@@ -96,8 +97,7 @@ class _ChitView extends StatelessWidget {
     // at its destination with the same text, sign and colour.
     final start = chit.travels ? (from ?? target) : target;
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
+    return Reveal(
       duration: Motion.chit,
       // Linear: the two phases below shape their own timing, and easing the
       // whole thing would smear the hold into the journey.
@@ -174,8 +174,7 @@ class _ArrestView extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = arrest.seat == null ? Pc.gold : pawnColor(arrest.seat!);
     return Positioned.fill(
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
+      child: Reveal(
         duration: Motion.establish,
         curve: Motion.inevitable,
         builder: (context, t, _) => Opacity(

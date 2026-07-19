@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../motion.dart';
+import '../../reveal.dart';
 import '../../tokens.dart';
 
 class BidChip extends StatelessWidget {
@@ -13,8 +14,7 @@ class BidChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
+    return Reveal(
       duration: Motion.bidReveal,
       curve: Motion.arrive,
       builder: (context, t, child) => Transform(

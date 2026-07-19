@@ -518,8 +518,14 @@ class _Refusable extends StatefulWidget {
 
 class _RefusableState extends State<_Refusable>
     with SingleTickerProviderStateMixin {
-  late final _ctrl =
-      AnimationController(vsync: this, duration: Motion.refuse);
+  // preserve: the app's MotionProfile (ADR-0030) is the sole motion authority.
+  // Without it, a platform `disableAnimations` flag (Flutter Web sets it from
+  // the browser's reduced-motion) silently scales every controller to 0.05x,
+  // overriding the profile - the user could not get full motion even by asking.
+  late final _ctrl = AnimationController(
+      vsync: this,
+      duration: Motion.refuse,
+      animationBehavior: AnimationBehavior.preserve);
 
   @override
   void didUpdateWidget(_Refusable old) {
@@ -595,7 +601,12 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
   final Map<int, _PawnAnim> _anims = {};
 
   _PawnAnim _makeAnim(int pos) {
-    final anim = _PawnAnim(AnimationController(vsync: this), pos);
+    // preserve: keep the app's MotionProfile authoritative over the platform's
+    // reduced-motion flag (see _RefusableState._ctrl).
+    final anim = _PawnAnim(
+        AnimationController(
+            vsync: this, animationBehavior: AnimationBehavior.preserve),
+        pos);
     anim.ctrl.addListener(() => _onTick(anim));
     anim.ctrl.addStatusListener((s) {
       if (s == AnimationStatus.completed) sfx.pawnStop();
