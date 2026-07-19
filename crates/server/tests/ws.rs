@@ -9,6 +9,7 @@ use std::sync::Arc;
 use futures_util::{SinkExt, StreamExt};
 use parcello_server::auth::CompositeVerifier;
 use parcello_server::history::MemoryHistory;
+use parcello_server::ranked::{MemoryRatings, RankedConfig, RankedService, spawn_matchmaker};
 use parcello_server::room::Rooms;
 use parcello_server::{AppState, game_router};
 use serde_json::{Value, json};
@@ -37,6 +38,7 @@ async fn spawn_server() -> String {
         game_timeout: None,
         default_issuer: None,
         connections: AppState::connection_limiter(),
+        ranked: None,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -88,6 +90,75 @@ async fn recv_until(socket: &mut Socket, wanted: &str) -> Value {
 
 fn guest(name: &str) -> Value {
     json!({ "guest_name": name })
+}
+
+/// Boots the router with ranked matchmaking enabled (ADR-0034): HS256 token
+/// auth (so identities are non-spoofable), guests allowed (to test their
+/// rejection), an in-memory rating store, and a fast matchmaker tuned for
+/// two-seat tables so tests never wait on the real 60s fallback.
+async fn spawn_ranked_server(secret: &str) -> String {
+    spawn_ranked_server_with_grace(secret, std::time::Duration::from_secs(10)).await
+}
+
+async fn spawn_ranked_server_with_grace(secret: &str, start_grace: std::time::Duration) -> String {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mods_dir = manifest
+        .join("../../mods")
+        .canonicalize()
+        .expect("mods dir");
+    let resolved = parcello_mods::resolve(&mods_dir, &["base".to_string()]).expect("base resolves");
+    let ranked = RankedService::new(
+        Arc::new(MemoryRatings::new()),
+        RankedConfig {
+            target_seats: 2,
+            fallback: std::time::Duration::from_mins(1),
+            start_grace,
+            tick: std::time::Duration::from_millis(50),
+        },
+    );
+    let state = AppState {
+        rooms: Rooms::default(),
+        content: Arc::new(resolved),
+        mods_dir: Arc::new(mods_dir),
+        verifier: Arc::new(CompositeVerifier::new(None, Some(secret.into()), true)),
+        history: Arc::new(MemoryHistory::new()),
+        turn_timeout: None,
+        time_bank: None,
+        game_timeout: None,
+        default_issuer: None,
+        connections: AppState::connection_limiter(),
+        ranked: Some(ranked),
+    };
+    spawn_matchmaker(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, game_router(state)).await.unwrap();
+    });
+    format!("ws://{addr}/ws")
+}
+
+/// A signed HS256 token for `sub` (the deprecated-but-supported stopgap,
+/// ADR-0003): the cheapest non-spoofable identity a test can mint.
+fn hs256_token(secret: &str, sub: &str) -> String {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use hmac::{Hmac, KeyInit, Mac};
+
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
+    let payload =
+        URL_SAFE_NO_PAD.encode(format!(r#"{{"sub":"{sub}","name":"{sub}","exp":{exp}}}"#));
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(format!("{header}.{payload}").as_bytes());
+    let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    format!("{header}.{payload}.{sig}")
 }
 
 #[tokio::test]
@@ -288,6 +359,7 @@ async fn config_json_advertises_default_issuer() {
         game_timeout: None,
         default_issuer: Some("https://auth.example.com".to_string()),
         connections: AppState::connection_limiter(),
+        ranked: None,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -315,4 +387,231 @@ async fn config_json_advertises_default_issuer() {
         resp.contains(r#""default_issuer":"https://auth.example.com""#),
         "body should carry the configured issuer: {resp}"
     );
+}
+
+#[tokio::test]
+async fn ranked_flow_queues_matches_plays_and_rates() {
+    let secret = "test-secret";
+    let url = spawn_ranked_server(secret).await;
+
+    // Two token-authenticated players enter the queue.
+    let mut a = connect(&url).await;
+    send(
+        &mut a,
+        json!({"type": "queue_ranked", "auth": {"token": hs256_token(secret, "ua")}}),
+    )
+    .await;
+    assert_eq!(recv_until(&mut a, "queued").await["size"], 1);
+
+    let mut b = connect(&url).await;
+    send(
+        &mut b,
+        json!({"type": "queue_ranked", "auth": {"token": hs256_token(secret, "ub")}}),
+    )
+    .await;
+
+    // The matchmaker forms a two-seat table and both get the room code.
+    let found_a = recv_until(&mut a, "match_found").await;
+    let found_b = recv_until(&mut b, "match_found").await;
+    let code = found_a["code"].as_str().expect("code").to_string();
+    assert_eq!(found_b["code"], code.as_str());
+
+    // Both join with a normal Join; the room flags itself ranked...
+    send(
+        &mut a,
+        json!({"type": "join", "code": code, "auth": {"token": hs256_token(secret, "ua")}}),
+    )
+    .await;
+    let joined = recv_until(&mut a, "joined").await;
+    assert_eq!(joined["ranked"], true, "ranked marker rides Joined");
+    send(
+        &mut b,
+        json!({"type": "join", "code": code, "auth": {"token": hs256_token(secret, "ub")}}),
+    )
+    .await;
+
+    // ...an outsider (even token-authenticated) is refused a seat...
+    let mut outsider = connect(&url).await;
+    send(
+        &mut outsider,
+        json!({"type": "join", "code": code, "auth": {"token": hs256_token(secret, "ux")}}),
+    )
+    .await;
+    let err = recv_until(&mut outsider, "error").await;
+    assert!(err["message"].as_str().unwrap().contains("ranked match"));
+
+    // ...and the game auto-starts once every matched player arrived.
+    recv_until(&mut a, "game_started").await;
+    recv_until(&mut b, "game_started").await;
+
+    // Ranked rooms have no host: host powers are rejected for everyone.
+    send(&mut a, json!({"type": "add_bot"})).await;
+    let err = recv_until(&mut a, "error").await;
+    assert!(
+        err["message"]
+            .as_str()
+            .unwrap()
+            .contains("not available in a ranked match")
+    );
+
+    // Seat a resigns (turn-exempt like trading): last player standing wins
+    // and the result is rated - both ends see the rating movements.
+    send(&mut a, json!({"type": "cmd", "cmd": {"type": "resign"}})).await;
+    let updated = recv_until(&mut b, "ratings_updated").await;
+    let changes = updated["changes"].as_array().expect("changes");
+    assert_eq!(changes.len(), 2);
+    assert_eq!(changes[0]["player_id"], "hs256:ub", "winner listed first");
+    assert!(
+        changes[0]["display_delta"].as_i64().unwrap() > 0,
+        "winner climbs"
+    );
+    assert_eq!(changes[1]["player_id"], "hs256:ua");
+    assert!(
+        changes[1]["display_delta"].as_i64().unwrap() <= 0,
+        "resigner does not climb"
+    );
+    recv_until(&mut a, "ratings_updated").await;
+
+    // Replay goes back through the queue: PlayAgain is a host power and
+    // ranked rooms have none.
+    send(&mut b, json!({"type": "play_again"})).await;
+    let err = recv_until(&mut b, "error").await;
+    assert!(
+        err["message"]
+            .as_str()
+            .unwrap()
+            .contains("not available in a ranked match")
+    );
+
+    // The ladder remembers: the winner's record now shows 1 win / 1 game.
+    let mut c = connect(&url).await;
+    send(
+        &mut c,
+        json!({"type": "get_rating", "auth": {"token": hs256_token(secret, "ub")}}),
+    )
+    .await;
+    let rating = recv_until(&mut c, "rating").await;
+    assert_eq!(rating["player_id"], "hs256:ub");
+    assert_eq!(rating["games"], 1);
+    assert_eq!(rating["wins"], 1);
+    assert!(rating["display"].as_i64().unwrap() > 1000);
+}
+
+#[tokio::test]
+async fn ranked_queue_rejects_guests_and_requeue_leaves_no_orphan() {
+    let secret = "test-secret";
+    let url = spawn_ranked_server(secret).await;
+
+    // Spoofable identities cannot hold a rating (ADR-0034).
+    let mut g = connect(&url).await;
+    send(
+        &mut g,
+        json!({"type": "queue_ranked", "auth": guest("mallory")}),
+    )
+    .await;
+    let err = recv_until(&mut g, "error").await;
+    assert!(err["message"].as_str().unwrap().contains("signed-in"));
+
+    // A fresh token identity reads the default ladder record.
+    send(
+        &mut g,
+        json!({"type": "get_rating", "auth": {"token": hs256_token(secret, "fresh")}}),
+    )
+    .await;
+    let rating = recv_until(&mut g, "rating").await;
+    assert_eq!(rating["display"], 1000);
+    assert_eq!(rating["games"], 0);
+
+    // A queued player whose re-queue fails auth leaves no orphan entry:
+    // the pool must be empty again, so a second player queueing alone
+    // sees size 1 (an orphan would read 2 and could burn a match on a
+    // connection that no longer expects one).
+    let mut a = connect(&url).await;
+    send(
+        &mut a,
+        json!({"type": "queue_ranked", "auth": {"token": hs256_token(secret, "ua")}}),
+    )
+    .await;
+    assert_eq!(recv_until(&mut a, "queued").await["size"], 1);
+    send(&mut a, json!({"type": "queue_ranked", "auth": guest("ua")})).await;
+    let err = recv_until(&mut a, "error").await;
+    assert!(err["message"].as_str().unwrap().contains("signed-in"));
+
+    let mut b = connect(&url).await;
+    send(
+        &mut b,
+        json!({"type": "queue_ranked", "auth": {"token": hs256_token(secret, "ub")}}),
+    )
+    .await;
+    assert_eq!(
+        recv_until(&mut b, "queued").await["size"],
+        1,
+        "the failed re-queue must have dropped the old entry"
+    );
+}
+
+#[tokio::test]
+async fn ranked_room_aborts_when_matched_players_never_join() {
+    let secret = "test-secret";
+    // A dedicated server with a very short lobby grace so the abort path
+    // runs in test time.
+    let url = spawn_ranked_server_with_grace(secret, std::time::Duration::from_secs(1)).await;
+
+    let mut a = connect(&url).await;
+    send(
+        &mut a,
+        json!({"type": "queue_ranked", "auth": {"token": hs256_token(secret, "ua")}}),
+    )
+    .await;
+    let mut b = connect(&url).await;
+    send(
+        &mut b,
+        json!({"type": "queue_ranked", "auth": {"token": hs256_token(secret, "ub")}}),
+    )
+    .await;
+
+    let code = recv_until(&mut a, "match_found").await["code"]
+        .as_str()
+        .expect("code")
+        .to_string();
+    recv_until(&mut b, "match_found").await;
+
+    // Only a joins; b ignores the match. Below MIN_PLAYERS at the grace,
+    // the room aborts (a is told) and dissolves (the code dies).
+    send(
+        &mut a,
+        json!({"type": "join", "code": code, "auth": {"token": hs256_token(secret, "ua")}}),
+    )
+    .await;
+    recv_until(&mut a, "joined").await;
+    let err = recv_until(&mut a, "error").await;
+    assert!(
+        err["message"].as_str().unwrap().contains("aborted"),
+        "the lone arrival learns the match died: {err}"
+    );
+    send(&mut a, json!({"type": "leave"})).await;
+    send(
+        &mut a,
+        json!({"type": "join", "code": code, "auth": {"token": hs256_token(secret, "ua")}}),
+    )
+    .await;
+    let err = recv_until(&mut a, "error").await;
+    assert!(
+        err["message"].as_str().unwrap().contains("no room"),
+        "the aborted room must have dissolved: {err}"
+    );
+}
+
+#[tokio::test]
+async fn ranked_messages_error_cleanly_when_disabled() {
+    // The default test server has no ranked service.
+    let url = spawn_server().await;
+    let mut socket = connect(&url).await;
+    send(
+        &mut socket,
+        json!({"type": "queue_ranked", "auth": guest("ada")}),
+    )
+    .await;
+    let err = recv_until(&mut socket, "error").await;
+    assert!(err["message"].as_str().unwrap().contains("disabled"));
 }

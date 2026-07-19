@@ -27,42 +27,7 @@ impl Ctx {
             ServerMessage::RoomCreated { code } => {
                 println!("* room created: {code} (share this code)");
             }
-            ServerMessage::Joined {
-                code,
-                seat,
-                players,
-                content,
-                view,
-                reconnect,
-                time_remaining,
-                turn_seconds,
-                time_bank_seconds,
-                settings,
-            } => {
-                self.my_seat = Some(seat);
-                self.content = Some(*content);
-                self.settings = Some(settings);
-                println!("* joined room {code} as seat {seat}");
-                if let Some(token) = reconnect {
-                    println!("* reconnect token: {token} (rejoin with --reconnect {token})");
-                }
-                if let Some(secs) = time_remaining {
-                    println!("* timed game: {secs}s left (richest wins)");
-                }
-                if let Some(secs) = turn_seconds {
-                    println!("* turn timer: {secs}s per turn");
-                }
-                if let Some(secs) = time_bank_seconds {
-                    println!("* time bank: {secs}s personal reserve, never refilled");
-                }
-                self.print_lobby(&players);
-                self.print_settings();
-                if let Some(view) = view {
-                    println!("* game in progress:");
-                    self.print_view(&view);
-                    self.view = Some(view);
-                }
-            }
+            joined @ ServerMessage::Joined { .. } => self.render_joined(joined),
             ServerMessage::Lobby { players, settings } => {
                 // Keep effective rules current for the --bot heuristic.
                 if let Some(content) = &mut self.content {
@@ -112,7 +77,73 @@ impl Ctx {
             ServerMessage::Rejected { error } => println!("! rejected: {error}"),
             ServerMessage::Error { message } => println!("! error: {message}"),
             ServerMessage::Mods { ids } => println!("* mods: {}", ids.join(", ")),
+            ServerMessage::Queued { size } => {
+                println!("* ranked queue: {size} waiting");
+            }
+            ServerMessage::MatchFound { code } => {
+                println!("* match found: room {code} (joining)");
+            }
+            ServerMessage::Rating {
+                player_id,
+                games,
+                wins,
+                display,
+                ..
+            } => {
+                println!("* rating for {player_id}: {display} ({wins} wins / {games} games)");
+            }
+            ServerMessage::RatingsUpdated { changes } => {
+                println!("* ratings updated:");
+                for c in changes {
+                    println!("    {}: {} ({:+})", c.player_id, c.display, c.display_delta);
+                }
+            }
             ServerMessage::Pong => println!("* pong"),
+        }
+    }
+
+    fn render_joined(&mut self, msg: ServerMessage) {
+        let ServerMessage::Joined {
+            code,
+            seat,
+            players,
+            content,
+            view,
+            reconnect,
+            time_remaining,
+            turn_seconds,
+            time_bank_seconds,
+            settings,
+            ranked,
+        } = msg
+        else {
+            return;
+        };
+        self.my_seat = Some(seat);
+        self.content = Some(*content);
+        self.settings = Some(settings);
+        println!("* joined room {code} as seat {seat}");
+        if ranked {
+            println!("* ranked match (ADR-0034): fixed settings, auto-start, rated result");
+        }
+        if let Some(token) = reconnect {
+            println!("* reconnect token: {token} (rejoin with --reconnect {token})");
+        }
+        if let Some(secs) = time_remaining {
+            println!("* timed game: {secs}s left (richest wins)");
+        }
+        if let Some(secs) = turn_seconds {
+            println!("* turn timer: {secs}s per turn");
+        }
+        if let Some(secs) = time_bank_seconds {
+            println!("* time bank: {secs}s personal reserve, never refilled");
+        }
+        self.print_lobby(&players);
+        self.print_settings();
+        if let Some(view) = view {
+            println!("* game in progress:");
+            self.print_view(&view);
+            self.view = Some(view);
         }
     }
 

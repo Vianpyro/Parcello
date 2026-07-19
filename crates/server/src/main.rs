@@ -13,8 +13,11 @@ use tracing_subscriber::EnvFilter;
 
 use parcello_server::auth::CompositeVerifier;
 use parcello_server::history::{GameHistory, MemoryHistory, SqliteHistory};
+use parcello_server::ranked::{
+    MemoryRatings, RankedConfig, RankedService, RatingStore, SqliteRatings,
+};
 use parcello_server::room::Rooms;
-use parcello_server::{AppState, eddsa, game_router, lan};
+use parcello_server::{AppState, eddsa, game_router, lan, ranked};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -22,6 +25,10 @@ use parcello_server::{AppState, eddsa, game_router, lan};
     version,
     about = "Parcello authoritative game server"
 )]
+// A CLI flag surface is data-shaped: each bool IS an independent on/off
+// switch (clap derives them from the struct), not a state machine in
+// disguise - grouping them into enums would only obscure --help.
+#[allow(clippy::struct_excessive_bools)]
 struct Args {
     /// Listen address.
     #[arg(long, env = "PARCELLO_BIND", default_value = "0.0.0.0:7878")]
@@ -95,6 +102,14 @@ struct Args {
     #[arg(long, env = "PARCELLO_GAME_TIMEOUT", default_value_t = 3600)]
     game_timeout: u64,
 
+    /// Enable ranked matchmaking with a per-server ladder (ADR-0034):
+    /// token-authenticated players queue with `queue_ranked`, the server
+    /// forms tables and rates results (Weng-Lin). Ratings persist in the
+    /// `--history` database; without one they are in-memory and reset at
+    /// restart.
+    #[arg(long, env = "PARCELLO_RANKED")]
+    ranked: bool,
+
     /// Enable LAN discovery announcements (multicast) for local network
     /// game browsing.
     #[arg(long, env = "PARCELLO_LAN")]
@@ -134,6 +149,7 @@ async fn main() -> anyhow::Result<()> {
     info!(dir = %args.web_dir.display(), "serving flutter web build");
 
     let state = build_state(&args)?;
+    ranked::spawn_matchmaker(state.clone());
 
     if args.lan {
         lan::spawn_broadcaster(
@@ -196,6 +212,7 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
     if args.insecure_guest {
         warn!("--insecure-guest: guest identities are spoofable; LAN/testing only");
     }
+    let has_token_auth = eddsa.is_some() || jwt_secret.is_some();
     let verifier = Arc::new(CompositeVerifier::new(
         eddsa,
         jwt_secret,
@@ -208,6 +225,24 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
             Arc::new(SqliteHistory::open(path)?)
         }
         None => Arc::new(MemoryHistory::new()),
+    };
+
+    // Ranked matchmaking (ADR-0034): ratings share the history database
+    // (separate connection, WAL) when one is configured.
+    let ranked = if args.ranked {
+        let store: Arc<dyn RatingStore> = if let Some(path) = &args.history {
+            Arc::new(SqliteRatings::open(path)?)
+        } else {
+            warn!("--ranked without --history: ratings are in-memory and reset at restart");
+            Arc::new(MemoryRatings::new())
+        };
+        info!("ranked matchmaking enabled");
+        if !has_token_auth {
+            warn!("--ranked needs token identities (--identity-url); guests cannot queue");
+        }
+        Some(RankedService::new(store, RankedConfig::default()))
+    } else {
+        None
     };
 
     // `0` = feature off, anything else enables it with that many seconds.
@@ -228,5 +263,6 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
         game_timeout: timeout(args.game_timeout, "time-boxed games (richest wins)"),
         default_issuer: args.default_issuer.clone(),
         connections: AppState::connection_limiter(),
+        ranked,
     })
 }

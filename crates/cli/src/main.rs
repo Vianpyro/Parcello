@@ -13,6 +13,8 @@
 //! build <tile_id> | mortgage <tile_id> | redeem <tile_id>
 //! offer <seat> <give_cash> <give_tiles|-> <want_cash> <want_tiles|->
 //! accept <id> | refuse <id> | cancel <id> | end | resign | quit
+//! rating (ladder record) | cancel-queue (leave the ranked queue; enter it
+//!   with the --queue flag, ADR-0034)
 //! ```
 
 use clap::Parser;
@@ -58,6 +60,12 @@ struct Args {
     #[arg(long)]
     join: Option<String>,
 
+    /// Enter the server's ranked queue (ADR-0034) instead of creating or
+    /// joining a room; requires --token (guests cannot hold a rating). The
+    /// client joins the ranked room automatically when a match forms.
+    #[arg(long, conflicts_with_all = ["create", "join"])]
+    queue: bool,
+
     /// Reconnect token from a previous join (printed on join; proves seat
     /// ownership when rejoining as a guest).
     #[arg(long)]
@@ -73,8 +81,8 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     anyhow::ensure!(
-        args.create || args.join.is_some(),
-        "pass --create or --join CODE"
+        args.create || args.join.is_some() || args.queue,
+        "pass --create, --join CODE, or --queue"
     );
 
     let (socket, _) = tokio_tungstenite::connect_async(&args.url).await?;
@@ -89,33 +97,10 @@ async fn main() -> anyhow::Result<()> {
         // (ADR-0033), so a bot/test seat isn't stuck with the token's name.
         display_name: args.token.as_ref().and_then(|_| args.name.clone()),
     };
-    let first = if args.create {
-        ClientMessage::Create {
-            auth,
-            mods: (!args.mods.is_empty()).then(|| args.mods.clone()),
-        }
-    } else {
-        ClientMessage::Join {
-            code: args.join.clone().expect("checked above"),
-            auth,
-        }
-    };
+    let first = opening_message(&args, &auth);
     sink.send(Message::Text(serde_json::to_string(&first)?.into()))
         .await?;
-
-    println!(
-        "connected to {} as {}",
-        args.url,
-        args.name.as_deref().unwrap_or("(identity token)")
-    );
-    println!(
-        "commands: start | play <n> | route <n,n,...> | bribe <amount> | vote yes|no | card | bid <n> (0 abstains) | build <t> | sell <t> | seize <t> (landing tile only, end of turn) | boost <t> | mortgage <t> | redeem <t> | end | resign | quit"
-    );
-    println!(
-        "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
-    );
-    println!("          accept <id> | refuse <id> | cancel <id>");
-    println!("post-game: feedback <1-5> [comment]");
+    print_banner(&args);
 
     let mut ctx = Ctx::default();
     let mut stdin = BufReader::new(tokio::io::stdin()).lines();
@@ -143,7 +128,18 @@ async fn main() -> anyhow::Result<()> {
                             ServerMessage::Update { seq, .. } => Some(*seq),
                             _ => None,
                         };
+                        // A formed ranked table (ADR-0034): take the seat
+                        // with a normal Join, same credentials.
+                        let ranked_room = match &msg {
+                            ServerMessage::MatchFound { code } => Some(code.clone()),
+                            _ => None,
+                        };
                         ctx.render(msg);
+                        if let Some(code) = ranked_room {
+                            let join = ClientMessage::Join { code, auth: auth.clone() };
+                            sink.send(Message::Text(serde_json::to_string(&join)?.into()))
+                                .await?;
+                        }
                         if let Some(seq) = ack_seq {
                             let ack = ClientMessage::AnimationDone { through_seq: seq };
                             sink.send(Message::Text(serde_json::to_string(&ack)?.into()))
@@ -172,6 +168,18 @@ async fn main() -> anyhow::Result<()> {
             }
             line = stdin.next_line() => {
                 let Some(line) = line? else { break };
+                // Ranked stdin commands need the connection's credentials,
+                // so they resolve here instead of in `parse_command`.
+                let ranked_cmd = match line.trim() {
+                    "rating" => Some(ClientMessage::GetRating { auth: auth.clone() }),
+                    "cancel-queue" => Some(ClientMessage::CancelQueue),
+                    _ => None,
+                };
+                if let Some(msg) = ranked_cmd {
+                    sink.send(Message::Text(serde_json::to_string(&msg)?.into()))
+                        .await?;
+                    continue;
+                }
                 let Some(msg) = parse_command(&ctx, line.trim()) else {
                     if line.trim() == "quit" { break; }
                     if !line.trim().is_empty() {
@@ -188,6 +196,40 @@ async fn main() -> anyhow::Result<()> {
     let _ = sink.close().await;
     println!("disconnected");
     Ok(())
+}
+
+/// The connection's first message: queue for ranked, create, or join.
+fn opening_message(args: &Args, auth: &AuthPayload) -> ClientMessage {
+    if args.queue {
+        ClientMessage::QueueRanked { auth: auth.clone() }
+    } else if args.create {
+        ClientMessage::Create {
+            auth: auth.clone(),
+            mods: (!args.mods.is_empty()).then(|| args.mods.clone()),
+        }
+    } else {
+        ClientMessage::Join {
+            code: args.join.clone().expect("checked in main"),
+            auth: auth.clone(),
+        }
+    }
+}
+
+fn print_banner(args: &Args) {
+    println!(
+        "connected to {} as {}",
+        args.url,
+        args.name.as_deref().unwrap_or("(identity token)")
+    );
+    println!(
+        "commands: start | play <n> | route <n,n,...> | bribe <amount> | vote yes|no | card | bid <n> (0 abstains) | build <t> | sell <t> | seize <t> (landing tile only, end of turn) | boost <t> | mortgage <t> | redeem <t> | end | resign | quit"
+    );
+    println!(
+        "trading:  offer <seat> <give$> <give_tiles|-> <want$> <want_tiles|->  (tiles comma-separated)"
+    );
+    println!("          accept <id> | refuse <id> | cancel <id>");
+    println!("post-game: feedback <1-5> [comment]");
+    println!("ranked:   rating | cancel-queue  (queue via the --queue flag)");
 }
 
 mod input;

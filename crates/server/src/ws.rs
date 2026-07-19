@@ -95,6 +95,9 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     let writer = spawn_writer(sink, rx);
 
     let mut session: Option<Session> = None;
+    // Ranked-queue membership for this connection (ADR-0034): the entry is
+    // dropped on cancel, on entering a room, and when the socket closes.
+    let mut queued: Option<String> = None;
     let mut limiter = RateLimiter::new(std::time::Instant::now());
 
     while let Some(frame) = stream.next().await {
@@ -112,12 +115,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
         let msg: ClientMessage = match serde_json::from_str(&text) {
             Ok(msg) => msg,
             Err(e) => {
-                send(
-                    &tx,
-                    ServerMessage::Error {
-                        message: format!("malformed message: {e}"),
-                    },
-                );
+                send_error(&tx, &format!("malformed message: {e}"));
                 continue;
             }
         };
@@ -137,21 +135,40 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 );
             }
 
+            // Ranked queue entry/exit and the ladder query (ADR-0034):
+            // connection-scoped like ListMods. Queueing from inside a room
+            // is refused; entering a room drops the queue entry below.
+            (ClientMessage::QueueRanked { auth }, None) => {
+                // A re-queue replaces this connection's previous entry,
+                // whatever identity it carried: a failed re-auth (or an
+                // identity switch) must never leave an orphan in the pool
+                // that the matchmaker would seat in a table this client
+                // no longer expects.
+                if let (Some(service), Some(old)) = (&app.ranked, queued.take()) {
+                    service.remove(&old, &tx);
+                }
+                queued = handle_queue_ranked(&app, &auth, &tx).await;
+            }
+            (ClientMessage::QueueRanked { .. }, Some(_)) => {
+                send_error(&tx, "leave the room before queueing ranked");
+            }
+            (ClientMessage::CancelQueue, _) => cancel_queue(&app, &mut queued, &tx),
+            (ClientMessage::GetRating { auth }, _) => {
+                handle_get_rating(&app, &auth, &tx).await;
+            }
+
             (ClientMessage::Create { auth, mods }, None) => {
                 session = handle_create(&app, auth, mods, &tx).await;
+                drop_queue_entry_on_seat(&app, &mut queued, session.is_some(), &tx);
             }
 
             (ClientMessage::Join { code, auth }, None) => {
                 session = handle_join(&app, &code, auth, &tx).await;
+                drop_queue_entry_on_seat(&app, &mut queued, session.is_some(), &tx);
             }
 
             (ClientMessage::Create { .. } | ClientMessage::Join { .. }, Some(_)) => {
-                send(
-                    &tx,
-                    ServerMessage::Error {
-                        message: "already in a room".into(),
-                    },
-                );
+                send_error(&tx, "already in a room");
             }
 
             // Leaving keeps the socket open: the session is cleared so a
@@ -177,14 +194,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 }
             }
 
-            (_, None) => {
-                send(
-                    &tx,
-                    ServerMessage::Error {
-                        message: "join a room first".into(),
-                    },
-                );
-            }
+            (_, None) => send_error(&tx, "join a room first"),
         }
     }
 
@@ -195,6 +205,11 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 player_id: s.player_id,
             })
             .await;
+    }
+    // A closed socket leaves the queue (the matchmaker also prunes dead
+    // senders each tick; this just makes it immediate).
+    if let (Some(service), Some(player_id)) = (&app.ranked, queued) {
+        service.remove(&player_id, &tx);
     }
     drop(tx); // Closes the writer task's channel.
     let _ = writer.await;
@@ -252,6 +267,9 @@ fn relay(msg: ClientMessage, player_id: &str) -> RoomCmd {
         // earlier arms and can never reach the relay.
         ClientMessage::Ping
         | ClientMessage::ListMods
+        | ClientMessage::QueueRanked { .. }
+        | ClientMessage::CancelQueue
+        | ClientMessage::GetRating { .. }
         | ClientMessage::Create { .. }
         | ClientMessage::Join { .. }
         | ClientMessage::Leave => unreachable!("connection-scoped message reached relay"),
@@ -385,6 +403,113 @@ fn valid_mod_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
+/// Queue entry (ADR-0034): authenticate, refuse spoofable identities (a
+/// persistent rating needs an unforgeable id), read the caller's rating off
+/// the executor threads, enqueue. Returns the queued `player_id` so the
+/// connection can clean its entry up later.
+async fn handle_queue_ranked(
+    app: &AppState,
+    auth: &parcello_protocol::AuthPayload,
+    tx: &ClientTx,
+) -> Option<String> {
+    let Some(service) = &app.ranked else {
+        send(
+            tx,
+            ServerMessage::Error {
+                message: "ranked matchmaking is disabled on this server".into(),
+            },
+        );
+        return None;
+    };
+    let identity = authenticate(app, auth, tx)?;
+    if identity.spoofable {
+        send(
+            tx,
+            ServerMessage::Error {
+                message:
+                    "ranked requires a signed-in account; guest identities cannot hold a rating"
+                        .into(),
+            },
+        );
+        return None;
+    }
+    let player_id = identity.player_id.clone();
+    let mu = {
+        let store = std::sync::Arc::clone(&service.store);
+        let id = player_id.clone();
+        // Rating reads may hit SQLite: keep them off the async executor.
+        tokio::task::spawn_blocking(move || store.get(&id).rating.mu)
+            .await
+            .unwrap_or_else(|_| crate::ranked::ladder::Rating::default().mu)
+    };
+    service.enqueue(identity, mu, tx.clone());
+    Some(player_id)
+}
+
+/// Ladder record query (ADR-0034), feeding the client's menu player card.
+async fn handle_get_rating(app: &AppState, auth: &parcello_protocol::AuthPayload, tx: &ClientTx) {
+    let Some(service) = &app.ranked else {
+        send(
+            tx,
+            ServerMessage::Error {
+                message: "ranked matchmaking is disabled on this server".into(),
+            },
+        );
+        return;
+    };
+    let Some(identity) = authenticate(app, auth, tx) else {
+        return;
+    };
+    if identity.spoofable {
+        send(
+            tx,
+            ServerMessage::Error {
+                message: "guest identities have no rating; sign in first".into(),
+            },
+        );
+        return;
+    }
+    let store = std::sync::Arc::clone(&service.store);
+    let player_id = identity.player_id;
+    let record = {
+        let id = player_id.clone();
+        tokio::task::spawn_blocking(move || store.get(&id)).await
+    };
+    let Ok(record) = record else {
+        send(
+            tx,
+            ServerMessage::Error {
+                message: "rating lookup failed".into(),
+            },
+        );
+        return;
+    };
+    send(
+        tx,
+        ServerMessage::Rating {
+            player_id,
+            mu: record.rating.mu,
+            sigma: record.rating.sigma,
+            games: record.games,
+            wins: record.wins,
+            display: crate::ranked::ladder::display(record.rating),
+        },
+    );
+}
+
+/// Taking a seat anywhere ends the wait (ADR-0034): a player cannot sit at
+/// a table and stay in the ranked queue at once.
+fn drop_queue_entry_on_seat(
+    app: &AppState,
+    queued: &mut Option<String>,
+    seated: bool,
+    tx: &ClientTx,
+) {
+    if seated && let (Some(service), Some(player_id)) = (&app.ranked, queued.take()) {
+        service.remove(&player_id, tx);
+    }
+}
+
 /// Auth happens once per connection, at Create/Join time. The room binds the
 /// resulting identity to the connection's sender; the wire identity is never
 /// trusted again afterwards.
@@ -445,6 +570,28 @@ async fn try_join(
 
 fn send(tx: &ClientTx, msg: ServerMessage) {
     let _ = tx.send(msg);
+}
+
+fn send_error(tx: &ClientTx, message: &str) {
+    send(
+        tx,
+        ServerMessage::Error {
+            message: message.to_string(),
+        },
+    );
+}
+
+/// Leaves the ranked queue (ADR-0034) and confirms the new pool size.
+fn cancel_queue(app: &AppState, queued: &mut Option<String>, tx: &ClientTx) {
+    if let (Some(service), Some(player_id)) = (&app.ranked, queued.take()) {
+        service.remove(&player_id, tx);
+        send(
+            tx,
+            ServerMessage::Queued {
+                size: service.len(),
+            },
+        );
+    }
 }
 
 #[cfg(test)]

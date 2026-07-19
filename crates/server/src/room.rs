@@ -23,6 +23,7 @@ use tracing::{error, info, warn};
 
 use crate::auth::Identity;
 use crate::history::GameHistory;
+use crate::ranked::{RatingStore, ladder};
 
 pub const MIN_PLAYERS: usize = 2;
 pub const MAX_PLAYERS: usize = 6;
@@ -125,6 +126,25 @@ pub enum RoomCmd {
     },
 }
 
+/// What the matchmaker hands a ranked room at creation (ADR-0034): who may
+/// sit down, where results go, and how long the lobby waits for arrivals.
+pub struct RankedSetup {
+    pub expected: Vec<Identity>,
+    pub store: Arc<dyn RatingStore>,
+    pub start_grace: Duration,
+}
+
+/// Per-room ranked state (ADR-0034). `start_deadline` is armed while the
+/// lobby waits for the matched players and cleared once the game starts;
+/// `eliminated` records seats in the order they fell, feeding the
+/// placement derivation at the end.
+struct RankedRoom {
+    store: Arc<dyn RatingStore>,
+    expected: Vec<Identity>,
+    start_deadline: Option<tokio::time::Instant>,
+    eliminated: Vec<usize>,
+}
+
 /// Creates the room task and registers its handle. Returns the room code.
 ///
 /// # Errors
@@ -137,6 +157,54 @@ pub async fn create_room(
     turn_timeout: Option<Duration>,
     time_bank: Option<Duration>,
     game_timeout: Option<Duration>,
+) -> Result<String, String> {
+    create_room_inner(
+        rooms,
+        content,
+        history,
+        turn_timeout,
+        time_bank,
+        game_timeout,
+        None,
+    )
+    .await
+}
+
+/// Matchmaker entry point (ADR-0034): a room that only admits the matched
+/// identities, auto-starts, and rates its result. Separate from
+/// `create_room` so ordinary rooms keep their signature.
+///
+/// # Errors
+/// Same as [`create_room`].
+pub async fn create_ranked_room(
+    rooms: &Rooms,
+    content: Arc<ResolvedContent>,
+    history: Arc<dyn GameHistory>,
+    turn_timeout: Option<Duration>,
+    time_bank: Option<Duration>,
+    game_timeout: Option<Duration>,
+    setup: RankedSetup,
+) -> Result<String, String> {
+    create_room_inner(
+        rooms,
+        content,
+        history,
+        turn_timeout,
+        time_bank,
+        game_timeout,
+        Some(setup),
+    )
+    .await
+}
+
+async fn create_room_inner(
+    rooms: &Rooms,
+    content: Arc<ResolvedContent>,
+    history: Arc<dyn GameHistory>,
+    turn_timeout: Option<Duration>,
+    time_bank: Option<Duration>,
+    game_timeout: Option<Duration>,
+    ranked: Option<RankedSetup>,
 ) -> Result<String, String> {
     let engine = Engine::new(Arc::new(content.content.clone()))
         .map_err(|e| format!("invalid room content: {e}"))?;
@@ -167,6 +235,12 @@ pub async fn create_room(
         seats: Vec::new(),
         phase: Phase::Lobby,
         history,
+        ranked: ranked.map(|setup| RankedRoom {
+            store: setup.store,
+            expected: setup.expected,
+            start_deadline: Some(tokio::time::Instant::now() + setup.start_grace),
+            eliminated: Vec::new(),
+        }),
         settings,
         game_deadline: None,
         bot_counter: 0,
@@ -362,6 +436,11 @@ struct Room {
     seats: Vec<Seat>,
     phase: Phase,
     history: Arc<dyn GameHistory>,
+    /// Ranked match state (ADR-0034); `None` for ordinary rooms. Ranked
+    /// rooms admit only the matched identities, reject every host power
+    /// (`Configure`/bots/`Start`/`PlayAgain`), auto-start, and rate the
+    /// result through the store when the game finishes.
+    ranked: Option<RankedRoom>,
     /// Host-editable per-room config (timers + rules, ADR-0015). Frozen once
     /// the game starts (`Configure` is lobby-only). The turn timer, game
     /// clock, and effective rules are all derived from here at `start_game`.
@@ -435,8 +514,12 @@ impl Room {
                 reply,
             } => {
                 let result = self.handle_join(identity, reconnect.as_deref(), &tx);
+                let ok = result.is_ok();
                 let _ = reply.send(result);
-                false
+                // A ranked lobby auto-starts the moment the last matched
+                // player arrives (ADR-0034); that counts as progress so
+                // the turn clock starts fresh.
+                ok && self.maybe_start_ranked()
             }
             RoomCmd::Disconnect { player_id } => {
                 if self.handle_disconnect(&player_id) {
@@ -535,6 +618,12 @@ impl Room {
             // instant directly in their own sleep targets.
             let gate_pending = (self.bid_gate || self.vote_gate) && self.table_settled_at.is_none();
             let gate = tokio::time::sleep_until(self.anim_broadcast_at + ANIM_ACK_CAP);
+            // Ranked lobby grace (ADR-0034): armed at creation, fires once -
+            // start without the absentees, or abort below MIN_PLAYERS.
+            let ranked_deadline = self.ranked.as_ref().and_then(|r| r.start_deadline);
+            let ranked_armed = ranked_deadline.is_some() && matches!(self.phase, Phase::Lobby);
+            let ranked_start =
+                tokio::time::sleep_until(ranked_deadline.unwrap_or(now + IDLE_TIMEOUT));
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
@@ -603,6 +692,12 @@ impl Room {
                 () = vote, if vote_armed => {
                     self.inject_silent_votes();
                 }
+                () = ranked_start, if ranked_armed => {
+                    if self.ranked_grace_expired() {
+                        break;
+                    }
+                    last_progress = tokio::time::Instant::now();
+                }
                 () = gate, if gate_pending => {
                     // Nothing to do here: reaching the cap is the signal;
                     // the refresh_gates call at the top of the next
@@ -646,9 +741,24 @@ impl Room {
             .is_some_and(|s| s.identity.player_id == player_id)
     }
 
+    /// True (with an error sent) when `player_id` tried a host power in a
+    /// ranked room. Ranked rooms have no host: the matchmaker fixed the
+    /// seats and settings, and replay goes back through the queue
+    /// (ADR-0034).
+    fn reject_if_ranked(&mut self, player_id: &str) -> bool {
+        if self.ranked.is_some() {
+            self.send_error(player_id, "not available in a ranked match");
+            return true;
+        }
+        false
+    }
+
     /// Host adds a bot seat in the lobby (ADR-0014). Bots fill up to
     /// `MAX_PLAYERS` but are evicted again when a human joins a full room.
     fn handle_add_bot(&mut self, player_id: &str) {
+        if self.reject_if_ranked(player_id) {
+            return;
+        }
         if !matches!(self.phase, Phase::Lobby) {
             return self.send_error(player_id, "bots can only be added in the lobby");
         }
@@ -677,6 +787,9 @@ impl Room {
 
     /// Host drops the most recently added bot seat (lobby only).
     fn handle_remove_bot(&mut self, player_id: &str) {
+        if self.reject_if_ranked(player_id) {
+            return;
+        }
         if !matches!(self.phase, Phase::Lobby) {
             return self.send_error(player_id, "bots can only be removed in the lobby");
         }
@@ -694,6 +807,9 @@ impl Room {
     /// it is applied; the clamped result is broadcast back so all clients
     /// (and the host's own inputs) converge on what the server accepted.
     fn handle_configure(&mut self, player_id: &str, settings: RoomSettings) {
+        if self.reject_if_ranked(player_id) {
+            return;
+        }
         if !matches!(self.phase, Phase::Lobby) {
             return self.send_error(player_id, "settings can only change in the lobby");
         }
@@ -711,6 +827,16 @@ impl Room {
         reconnect: Option<&str>,
         tx: &ClientTx,
     ) -> Result<(), String> {
+        // A ranked room seats only the matched identities (ADR-0034);
+        // rejoin-by-identity for those players keeps working below.
+        if let Some(ranked) = &self.ranked
+            && !ranked
+                .expected
+                .iter()
+                .any(|m| m.player_id == identity.player_id)
+        {
+            return Err("this is a ranked match; you are not seated in it".into());
+        }
         let seat_index = if let Some(i) = self.seat_of(&identity.player_id) {
             // Rejoin: last connection wins, but a spoofable (guest)
             // identity must prove seat ownership with the reconnect
@@ -766,6 +892,7 @@ impl Room {
             turn_seconds: self.settings.turn_seconds,
             time_bank_seconds: self.configured_time_bank(),
             settings: self.settings.clone(),
+            ranked: self.ranked.is_some(),
         };
         if tx.send(joined).is_err() {
             self.seats[seat_index].tx = None;
@@ -795,6 +922,9 @@ impl Room {
 
     /// Returns true when the game actually started (turn clock should reset).
     fn handle_start(&mut self, player_id: &str) -> bool {
+        if self.reject_if_ranked(player_id) {
+            return false;
+        }
         if !matches!(self.phase, Phase::Lobby) {
             self.send_error(player_id, "game already started");
             return false;
@@ -814,6 +944,9 @@ impl Room {
     /// for everyone still connected; seats that left are dropped. Returns true
     /// when a new game actually started (turn clock should reset).
     fn handle_play_again(&mut self, player_id: &str) -> bool {
+        if self.reject_if_ranked(player_id) {
+            return false;
+        }
         if !matches!(self.phase, Phase::Finished(_)) {
             self.send_error(player_id, "no finished game to replay");
             return false;
@@ -826,6 +959,88 @@ impl Room {
         // Drop players who returned to the start screen; re-seat the rest.
         self.seats.retain(|s| s.tx.is_some());
         self.start_game(player_id)
+    }
+
+    /// Auto-start for a ranked lobby (ADR-0034): fires the moment every
+    /// matched player is connected. Returns true when the game started.
+    fn maybe_start_ranked(&mut self) -> bool {
+        let Some(ranked) = &self.ranked else {
+            return false;
+        };
+        if ranked.start_deadline.is_none() || !matches!(self.phase, Phase::Lobby) {
+            return false;
+        }
+        let all_in = ranked.expected.iter().all(|m| {
+            self.seats
+                .iter()
+                .any(|s| s.identity.player_id == m.player_id && s.tx.is_some())
+        });
+        if !all_in {
+            return false;
+        }
+        self.start_ranked_game()
+    }
+
+    /// The ranked lobby grace ran out (ADR-0034): start without the
+    /// absentees, or abort. Returns true when the room should dissolve.
+    fn ranked_grace_expired(&mut self) -> bool {
+        if !matches!(self.phase, Phase::Lobby) || self.ranked.is_none() {
+            return false;
+        }
+        // Matched players who never arrived are dropped, simply unrated.
+        self.seats.retain(|s| s.tx.is_some());
+        if self.seats.len() >= MIN_PLAYERS {
+            info!(room = %self.code, seats = self.seats.len(),
+                  "ranked grace expired; starting without absentees");
+            self.start_ranked_game();
+            false
+        } else {
+            warn!(room = %self.code, "ranked match aborted: not enough players arrived");
+            self.broadcast(&ServerMessage::Error {
+                message: "ranked match aborted: not enough players arrived; queue again".into(),
+            });
+            true
+        }
+    }
+
+    /// Starts a ranked game and disarms the lobby grace. There is no host;
+    /// any connected seat serves as the error-report target.
+    fn start_ranked_game(&mut self) -> bool {
+        let Some(reporter) = self
+            .seats
+            .iter()
+            .find(|s| s.tx.is_some())
+            .map(|s| s.identity.player_id.clone())
+        else {
+            return false;
+        };
+        let started = self.start_game(&reporter);
+        if started && let Some(ranked) = &mut self.ranked {
+            ranked.start_deadline = None;
+            ranked.eliminated.clear();
+        }
+        started
+    }
+
+    /// Rates a finished ranked game (ADR-0034): derive placements from the
+    /// final state and the recorded elimination order, apply the Weng-Lin
+    /// update through the store, and tell the table what moved.
+    fn finish_ranked(&mut self, winner: usize) {
+        let Some(ranked) = &self.ranked else {
+            return;
+        };
+        let Phase::Finished(state) = &self.phase else {
+            return;
+        };
+        let order = ladder::placements(state, self.engine.content(), winner, &ranked.eliminated);
+        let ids: Vec<String> = order
+            .iter()
+            .map(|&s| self.seats[s].identity.player_id.clone())
+            .collect();
+        let store = Arc::clone(&ranked.store);
+        let changes = store.record_match(&self.code, &ids);
+        info!(room = %self.code, players = ids.len(), "ranked result recorded");
+        self.broadcast(&ServerMessage::RatingsUpdated { changes });
     }
 
     /// Base content with the host's effective rules applied (ADR-0015).
@@ -928,6 +1143,7 @@ impl Room {
             .map(|s| s.identity.player_id.as_str());
         self.history.record_end(&self.code, winner_id);
         info!(room = %self.code, winner = ?winner_id, "game finished on time (richest wins)");
+        self.finish_ranked(winner);
     }
 
     /// Returns true when the command was accepted (turn clock should reset).
@@ -957,6 +1173,19 @@ impl Room {
             }
             Ok((next, events)) => {
                 self.history.record_command(&self.code, &cmd);
+                // Ranked placement bookkeeping (ADR-0034): remember the
+                // order seats fall in; reverse elimination order ranks the
+                // fallen at the end.
+                if let Some(ranked) = &mut self.ranked {
+                    for event in &events {
+                        if let Event::PlayerBankrupt { player, .. }
+                        | Event::PlayerResigned { player } = *event
+                            && !ranked.eliminated.contains(&player)
+                        {
+                            ranked.eliminated.push(player);
+                        }
+                    }
+                }
                 // Sealed-bid window timer (ADR-0018): a separate, parallel
                 // clock from the turn timer/time bank. Opening no longer
                 // arms it directly - it flags the gate, and refresh_gates
@@ -1014,6 +1243,7 @@ impl Room {
                         .map(|s| s.identity.player_id.as_str());
                     self.history.record_end(&self.code, winner_id);
                     info!(room = %self.code, winner = ?winner_id, "game finished");
+                    self.finish_ranked(winner);
                 }
                 true
             }

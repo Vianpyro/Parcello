@@ -120,7 +120,37 @@ pub enum ClientMessage {
     /// Connection-scoped like `Ping`: valid before any room exists, because
     /// the answer feeds room *creation* (ADR-0006).
     ListMods,
+    /// Enter the ranked queue (ADR-0034). Connection-scoped like `ListMods`
+    /// (a queued connection is in no room); requires a token identity -
+    /// spoofable guests cannot carry a persistent rating. The server answers
+    /// `Queued`, then `MatchFound` once a table forms; the client joins the
+    /// given room with a normal `Join`.
+    QueueRanked {
+        auth: AuthPayload,
+    },
+    /// Leave the ranked queue. Creating/joining a room or disconnecting
+    /// removes the entry too.
+    CancelQueue,
+    /// Ask for the caller's ladder record on this server (ADR-0034); feeds
+    /// the menu player card. Connection-scoped; requires a token identity.
+    GetRating {
+        auth: AuthPayload,
+    },
     Ping,
+}
+
+/// One player's rating movement from a finished rated game (ADR-0034).
+///
+/// Broadcast to the room in `RatingsUpdated`. `display` is the shown ladder
+/// number (a scaled conservative ordinal); matching and updates use
+/// `mu`/`sigma`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RatingChange {
+    pub player_id: String,
+    pub mu: f64,
+    pub sigma: f64,
+    pub display: i64,
+    pub display_delta: i64,
 }
 
 /// Public lobby info for one seat.
@@ -136,7 +166,8 @@ pub struct SeatInfo {
     pub is_bot: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+// No `Eq`: rating payloads carry `f64` (ADR-0034).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     RoomCreated {
@@ -169,6 +200,11 @@ pub enum ServerMessage {
         time_bank_seconds: Option<u64>,
         /// Current room settings (timers + rules) for the lobby UI (ADR-0015).
         settings: RoomSettings,
+        /// This room is a ranked match (ADR-0034): matchmaker-created,
+        /// host powers disabled, auto-started, rated at the end. Omitted
+        /// (= false) for ordinary rooms, so old clients are unaffected.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ranked: bool,
     },
     /// Broadcast on lobby membership, connection, or settings changes.
     Lobby {
@@ -222,6 +258,31 @@ pub enum ServerMessage {
     /// room with them (ADR-0006); this is just enough to fill a picker.
     Mods {
         ids: Vec<String>,
+    },
+    /// Queue confirmation and size updates while waiting (ADR-0034).
+    Queued {
+        size: usize,
+    },
+    /// A ranked table formed (ADR-0034): join this room code with a normal
+    /// `Join` to take your seat. The room only admits the matched players
+    /// and auto-starts once everyone (or after a short grace, enough of
+    /// everyone) has arrived.
+    MatchFound {
+        code: String,
+    },
+    /// Reply to `GetRating`: the caller's ladder record on this server.
+    Rating {
+        player_id: String,
+        mu: f64,
+        sigma: f64,
+        games: u64,
+        wins: u64,
+        display: i64,
+    },
+    /// Broadcast to a ranked room when its game ends: every seat's rating
+    /// movement (ADR-0034).
+    RatingsUpdated {
+        changes: Vec<RatingChange>,
     },
     Pong,
 }
@@ -341,5 +402,56 @@ mod tests {
             serde_json::to_string(&mods).unwrap(),
             r#"{"type":"mods","ids":["base","highroller"]}"#
         );
+    }
+
+    #[test]
+    fn ranked_wire_format_is_stable() {
+        // Queue entry/exit and the rating query (ADR-0034).
+        let q: ClientMessage =
+            serde_json::from_str(r#"{"type":"queue_ranked","auth":{"token":"jwt"}}"#).unwrap();
+        assert!(matches!(
+            q,
+            ClientMessage::QueueRanked { auth: AuthPayload { token: Some(t), .. } } if t == "jwt"
+        ));
+        let c: ClientMessage = serde_json::from_str(r#"{"type":"cancel_queue"}"#).unwrap();
+        assert!(matches!(c, ClientMessage::CancelQueue));
+        let g: ClientMessage =
+            serde_json::from_str(r#"{"type":"get_rating","auth":{"token":"jwt"}}"#).unwrap();
+        assert!(matches!(g, ClientMessage::GetRating { .. }));
+
+        assert_eq!(
+            serde_json::to_string(&ServerMessage::Queued { size: 3 }).unwrap(),
+            r#"{"type":"queued","size":3}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&ServerMessage::MatchFound {
+                code: "BAKUZ".into()
+            })
+            .unwrap(),
+            r#"{"type":"match_found","code":"BAKUZ"}"#
+        );
+        let updated = ServerMessage::RatingsUpdated {
+            changes: vec![RatingChange {
+                player_id: "id:u1".into(),
+                mu: 27.5,
+                sigma: 7.5,
+                display: 1200,
+                display_delta: 200,
+            }],
+        };
+        assert_eq!(
+            serde_json::to_string(&updated).unwrap(),
+            r#"{"type":"ratings_updated","changes":[{"player_id":"id:u1","mu":27.5,"sigma":7.5,"display":1200,"display_delta":200}]}"#
+        );
+        let rating = ServerMessage::Rating {
+            player_id: "id:u1".into(),
+            mu: 25.0,
+            sigma: 8.0,
+            games: 4,
+            wins: 1,
+            display: 1040,
+        };
+        let json = serde_json::to_string(&rating).unwrap();
+        assert!(json.starts_with(r#"{"type":"rating","player_id":"id:u1""#));
     }
 }

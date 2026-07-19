@@ -27,11 +27,13 @@ pub mod auth;
 pub mod eddsa;
 pub mod history;
 pub mod lan;
+pub mod ranked;
 pub mod room;
 pub mod ws;
 
 use auth::IdentityVerifier;
 use history::GameHistory;
+use ranked::RankedService;
 use room::Rooms;
 
 /// Everything a connection handler needs, cheap to clone per request.
@@ -58,6 +60,10 @@ pub struct AppState {
     /// Global concurrent-connection limiter (`MAX_CONNECTIONS` permits); a
     /// socket holds one permit for its whole life (ws.rs).
     pub connections: Arc<Semaphore>,
+    /// Ranked matchmaking (ADR-0034): the queue plus the rating store.
+    /// `None` when `--ranked` is off - every ranked message then answers
+    /// with an explicit "disabled" error.
+    pub ranked: Option<Arc<RankedService>>,
 }
 
 impl AppState {

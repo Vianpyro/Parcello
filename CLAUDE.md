@@ -15,7 +15,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0033` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0034` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
    0017-0024 are the v2 ruleset (implemented); 0026 the spotlight; 0028
    the animation-ack watermark (server timers wait for client rendering);
@@ -25,7 +25,15 @@ Authoritative documents, in order of precedence:
    server serves runtime client config at `GET /config.json` (operator-set
    defaults like the sign-in issuer, no bundle rebuild); 0033 a
    token-authenticated player picks a public in-game handle (`display_name` on
-   `AuthPayload`, identity still the token `sub`, re-sanitized server-side).
+   `AuthPayload`, identity still the token `sub`, re-sanitized server-side);
+   0034 ranked matchmaking with a PER-SERVER ladder (`--ranked`): Weng-Lin
+   ratings (`skillratings` crate, chosen over patented TrueSkill and
+   2-player Glicko-2) keyed to the token `sub` - never the handle, never
+   guests - behind a new `RatingStore` port (read-modify-write, so NOT
+   `GameHistory`), a widening-window queue on the existing WebSocket,
+   matchmaker-created rooms with no host powers that auto-start and
+   broadcast `ratings_updated`; a global cross-server ladder stays deferred
+   (it needs signed results, ADR-0009's stats note).
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 

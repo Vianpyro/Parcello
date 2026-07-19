@@ -858,7 +858,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "parcello-cli"
-version = "0.17.6"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -874,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-engine"
-version = "0.17.6"
+version = "0.18.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-mods"
-version = "0.17.6"
+version = "0.18.0"
 dependencies = [
  "parcello-engine",
  "serde",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-protocol"
-version = "0.17.6"
+version = "0.18.0"
 dependencies = [
  "parcello-engine",
  "parcello-mods",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-server"
-version = "0.17.6"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -922,6 +922,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "skillratings",
  "tempfile",
  "tokio",
  "tokio-tungstenite",
@@ -1331,6 +1332,12 @@ name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+
+[[package]]
+name = "skillratings"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d092cda2fa802e2e64f9ca9c6b54ffbb9a64c8bb585f6f7a601fedaea22b8b2"
 
 [[package]]
 name = "slab"

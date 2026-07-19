@@ -108,6 +108,18 @@ Rauthy, ADR-0009) with optional `--identity-audience <client-id>`.
 OIDC issuer, served at runtime via `GET /config.json` so no bundle rebuild is
 needed (ADR-0032; unset leaves a generic default).
 `PARCELLO_JWT_SECRET` (HS256, ADR-0003) still works but is deprecated.
+`--ranked` enables ranked matchmaking with a per-server ladder (ADR-0034):
+token-authenticated players queue with `queue_ranked` (guests are refused -
+a persistent rating needs an unforgeable identity), the server forms tables
+(target 4 seats, rating window widening with wait, any 2 after 60s) and
+rates results with Weng-Lin (the OpenSkill model; shown as
+`max(0, 1000 + 40*(mu - 3*sigma))`). Ranked rooms are matchmaker-created:
+only the matched players may join, host powers (`configure`/bots/`start`/
+`play_again`) are disabled, the game auto-starts once everyone arrived (or
+after a 15s grace with at least 2), and the result is broadcast as
+`ratings_updated`. Ratings persist in the `--history` database; without one
+they are in-memory and reset at restart. CLI: `--queue` to enter the queue
+(auto-joins on `match_found`), `rating` / `cancel-queue` on stdin.
 `--lan` announces the server on the LAN so clients can find it without a
 URL (multicast `239.255.0.1:55888` by default, override with `--lan-maddr`
 / `--lan-port`; add `--lan-broadcast-fallback` for networks that block
@@ -271,7 +283,9 @@ server's animation-sensitive timers wait for these acks, bounded by a 6s
 hard cap; clients with no animations send it immediately), `list_mods`
 (connection-scoped like ping: ask which mod ids this server can resolve, so
 clients can offer a picker instead of free-text ids - the answer feeds room
-creation, ADR-0006), `ping`.
+creation, ADR-0006), `queue_ranked {auth}` / `cancel_queue` (enter/leave
+the ranked queue, connection-scoped, token identities only, ADR-0034),
+`get_rating {auth}` (the caller's ladder record on this server), `ping`.
 Server -> client: `room_created`, `joined`
 (includes the resolved mod bundle, a per-seat reconnect token - present it
 in `auth.reconnect` to re-take a guest seat, ADR-0008 - and, mid-game, a
@@ -279,9 +293,15 @@ state snapshot), `lobby`,
 `game_started`, `update {seq, events, view}` (`seq` is the monotonic
 per-room counter the ack above refers to), `rejected {error}` (sent only to
 the offending player), `error`, `mods {ids}` (sorted reply to `list_mods`),
+`queued {size}` (queue confirmation and size updates), `match_found {code}`
+(a ranked table formed: join that room with a normal `join`),
+`rating {...}` (reply to `get_rating`), `ratings_updated {changes}`
+(broadcast to a ranked room when its game ends: per-player `mu`/`sigma`,
+the shown ladder number and its delta, ADR-0034),
 `pong`. Shapes live in `parcello-protocol`;
 commands and events are the engine's own serialized types, so the wire
-format is the replay format.
+format is the replay format. `joined` carries `ranked: true` in
+matchmaker-created rooms.
 
 ## Mods (V1, data-only)
 
@@ -545,7 +565,12 @@ deck replaces dice movement (a public per-player hand of
 `RentModel::DiceScaled` removed outright, `mods/classic` deleted as its
 only user); 0024 jail escape without dice - Legal Route, Corruption, and
 the unchanged jail card replace doubles/fine/third-roll (amends the entry
-side of nothing - Go To Jail is unchanged, only escape is redesigned).
+side of nothing - Go To Jail is unchanged, only escape is redesigned);
+0034 ranked matchmaking with a per-server ladder (Weng-Lin ratings keyed
+to the token `sub`, a widening-window queue over the existing WebSocket,
+matchmaker-created auto-starting rooms, a new `RatingStore` port beside
+`GameHistory`; the architecture doc's "no central matchmaking" trade-off
+stands - a global ladder would need signed results and stays deferred).
 
 ## Roadmap
 
