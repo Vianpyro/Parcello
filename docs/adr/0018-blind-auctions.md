@@ -22,6 +22,19 @@ uncontested list-price purchase exists any more.
   else). Bids are validated against cash at submit time and cash is
   frozen while the phase is open - trades are rejected, extending
   today's auction-solvency invariant - so the winner can always pay.
+  **Amended 2026-07 (universal floor):** the floor now binds every
+  bidder, not only the discoverer - any non-zero bid below the current
+  market price is rejected (`BidBelowFloor`); `0` remains the only way
+  to abstain. Playtests on the public server showed the original rule's
+  side channel: whenever the discoverer could not cover the price (so
+  held no implicit floor bid), a rival could take the tile for 1$ - a
+  win that felt like a glitch, not a snipe. The trade-off is accepted
+  knowingly: a seat that cannot afford the market price can no longer
+  participate at all, and unwanted tiles will stay unsold more often.
+  Bankruptcy releasing tiles back to the bank (ADR-0031) leans on those
+  re-auctions, so watch pacing in playtests. The engine's bots already
+  never bid sub-floor (bot.rs `BID_JITTER_MIN_PCT` = 100), so only
+  humans are affected.
 - Resolution is pure and happens inside `apply` the moment every living
   seat has a recorded bid: highest amount wins; ties go to the
   discoverer, then the lowest seat (the house convention); if every

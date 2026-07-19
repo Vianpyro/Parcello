@@ -15,7 +15,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0034` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0035` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
    0017-0024 are the v2 ruleset (implemented); 0026 the spotlight; 0028
    the animation-ack watermark (server timers wait for client rendering);
@@ -33,7 +33,13 @@ Authoritative documents, in order of precedence:
    `GameHistory`), a widening-window queue on the existing WebSocket,
    matchmaker-created rooms with no host powers that auto-start and
    broadcast `ratings_updated`; a global cross-server ladder stays deferred
-   (it needs signed results, ADR-0009's stats note).
+   (it needs signed results, ADR-0009's stats note); 0035 spectators + the
+   bots showcase: `ClientView::for_spectator` (seatless - NO trade offers,
+   ALL pending bids/votes masked), `spectate {code?}` picks the fullest
+   human game else the showcase, spectators are not seats (never gate
+   timers, commands refused at the transport, cap 32/room, but they DO
+   keep a room from idling out), and `--showcase` runs a supervisor that
+   keeps one all-bot self-replaying room alive only while no humans play.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -63,8 +69,9 @@ Authoritative documents, in order of precedence:
 - **`ClientView` must never expose** `GameState.rng` or deck order
   (chance/community draws and market events would become predictable).
   Cash is public by design; trade offers are visible only to their two
-  parties (ADR-0007) - the server sends `ClientView::for_seat` views,
-  never the omniscient `of`.
+  parties (ADR-0007) - the server sends `ClientView::for_seat` views (or
+  `for_spectator`, which hides ALL offers and masks every pending
+  bid/vote, ADR-0035), never the omniscient `of`.
 - **Auction solvency invariant**: cash cannot change while
   `TurnPhase::BlindAuction` is active. Bids are validated against cash at bid
   time, so the winner can always pay at settlement. This is WHY all four
@@ -84,7 +91,7 @@ Authoritative documents, in order of precedence:
 
 ```sh
 cargo build --workspace --locked
-cargo test  --workspace --locked          # 164 tests, all must pass
+cargo test  --workspace --locked          # 200 tests, all must pass
 cargo run -p parcello-server -- --insecure-guest [--history game.db]
 # Browser client: http://localhost:7878/   (create/join by 5-letter code;
 #   codes are pronounceable CVCVC, `random_code` in room.rs, click to copy)
@@ -249,7 +256,17 @@ architecture doc section 5; dependencies point downward only):
   on the header `alg`), `history.rs` (`GameHistory` port; in-memory
   adapter + `SqliteHistory`: dedicated writer thread owns the rusqlite
   connection, trait methods enqueue and never block, `Drop` drains -
-  ADR-0005), `lan.rs` (opt-in `--lan` UDP discovery announcer: periodic
+  ADR-0005), `ranked/` (ADR-0034: `ladder.rs` pure Weng-Lin math +
+  placement derivation, `store.rs` the `RatingStore` port with
+  memory/SQLite adapters, `queue.rs` the widening-window pool + matchmaker
+  task), `showcase.rs` (ADR-0035: `--showcase` supervisor task keeping one
+  all-bot self-replaying room alive only while no room has an Active game
+  with a connected human; rooms answer `RoomCmd::Probe` for it and for the
+  spectate picker; spectators themselves live on the room -
+  `RoomCmd::SpectateJoin`, `ClientView::for_spectator` views, trade events
+  filtered, acks ignored, cap `MAX_SPECTATORS` = 32, and a watched room
+  never idles out), `lan.rs` (opt-in `--lan` UDP discovery announcer:
+  periodic
   multicast to `239.255.0.1:55888` with optional broadcast fallback so LAN
   clients find the server without a URL; best-effort, detached, no admin
   control plane - local process management is the client's job, ADR-0016),
@@ -261,7 +278,8 @@ architecture doc section 5; dependencies point downward only):
 - `crates/cli` - terminal test harness; keep it in sync with new commands
   (it is the cheapest end-to-end protocol check; `addbot`/`rmbot`,
   `set <field> <value>`, and `mods` (prints the server's `list_mods`
-  answer) stdin commands too, ADR-0015; the `discover` bin
+  answer) stdin commands too, ADR-0015; `--spectate [CODE]` watches a game
+  seatless, bare form lets the server pick (ADR-0035); the `discover` bin
   is a headless listener to validate `--lan` announcements). `--bot` turns it into an autopilot seat using the shared
   `parcello_engine::bot::decide` (bid/build/jail card > bribe > Legal
   Route, declines trades) so games can be playtested without volunteers;
@@ -290,8 +308,21 @@ architecture doc section 5; dependencies point downward only):
   the latter two expand *inline* in the card, never a modal; the mod picker
   is fed by `list_mods` (tap-to-order chips, same pattern as the Legal Route
   builder, order matters per ADR-0006; empty selection sends no `mods`
-  field) - plus `_MenuTile`s and a static
-  `RulesScreen`; the three OFL fonts (Inter/Fraunces/SourceSerif4) are
+  field) - plus `_MenuTile`s (including "Watch a game" - bare `spectate`,
+  ADR-0035: `GameSession.spectating`, seat null, action-free game screen
+  with a side-panel badge, `test/spectate_and_hints_test.dart`) and a static
+  `RulesScreen`. **Onboarding**: first-game coach marks
+  (`ui/coach_mark.dart` + the hint state on `GameSession`): ONE contextual,
+  never-modal hint at a time (lobby / hand / sealed bid / jail / VP race),
+  shown the first time its situation comes up, dismissed forever (persisted
+  under the `_hints` reserved key beside the reconnect tokens), re-armed by
+  the menu's "replay tips" button; spectators get none. The connect screen
+  probes the *typed* server's `/config.json` (debounced; ADR-0032 +
+  `guest_allowed`): a definitive `guest_allowed: false` disables the guest
+  path (sign-in becomes primary, Connect requires a token), and the probe
+  doubles as a liveness indicator (web cross-origin failures stay
+  "unknown", never "unreachable" - could be CORS).
+  The three OFL fonts (Inter/Fraunces/SourceSerif4) are
   bundled offline under `assets/fonts/` (SHA256SUMS + README there), Inter
   wired as the theme family and their licences registered via
   `LicenseRegistry`. The event log is localized too: `describeEvent`
@@ -367,8 +398,12 @@ salary. The starting player is seed-drawn (2026-07), not the host.
 Sealed-bid auctions on every landing (ADR-0018): a 12s
 `TurnPhase::BlindAuction` window (raised from 5s after playtests), every
 living seat bids at once via
-`SubmitBlindBid` (0 abstains), the discoverer gets an implicit list-price
-floor bid if silent and solvent, ties favour the discoverer then
+`SubmitBlindBid` (0 abstains), the market-price floor binds EVERY non-zero
+bid (ADR-0018 amended 2026-07: the old discoverer-only floor let a rival
+buy for 1$ whenever the discoverer was too broke to hold its implicit
+bid - a seat that can't afford the price now abstains, full stop), the
+discoverer gets an implicit list-price floor bid if silent and solvent,
+ties favour the discoverer then
 the lowest seat, an all-zero result leaves the tile unsold - no plain
 decline any more. Every winner pays their bid IN FULL; a discoverer that
 wins is then rebated `DISCOVERER_REFUND_PCT` = 10% of what it paid, as its

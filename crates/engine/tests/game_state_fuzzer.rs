@@ -165,11 +165,11 @@ fn next_valid_command(
                 .collect();
             let seat = pending[rng.below(pending.len())];
             let cash = state.players[seat].cash;
-            let is_discoverer = seat == state.current;
-            let amount = if is_discoverer && cash >= floor && rng.chance(2) {
+            // Universal floor (ADR-0018 amended 2026-07): any non-zero bid
+            // must reach the market price, whoever bids it - so a legal bid
+            // is either an abstain or drawn from floor..=cash.
+            let amount = if cash >= floor && rng.chance(2) {
                 floor + rng.below((cash - floor + 1) as usize) as i64
-            } else if !is_discoverer && cash > 0 && rng.chance(2) {
-                rng.below((cash + 1) as usize) as i64
             } else {
                 0
             };

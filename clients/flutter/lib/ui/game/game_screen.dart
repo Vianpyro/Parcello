@@ -116,6 +116,9 @@ class GameScreen extends StatelessWidget {
     final v = s.view;
     final c = s.content;
     if (v == null || c == null) return false;
+    // A spectator holds no seat: without this, `owner == seat` would match
+    // unowned tiles (null == null) and offer a watcher owner actions.
+    if (s.seat == null) return false;
     final def = c.board[i];
     final ts = v.tiles[i];
     if (ts.owner == s.seat) return true;

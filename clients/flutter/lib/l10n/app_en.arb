@@ -102,7 +102,9 @@
   },
   "actionSealedBid": "Sealed bid on {tile}:",
   "@actionSealedBid": { "placeholders": { "tile": { "type": "String" } } },
-  "actionDiscovererHint": "Outbid a rival above the floor and you pay only 90% of your bid - your reward for landing here.",
+  "actionDiscovererHint": "Win and the bank refunds you 10% of what you paid - your reward for landing here.",
+  "actionBidCantAfford": "You can't cover the {price}$ floor: passing is your only move.",
+  "@actionBidCantAfford": { "placeholders": { "price": { "type": "int" } } },
   "actionBid": "Bid",
   "actionAbstain": "Abstain",
   "actionRaisePct": "+{pct}%",
@@ -553,5 +555,23 @@
   "evtRoundBonusAwarded": "{player} is the round's cash leader: +{points} permanent VP",
   "@evtRoundBonusAwarded": {
     "placeholders": { "player": { "type": "String" }, "points": { "type": "int" } }
-  }
+  },
+
+  "serverReachable": "Server reachable",
+  "serverUnreachable": "Server not reachable - check the address",
+  "serverRequiresAccount": "This server does not accept guests: sign in to play.",
+
+  "menuWatchTitle": "Watch a game",
+  "menuWatchSubtitle": "Spectate a live table - a good way to learn",
+  "menuReplayTips": "Replay the first-game tips",
+  "spectatingBadge": "You are watching this game. Bids and votes stay hidden until they resolve.",
+  "logSpectating": "Watching room {code} as a spectator",
+  "@logSpectating": { "placeholders": { "code": { "type": "String" } } },
+
+  "hintDismiss": "Got it",
+  "hintLobby": "Share the room code with friends, add bots to fill seats, then press Start.",
+  "hintHand": "Your hand is at the bottom: play a card to move that many tiles. Landing on a free property opens an auction.",
+  "hintAuction": "Sealed auction: everyone bids at once, secretly. Bid at least the listed price - or 0 to pass. The discoverer wins ties.",
+  "hintJail": "Jailed! Choose your exit: play your whole hand in a fixed order (Legal Route), bribe the other players, or use a jail card.",
+  "hintVp": "The race is to victory points: complete color groups (+3), build conglomerates (+2), and stay cash leader each round (+2)."
 }

@@ -28,6 +28,7 @@ impl Ctx {
                 println!("* room created: {code} (share this code)");
             }
             joined @ ServerMessage::Joined { .. } => self.render_joined(joined),
+            spect @ ServerMessage::Spectating { .. } => self.render_spectating(spect),
             ServerMessage::Lobby { players, settings } => {
                 // Keep effective rules current for the --bot heuristic.
                 if let Some(content) = &mut self.content {
@@ -142,6 +143,38 @@ impl Ctx {
         self.print_settings();
         if let Some(view) = view {
             println!("* game in progress:");
+            self.print_view(&view);
+            self.view = Some(view);
+        }
+    }
+
+    fn render_spectating(&mut self, msg: ServerMessage) {
+        let ServerMessage::Spectating {
+            code,
+            players,
+            content,
+            view,
+            time_remaining,
+            turn_seconds,
+            settings,
+        } = msg
+        else {
+            return;
+        };
+        // Watching, not playing (ADR-0035): no seat, so the --bot autopilot
+        // and every command stay inert.
+        self.my_seat = None;
+        self.content = Some(*content);
+        self.settings = Some(settings);
+        println!("* spectating room {code} (watch only; quit to leave)");
+        if let Some(secs) = time_remaining {
+            println!("* timed game: {secs}s left (richest wins)");
+        }
+        if let Some(secs) = turn_seconds {
+            println!("* turn timer: {secs}s per turn");
+        }
+        self.print_lobby(&players);
+        if let Some(view) = view {
             self.print_view(&view);
             self.view = Some(view);
         }

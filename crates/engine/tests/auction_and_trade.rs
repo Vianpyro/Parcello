@@ -121,6 +121,37 @@ fn seat_view_shows_only_own_trade_offers() {
             .pending_trades
             .is_empty()
     );
+    // A spectator is party to no offer at all (ADR-0035, same doctrine as
+    // the third seat above).
+    assert!(
+        ClientView::for_spectator(&st, engine.content())
+            .pending_trades
+            .is_empty()
+    );
+}
+
+#[test]
+fn spectator_view_masks_every_pending_bid() {
+    // Mid-window, a seat sees only its own bid (ADR-0018); a spectator has
+    // no own bid to see, so every entry must be masked (ADR-0035). The
+    // amounts become public in the resolution event, like for everyone.
+    let engine = engine_with(plain_board());
+    let st = two_players(&engine);
+    let (st, _) = play(&engine, &st, "p0", 2);
+    let (st, _) = step(
+        &engine,
+        &st,
+        cmd("p0", CommandKind::SubmitBlindBid { amount: 80 }),
+    );
+
+    let spect = ClientView::for_spectator(&st, engine.content());
+    let TurnPhase::BlindAuction { bids, .. } = &spect.turn else {
+        panic!("window should still be open for p1");
+    };
+    assert!(
+        bids.iter().all(Option::is_none),
+        "no pending bid may leak to a spectator: {bids:?}"
+    );
 }
 
 #[test]
@@ -132,12 +163,21 @@ fn discoverer_pays_its_winning_bid_in_full_then_gets_the_rebate() {
     let (st, _) = play(&engine, &st, "p0", 2);
     assert!(matches!(st.turn, TurnPhase::BlindAuction { tile: 2, .. }));
 
-    // A discoverer bid below the floor is rejected; an unaffordable bid too.
+    // A bid below the floor is rejected for EVERY seat (ADR-0018 amended
+    // 2026-07: the floor is universal, not the discoverer's alone); an
+    // unaffordable bid too.
     assert_eq!(
         engine
             .apply(&st, &cmd("p0", CommandKind::SubmitBlindBid { amount: 10 }))
             .unwrap_err(),
         CommandError::BidBelowFloor
+    );
+    assert_eq!(
+        engine
+            .apply(&st, &cmd("p1", CommandKind::SubmitBlindBid { amount: 10 }))
+            .unwrap_err(),
+        CommandError::BidBelowFloor,
+        "the 1$ snipe is gone: non-discoverers are held to the floor too"
     );
     assert_eq!(
         engine
@@ -164,7 +204,7 @@ fn discoverer_pays_its_winning_bid_in_full_then_gets_the_rebate() {
     let (st, ev) = step(
         &engine,
         &st,
-        cmd("p1", CommandKind::SubmitBlindBid { amount: 50 }),
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 60 }),
     );
     assert!(ev.iter().any(|e| matches!(
         e,
@@ -330,7 +370,7 @@ fn discoverer_resigning_mid_window_does_not_abort_the_auction() {
     let (st, _) = step(
         &engine,
         &st,
-        cmd("p1", CommandKind::SubmitBlindBid { amount: 30 }),
+        cmd("p1", CommandKind::SubmitBlindBid { amount: 60 }),
     );
     let (st, _) = step(&engine, &st, cmd("p0", CommandKind::Resign));
     assert!(
@@ -339,9 +379,9 @@ fn discoverer_resigning_mid_window_does_not_abort_the_auction() {
     );
     assert!(st.players[0].bankrupt);
 
-    // p2 abstains: with the discoverer gone (no floor), p1's bid wins at
-    // full price. Resolving also completes the deferred turn-advance off
-    // the now-bankrupt former discoverer.
+    // p2 abstains: with the discoverer gone, p1's floor bid wins. Resolving
+    // also completes the deferred turn-advance off the now-bankrupt former
+    // discoverer.
     let (st, ev) = step(
         &engine,
         &st,
@@ -352,7 +392,7 @@ fn discoverer_resigning_mid_window_does_not_abort_the_auction() {
         Event::BlindAuctionResolved {
             tile: 2,
             winner: Some(1),
-            amount: 30,
+            amount: 60,
             ..
         }
     )));

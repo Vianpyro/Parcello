@@ -192,11 +192,11 @@ impl Bot<'_> {
     }
 
     /// Sealed-bid auction (ADR-0018): each seat submits exactly once. Bids
-    /// a jittered 50-200% of list price (2026-07 playtest decision -
+    /// a jittered 100-200% of list price (2026-07 playtest decision -
     /// fixed-formula bots were perfectly predictable to bid against),
-    /// clamped to what the seat can afford. The discoverer never bids
-    /// below its own implicit floor (an explicit sub-floor bid would be
-    /// rejected); a seat that can't cover half the price abstains.
+    /// clamped to what the seat can afford. The floor binds every seat
+    /// (ADR-0018 amended 2026-07): a sub-floor bid would be rejected, so a
+    /// seat that can't cover the price with its reserve intact abstains.
     fn blind_bid_action(&self, tile: usize, bids: &[Option<i64>]) -> Option<CommandKind> {
         if bids[self.me].is_some() {
             return None;

@@ -40,6 +40,12 @@ pub const DISCONNECTED_GRACE: Duration = Duration::from_secs(30);
 /// A bot seat pauses this long before each move so humans can follow the
 /// action; without it a table of bots would resolve instantly (ADR-0014).
 const BOT_THINK: Duration = Duration::from_millis(800);
+/// Fan-out bound for seatless watchers (ADR-0035): one room never serializes
+/// views for more than this many spectators on top of its seats.
+pub const MAX_SPECTATORS: usize = 32;
+/// A showcase room (ADR-0035) deals itself a fresh game this long after the
+/// previous one finishes - a breather for whoever is watching the outcome.
+const SHOWCASE_RESTART: Duration = Duration::from_secs(10);
 /// Floor on the plain-turn window for a jailed seat choosing its exit
 /// (Legal Route / Corruption / jail card, ADR-0024): a genuine multi-way
 /// decision needs more room than an ordinary blitz turn, so the effective
@@ -77,6 +83,18 @@ const ANIM_ACK_CAP: Duration = Duration::from_secs(10);
 pub type Rooms = Arc<RwLock<HashMap<String, mpsc::Sender<RoomCmd>>>>;
 pub type ClientTx = mpsc::UnboundedSender<ServerMessage>;
 
+/// What a room reveals about itself to the transport's spectate picker and
+/// the showcase supervisor (ADR-0035). Public data only.
+#[derive(Debug, Clone, Copy)]
+pub struct RoomProbe {
+    /// A game is running (Active phase).
+    pub active: bool,
+    /// Connected human seats (bots and empty seats excluded).
+    pub humans: usize,
+    /// This is the server's bots showcase room.
+    pub showcase: bool,
+}
+
 pub enum RoomCmd {
     Join {
         identity: Identity,
@@ -85,6 +103,21 @@ pub enum RoomCmd {
         reconnect: Option<String>,
         tx: ClientTx,
         reply: oneshot::Sender<Result<(), String>>,
+    },
+    /// Watch without a seat (ADR-0035): the connection receives the room's
+    /// broadcasts with the seatless spectator view. The reply carries the
+    /// watcher's unique routing key (`watch:<n>:<id>`), which the transport
+    /// uses as this session's id so a watcher's `Disconnect` can never
+    /// shadow a seat's - or another watcher's - with the same identity.
+    SpectateJoin {
+        identity: Identity,
+        tx: ClientTx,
+        reply: oneshot::Sender<Result<String, String>>,
+    },
+    /// Public self-description for the spectate picker / showcase
+    /// supervisor (ADR-0035).
+    Probe {
+        reply: oneshot::Sender<RoomProbe>,
     },
     Disconnect {
         player_id: PlayerId,
@@ -165,7 +198,7 @@ pub async fn create_room(
         turn_timeout,
         time_bank,
         game_timeout,
-        None,
+        RoomVariant::Normal,
     )
     .await
 }
@@ -192,9 +225,46 @@ pub async fn create_ranked_room(
         turn_timeout,
         time_bank,
         game_timeout,
-        Some(setup),
+        RoomVariant::Ranked(setup),
     )
     .await
+}
+
+/// Showcase supervisor entry point (ADR-0035).
+///
+/// A bots-only room, dealt and started at creation, that replays itself
+/// while it lives. Nobody ever joins it as a player - it is never in a
+/// joinable lobby phase.
+///
+/// # Errors
+/// Same as [`create_room`].
+pub async fn create_showcase_room(
+    rooms: &Rooms,
+    content: Arc<ResolvedContent>,
+    history: Arc<dyn GameHistory>,
+    turn_timeout: Option<Duration>,
+    time_bank: Option<Duration>,
+    game_timeout: Option<Duration>,
+) -> Result<String, String> {
+    create_room_inner(
+        rooms,
+        content,
+        history,
+        turn_timeout,
+        time_bank,
+        game_timeout,
+        RoomVariant::Showcase,
+    )
+    .await
+}
+
+/// The three room flavours, mutually exclusive by construction: a plain
+/// player-created room, a matchmaker-created rated one (ADR-0034), or the
+/// server's bots showcase (ADR-0035).
+enum RoomVariant {
+    Normal,
+    Ranked(RankedSetup),
+    Showcase,
 }
 
 async fn create_room_inner(
@@ -204,7 +274,7 @@ async fn create_room_inner(
     turn_timeout: Option<Duration>,
     time_bank: Option<Duration>,
     game_timeout: Option<Duration>,
-    ranked: Option<RankedSetup>,
+    variant: RoomVariant,
 ) -> Result<String, String> {
     let engine = Engine::new(Arc::new(content.content.clone()))
         .map_err(|e| format!("invalid room content: {e}"))?;
@@ -228,19 +298,31 @@ async fn create_room_inner(
         time_bank_seconds: time_bank.map(|d| d.as_secs()),
         rules: content.content.rules.clone(),
     };
-    let room = Room {
+    let (ranked, showcase) = match variant {
+        RoomVariant::Normal => (None, false),
+        RoomVariant::Ranked(setup) => (
+            Some(RankedRoom {
+                store: setup.store,
+                expected: setup.expected,
+                start_deadline: Some(tokio::time::Instant::now() + setup.start_grace),
+                eliminated: Vec::new(),
+            }),
+            false,
+        ),
+        RoomVariant::Showcase => (None, true),
+    };
+    let mut room = Room {
         code: code.clone(),
         content,
         engine,
         seats: Vec::new(),
         phase: Phase::Lobby,
         history,
-        ranked: ranked.map(|setup| RankedRoom {
-            store: setup.store,
-            expected: setup.expected,
-            start_deadline: Some(tokio::time::Instant::now() + setup.start_grace),
-            eliminated: Vec::new(),
-        }),
+        ranked,
+        showcase,
+        spectators: Vec::new(),
+        watcher_counter: 0,
+        finished_at: None,
         settings,
         game_deadline: None,
         bot_counter: 0,
@@ -255,6 +337,25 @@ async fn create_room_inner(
         bid_gate: false,
         vote_gate: false,
     };
+    // A showcase room is born playing (ADR-0035): four bot seats, dealt and
+    // started before the task even spawns - it is never in a joinable lobby.
+    if room.showcase {
+        for n in 1..=4 {
+            room.bot_counter = n;
+            room.seats.push(Seat {
+                identity: Identity {
+                    player_id: format!("bot:{n}"),
+                    name: format!("Bot {n}"),
+                    spoofable: false,
+                },
+                tx: None,
+                reconnect: String::new(),
+                feedback_given: false,
+                is_bot: true,
+            });
+        }
+        room.start_game("bot:1");
+    }
     tokio::spawn(room.run(rx, Arc::clone(rooms)));
     Ok(code)
 }
@@ -269,6 +370,18 @@ const fn event_visible_to(event: &Event, seat: usize) -> bool {
         | Event::TradeCancelled { from, to, .. } => seat == from || seat == to,
         _ => true,
     }
+}
+
+/// What a seatless spectator may see (ADR-0035): everything except the
+/// trade lifecycle - a spectator is party to no offer (ADR-0007).
+const fn event_public(event: &Event) -> bool {
+    !matches!(
+        *event,
+        Event::TradeProposed { .. }
+            | Event::TradeAccepted { .. }
+            | Event::TradeDeclined { .. }
+            | Event::TradeCancelled { .. }
+    )
 }
 
 /// A pronounceable 5-char code (consonant-vowel-consonant-vowel-consonant),
@@ -409,6 +522,19 @@ pub(crate) const fn is_unsafe_format(c: char) -> bool {
     )
 }
 
+/// A seatless watcher (ADR-0035): receives broadcasts with the spectator
+/// view, holds nothing, gates nothing.
+struct Spectator {
+    /// Unique per-watch routing key (`watch:<n>:<id>`): what the transport
+    /// session carries, so disconnects target exactly this entry. Seat ids
+    /// (`guest:`/`hs256:`/`id:`/`bot:`) can never collide with it.
+    key: String,
+    /// The underlying identity, for the one-watch-per-identity dedup and
+    /// the seated-identity guard.
+    player_id: String,
+    tx: ClientTx,
+}
+
 struct Seat {
     identity: Identity,
     /// `None` while disconnected; the seat survives for rejoin. Bot seats
@@ -441,6 +567,19 @@ struct Room {
     /// (`Configure`/bots/`Start`/`PlayAgain`), auto-start, and rate the
     /// result through the store when the game finishes.
     ranked: Option<RankedRoom>,
+    /// The server's bots showcase room (ADR-0035): all-bot seats, replays
+    /// itself `SHOWCASE_RESTART` after each finish for as long as it lives.
+    showcase: bool,
+    /// Seatless watchers (ADR-0035), capped at `MAX_SPECTATORS`. Not seats:
+    /// they never gate timers, hold no reconnect tokens, and their game
+    /// commands are refused at the transport.
+    spectators: Vec<Spectator>,
+    /// Monotonic counter behind the `watch:<n>:<id>` routing keys, so a
+    /// rewatch never reuses a key.
+    watcher_counter: usize,
+    /// When the current game reached `Finished` - the showcase restart
+    /// anchor. `None` while a game runs or in the lobby.
+    finished_at: Option<tokio::time::Instant>,
     /// Host-editable per-room config (timers + rules, ADR-0015). Frozen once
     /// the game starts (`Configure` is lobby-only). The turn timer, game
     /// clock, and effective rules are all derived from here at `start_game`.
@@ -520,6 +659,19 @@ impl Room {
                 // player arrives (ADR-0034); that counts as progress so
                 // the turn clock starts fresh.
                 ok && self.maybe_start_ranked()
+            }
+            RoomCmd::SpectateJoin {
+                identity,
+                tx,
+                reply,
+            } => {
+                let result = self.handle_spectate_join(identity, &tx);
+                let _ = reply.send(result);
+                false
+            }
+            RoomCmd::Probe { reply } => {
+                let _ = reply.send(self.probe());
+                false
             }
             RoomCmd::Disconnect { player_id } => {
                 if self.handle_disconnect(&player_id) {
@@ -620,39 +772,29 @@ impl Room {
             let gate = tokio::time::sleep_until(self.anim_broadcast_at + ANIM_ACK_CAP);
             // Ranked lobby grace (ADR-0034): armed at creation, fires once -
             // start without the absentees, or abort below MIN_PLAYERS.
-            let ranked_deadline = self.ranked.as_ref().and_then(|r| r.start_deadline);
-            let ranked_armed = ranked_deadline.is_some() && matches!(self.phase, Phase::Lobby);
+            // Showcase replay (ADR-0035): a finished bots game deals itself
+            // a fresh one after a short breather, while the room lives.
+            let ranked_deadline = self.ranked_start_deadline();
+            let ranked_armed = ranked_deadline.is_some();
             let ranked_start =
                 tokio::time::sleep_until(ranked_deadline.unwrap_or(now + IDLE_TIMEOUT));
+            let showcase_deadline = self.showcase_replay_deadline();
+            let showcase_armed = showcase_deadline.is_some();
+            let showcase_replay =
+                tokio::time::sleep_until(showcase_deadline.unwrap_or(now + IDLE_TIMEOUT));
             tokio::select! {
                 cmd = rx.recv() => {
                     let Some(cmd) = cmd else { break };
-                    let now = tokio::time::Instant::now();
-                    last_activity = now;
-                    // Snapshot who was acting and for how long BEFORE
-                    // dispatch, since applying a game command can advance
-                    // whose turn it is. Drain speculatively so a Game
-                    // command's own Update (built inside handle_game,
-                    // below) already reflects the spend; refunded after if
-                    // the command turns out rejected (which sends
-                    // Rejected, not Update, so the brief mutation is never
-                    // observed) - ADR-0023.
-                    let drain_seat = self.acting_seat();
-                    // Elapsed thinking time is measured from the animation
-                    // anchor, not last_progress (ADR-0028): stalling while
-                    // the table still renders must not drain the bank.
-                    let elapsed = now.saturating_duration_since(afk_anchor);
-                    let drained = self.drain_bank(drain_seat, elapsed);
-                    match self.dispatch(cmd) {
-                        // Last human left an empty lobby: the room is done.
-                        Dispatched::Dissolve => break,
-                        // Any accepted command resets the turn clock and
-                        // keeps the drain above...
-                        Dispatched::Advanced => {
-                            last_progress = tokio::time::Instant::now();
-                        }
-                        // ...a rejected or non-game one gets it refunded.
-                        Dispatched::NoProgress => self.refund_bank(drain_seat, drained),
+                    // Probes are the showcase supervisor's and the spectate
+                    // picker's heartbeat, not life (ADR-0035): at a 15s
+                    // cadence they would otherwise re-arm every room's idle
+                    // timer forever and no room could ever dissolve.
+                    if !matches!(cmd, RoomCmd::Probe { .. }) {
+                        last_activity = tokio::time::Instant::now();
+                    }
+                    // Last human left an empty lobby: the room is done.
+                    if self.on_cmd(cmd, afk_anchor, &mut last_progress) {
+                        break;
                     }
                 }
                 () = afk, if afk_armed => {
@@ -698,6 +840,11 @@ impl Room {
                     }
                     last_progress = tokio::time::Instant::now();
                 }
+                () = showcase_replay, if showcase_armed => {
+                    info!(room = %self.code, "showcase replaying (ADR-0035)");
+                    self.start_game("bot:1");
+                    last_progress = tokio::time::Instant::now();
+                }
                 () = gate, if gate_pending => {
                     // Nothing to do here: reaching the cap is the signal;
                     // the refresh_gates call at the top of the next
@@ -705,7 +852,12 @@ impl Room {
                     // pending window deadline (ADR-0028).
                 }
                 () = idle => {
-                    if self.seats.iter().all(|s| s.tx.is_none()) {
+                    // A watched game stays alive (ADR-0035): spectators
+                    // count against dissolution, only never against timers.
+                    self.spectators.retain(|s| !s.tx.is_closed());
+                    if self.seats.iter().all(|s| s.tx.is_none())
+                        && self.spectators.is_empty()
+                    {
                         info!(room = %self.code, "idle timeout, dissolving");
                         break;
                     }
@@ -715,6 +867,37 @@ impl Room {
         }
         rooms.write().await.remove(&self.code);
         info!(room = %self.code, "room dissolved");
+    }
+
+    /// Applies one inbound `RoomCmd` with the time-bank bookkeeping of
+    /// ADR-0023. Returns true when the room should dissolve.
+    ///
+    /// The acting seat is snapshotted BEFORE dispatch, since applying a
+    /// game command can advance whose turn it is; its bank is drained
+    /// speculatively so the command's own Update already reflects the
+    /// spend, and refunded if the command turns out rejected (which sends
+    /// `Rejected`, not `Update`, so the brief mutation is never observed).
+    /// Elapsed thinking time is measured from the animation anchor, not
+    /// `last_progress` (ADR-0028): stalling while the table still renders
+    /// must not drain the bank.
+    fn on_cmd(
+        &mut self,
+        cmd: RoomCmd,
+        afk_anchor: tokio::time::Instant,
+        last_progress: &mut tokio::time::Instant,
+    ) -> bool {
+        let now = tokio::time::Instant::now();
+        let drain_seat = self.acting_seat();
+        let elapsed = now.saturating_duration_since(afk_anchor);
+        let drained = self.drain_bank(drain_seat, elapsed);
+        match self.dispatch(cmd) {
+            Dispatched::Dissolve => return true,
+            // Any accepted command resets the turn clock and keeps the
+            // drain above; a rejected or non-game one gets it refunded.
+            Dispatched::Advanced => *last_progress = tokio::time::Instant::now(),
+            Dispatched::NoProgress => self.refund_bank(drain_seat, drained),
+        }
+        false
     }
 
     /// Seat expected to act right now, or `None` outside an active game -
@@ -901,14 +1084,101 @@ impl Room {
         Ok(())
     }
 
+    /// The instant a still-waiting ranked lobby gives up on absentees
+    /// (ADR-0034); `None` once started, aborted, or in any other room.
+    fn ranked_start_deadline(&self) -> Option<tokio::time::Instant> {
+        matches!(self.phase, Phase::Lobby)
+            .then(|| self.ranked.as_ref().and_then(|r| r.start_deadline))
+            .flatten()
+    }
+
+    /// The instant a finished showcase deals its next game (ADR-0035);
+    /// `None` while one runs or in any other room.
+    fn showcase_replay_deadline(&self) -> Option<tokio::time::Instant> {
+        self.showcase
+            .then(|| self.finished_at.map(|at| at + SHOWCASE_RESTART))
+            .flatten()
+    }
+
+    /// Public self-description (ADR-0035): what the spectate picker and the
+    /// showcase supervisor need, nothing more.
+    fn probe(&self) -> RoomProbe {
+        RoomProbe {
+            active: matches!(self.phase, Phase::Active(_)),
+            humans: self
+                .seats
+                .iter()
+                .filter(|s| !s.is_bot && s.tx.is_some())
+                .count(),
+            showcase: self.showcase,
+        }
+    }
+
+    /// Seats a watcher (ADR-0035): no seat taken, no lobby change - they
+    /// just start receiving this room's broadcasts with the spectator view.
+    /// Returns the watcher's unique routing key.
+    fn handle_spectate_join(
+        &mut self,
+        identity: Identity,
+        tx: &ClientTx,
+    ) -> Result<String, String> {
+        if self.seat_of(&identity.player_id).is_some() {
+            return Err("you are seated in this game; rejoin it instead".into());
+        }
+        // Rewatching replaces the old sender (same doctrine as rejoin's
+        // "last connection wins") and never counts against the cap twice;
+        // silently-died connections don't hold slots either.
+        self.spectators
+            .retain(|s| s.player_id != identity.player_id && !s.tx.is_closed());
+        if self.spectators.len() >= MAX_SPECTATORS {
+            return Err("this game has no spectator slots left".into());
+        }
+        let view = match &self.phase {
+            Phase::Lobby => None,
+            Phase::Active(state) | Phase::Finished(state) => Some(Box::new(
+                ClientView::for_spectator(state, self.engine.content()),
+            )),
+        };
+        let msg = ServerMessage::Spectating {
+            code: self.code.clone(),
+            players: self.seat_infos(),
+            content: Box::new(self.effective_resolved()),
+            view,
+            time_remaining: self.time_remaining_secs(),
+            turn_seconds: self.settings.turn_seconds,
+            settings: self.settings.clone(),
+        };
+        if tx.send(msg).is_err() {
+            return Err("connection closed during spectate".into());
+        }
+        info!(room = %self.code, player = %identity.player_id, "spectator joined");
+        self.watcher_counter += 1;
+        let key = format!("watch:{}:{}", self.watcher_counter, identity.player_id);
+        self.spectators.push(Spectator {
+            key: key.clone(),
+            player_id: identity.player_id,
+            tx: tx.clone(),
+        });
+        Ok(key)
+    }
+
     /// Returns true when the room should dissolve (lobby emptied out).
     fn handle_disconnect(&mut self, player_id: &str) -> bool {
+        // A leaving watcher just stops receiving (ADR-0035). Watcher
+        // sessions carry the unique `watch:` routing key, so this can
+        // never shadow a seat's disconnect - or another watcher's - that
+        // shares the underlying identity.
+        let before = self.spectators.len();
+        self.spectators.retain(|s| s.key != player_id);
+        if self.spectators.len() != before {
+            return false;
+        }
         match self.phase {
             Phase::Lobby => {
                 // Free the seat entirely; host role follows seat 0.
                 self.seats.retain(|s| s.identity.player_id != player_id);
                 self.broadcast_lobby();
-                self.seats.is_empty()
+                self.seats.is_empty() && self.spectators.is_empty()
             }
             Phase::Active(_) | Phase::Finished(_) => {
                 if let Some(i) = self.seat_of(player_id) {
@@ -1110,8 +1380,16 @@ impl Room {
                 time_bank_seconds,
             })
             .collect();
+        let spectator_msg = ServerMessage::GameStarted {
+            view: Box::new(ClientView::for_spectator(&state, self.engine.content())),
+            time_remaining: remaining,
+            turn_seconds,
+            time_bank_seconds,
+        };
         self.phase = Phase::Active(state);
+        self.finished_at = None;
         self.send_per_seat(msgs);
+        self.send_spectators(&spectator_msg);
         true
     }
 
@@ -1134,9 +1412,20 @@ impl Room {
                 banks: banks.clone(),
             })
             .collect();
+        // TimeUp is public today, but route through the spectator filter
+        // anyway so this path can never silently start leaking if the
+        // time-up event set ever grows (ADR-0035).
+        let spectator_msg = ServerMessage::Update {
+            seq,
+            events: events.into_iter().filter(event_public).collect(),
+            view: Box::new(ClientView::for_spectator(&next, self.engine.content())),
+            banks,
+        };
         self.phase = Phase::Finished(next);
+        self.finished_at = Some(tokio::time::Instant::now());
         self.game_deadline = None;
         self.send_per_seat(msgs);
+        self.send_spectators(&spectator_msg);
         let winner_id = self
             .seats
             .get(winner)
@@ -1231,11 +1520,24 @@ impl Room {
                         banks: banks.clone(),
                     })
                     .collect();
+                // Spectators get the public feed and the seatless view
+                // (ADR-0035); their acks never gate anything, so this is
+                // pure fan-out.
+                let spectator_msg = ServerMessage::Update {
+                    seq,
+                    events: events.iter().filter(|e| event_public(e)).cloned().collect(),
+                    view: Box::new(ClientView::for_spectator(&next, self.engine.content())),
+                    banks,
+                };
                 self.phase = match finished_winner {
                     Some(_) => Phase::Finished(next),
                     None => Phase::Active(next),
                 };
+                if finished_winner.is_some() {
+                    self.finished_at = Some(tokio::time::Instant::now());
+                }
                 self.send_per_seat(msgs);
+                self.send_spectators(&spectator_msg);
                 if let Some(winner) = finished_winner {
                     let winner_id = self
                         .seats
@@ -1308,6 +1610,14 @@ impl Room {
                 seat.tx = None; // Connection gone; seat stays for rejoin.
             }
         }
+        // Broadcasts are public by definition; spectators get them verbatim
+        // (ADR-0035). Per-seat traffic goes through send_per_seat instead.
+        self.send_spectators(msg);
+    }
+
+    /// Delivers a message to every spectator, dropping dead connections.
+    fn send_spectators(&mut self, msg: &ServerMessage) {
+        self.spectators.retain(|s| s.tx.send(msg.clone()).is_ok());
     }
 
     /// Delivers `msgs[i]` to seat `i` (per-seat views, ADR-0007).

@@ -55,7 +55,7 @@ pub enum CommandError {
     InsufficientFunds,
     #[error("already submitted a bid for this window")]
     AlreadyBid,
-    #[error("the discoverer's bid must be at least the list price")]
+    #[error("a bid must be at least the market price (0 abstains)")]
     BidBelowFloor,
     #[error("player is not in jail")]
     NotInJail,

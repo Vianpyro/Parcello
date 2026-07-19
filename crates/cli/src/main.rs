@@ -66,6 +66,13 @@ struct Args {
     #[arg(long, conflicts_with_all = ["create", "join"])]
     queue: bool,
 
+    /// Watch a game without playing (ADR-0035): `--spectate CODE` for a
+    /// specific room, bare `--spectate` to let the server pick (the room
+    /// with the most humans, else the bots showcase).
+    #[arg(long, num_args = 0..=1, default_missing_value = "",
+          conflicts_with_all = ["create", "join", "queue"])]
+    spectate: Option<String>,
+
     /// Reconnect token from a previous join (printed on join; proves seat
     /// ownership when rejoining as a guest).
     #[arg(long)]
@@ -81,8 +88,8 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     anyhow::ensure!(
-        args.create || args.join.is_some() || args.queue,
-        "pass --create, --join CODE, or --queue"
+        args.create || args.join.is_some() || args.queue || args.spectate.is_some(),
+        "pass --create, --join CODE, --queue, or --spectate [CODE]"
     );
 
     let (socket, _) = tokio_tungstenite::connect_async(&args.url).await?;
@@ -198,9 +205,15 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The connection's first message: queue for ranked, create, or join.
+/// The connection's first message: spectate, queue for ranked, create, or
+/// join.
 fn opening_message(args: &Args, auth: &AuthPayload) -> ClientMessage {
-    if args.queue {
+    if let Some(code) = &args.spectate {
+        ClientMessage::Spectate {
+            code: (!code.is_empty()).then(|| code.clone()),
+            auth: auth.clone(),
+        }
+    } else if args.queue {
         ClientMessage::QueueRanked { auth: auth.clone() }
     } else if args.create {
         ClientMessage::Create {

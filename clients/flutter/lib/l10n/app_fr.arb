@@ -72,7 +72,8 @@
 
   "actionSealedBidFloor": "Enchère scellée sur {tile} (plancher ${price} si vous restez silencieux) :",
   "actionSealedBid": "Enchère scellée sur {tile} :",
-  "actionDiscovererHint": "Surenchérissez au-dessus du plancher et vous ne payez que 90 % de votre enchère — votre récompense pour avoir atterri ici.",
+  "actionDiscovererHint": "Gagnez et la banque vous rembourse 10 % du montant payé — votre récompense pour avoir atterri ici.",
+  "actionBidCantAfford": "Vous ne pouvez pas couvrir le plancher de {price}$ : passer est votre seul choix.",
   "actionBid": "Enchérir",
   "actionAbstain": "S'abstenir",
   "actionRaisePct": "+{pct} %",
@@ -253,5 +254,22 @@
   "evtSpotlightStartedDuration": "L'Exposition met {tile} en vedette (+{pct} % de loyer pendant {duration} tours)",
   "evtSpotlightEnded": "Les projecteurs sur {tile} s'éteignent",
   "evtRentBoostConsumed": "Le boost sur {tile} est consommé (piège à usage unique)",
-  "evtRoundBonusAwarded": "{player} est le plus riche de la manche : +{points} PV permanents"
+  "evtRoundBonusAwarded": "{player} est le plus riche de la manche : +{points} PV permanents",
+
+  "serverReachable": "Serveur joignable",
+  "serverUnreachable": "Serveur injoignable - vérifiez l'adresse",
+  "serverRequiresAccount": "Ce serveur n'accepte pas les invités : connectez-vous pour jouer.",
+
+  "menuWatchTitle": "Regarder une partie",
+  "menuWatchSubtitle": "Observer une table en direct - idéal pour apprendre",
+  "menuReplayTips": "Revoir les astuces de première partie",
+  "spectatingBadge": "Vous regardez cette partie. Les mises et votes restent cachés jusqu'à leur résolution.",
+  "logSpectating": "Salle {code} observée en spectateur",
+
+  "hintDismiss": "Compris",
+  "hintLobby": "Partagez le code de la salle, ajoutez des bots pour remplir les sièges, puis lancez la partie.",
+  "hintHand": "Votre main est en bas : jouez une carte pour avancer d'autant de cases. Une propriété libre déclenche une enchère.",
+  "hintAuction": "Enchère scellée : tout le monde mise en même temps, en secret. Misez au moins le prix affiché - ou 0 pour passer. Le découvreur gagne les égalités.",
+  "hintJail": "En prison ! Choisissez votre sortie : jouer toute votre main dans un ordre fixé (Route légale), soudoyer les autres joueurs, ou utiliser une carte.",
+  "hintVp": "La course se joue aux points de victoire : groupes complets (+3), conglomérats (+2), et plus riche de chaque manche (+2)."
 }

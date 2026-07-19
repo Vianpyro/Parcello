@@ -39,6 +39,8 @@ async fn spawn_server() -> String {
         default_issuer: None,
         connections: AppState::connection_limiter(),
         ranked: None,
+        guest_allowed: true,
+        showcase: false,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -128,6 +130,8 @@ async fn spawn_ranked_server_with_grace(secret: &str, start_grace: std::time::Du
         default_issuer: None,
         connections: AppState::connection_limiter(),
         ranked: Some(ranked),
+        guest_allowed: true,
+        showcase: false,
     };
     spawn_matchmaker(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -360,6 +364,10 @@ async fn config_json_advertises_default_issuer() {
         default_issuer: Some("https://auth.example.com".to_string()),
         connections: AppState::connection_limiter(),
         ranked: None,
+        // Deliberately false: proves the advertised value follows the
+        // state, so clients can trust it to hide the guest path.
+        guest_allowed: false,
+        showcase: false,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -386,6 +394,11 @@ async fn config_json_advertises_default_issuer() {
     assert!(
         resp.contains(r#""default_issuer":"https://auth.example.com""#),
         "body should carry the configured issuer: {resp}"
+    );
+    assert!(
+        resp.contains(r#""guest_allowed":false"#),
+        "no --insecure-guest: the config must say so, so clients hide the \
+         guest path: {resp}"
     );
 }
 
@@ -614,4 +627,147 @@ async fn ranked_messages_error_cleanly_when_disabled() {
     .await;
     let err = recv_until(&mut socket, "error").await;
     assert!(err["message"].as_str().unwrap().contains("disabled"));
+}
+
+#[tokio::test]
+async fn spectator_watches_without_a_seat_and_sees_nothing_private() {
+    let url = spawn_server().await;
+
+    // Two players set up and start a game.
+    let mut host = connect(&url).await;
+    send(&mut host, json!({"type": "create", "auth": guest("alice")})).await;
+    let code = recv(&mut host).await["code"].as_str().unwrap().to_string();
+    recv_until(&mut host, "joined").await;
+    let mut bob = connect(&url).await;
+    send(
+        &mut bob,
+        json!({"type": "join", "code": code, "auth": guest("bob")}),
+    )
+    .await;
+    recv_until(&mut bob, "joined").await;
+    send(&mut host, json!({"type": "start"})).await;
+    recv_until(&mut host, "game_started").await;
+    recv_until(&mut bob, "game_started").await;
+
+    // A third connection watches by code: full context, no seat field.
+    let mut watcher = connect(&url).await;
+    send(
+        &mut watcher,
+        json!({"type": "spectate", "code": code, "auth": guest("carol")}),
+    )
+    .await;
+    let spectating = recv_until(&mut watcher, "spectating").await;
+    assert_eq!(spectating["code"], code.as_str());
+    assert!(spectating.get("seat").is_none(), "a watcher holds no seat");
+    assert!(
+        spectating["view"]["players"].as_array().unwrap().len() == 2,
+        "mid-game spectate carries the current view"
+    );
+
+    // A trade between the two players must not reach the watcher (ADR-0007
+    // via ADR-0035): neither the event nor the pending offer in the view.
+    send(
+        &mut host,
+        json!({"type": "cmd", "cmd": {"type": "propose_trade", "to": "guest:bob",
+               "give_cash": 50, "give_tiles": [], "receive_cash": 0, "receive_tiles": []}}),
+    )
+    .await;
+    let update = recv_until(&mut watcher, "update").await;
+    let events = update["events"].as_array().unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| e["type"].as_str().unwrap_or("").starts_with("trade_")),
+        "trade lifecycle must be filtered from the spectator feed: {events:?}"
+    );
+    assert!(
+        update["view"]["pending_trades"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "no pending offer may appear in the spectator view"
+    );
+
+    // Game commands from a spectator are refused at the transport.
+    send(
+        &mut watcher,
+        json!({"type": "cmd", "cmd": {"type": "end_turn"}}),
+    )
+    .await;
+    let err = recv_until(&mut watcher, "error").await;
+    assert!(err["message"].as_str().unwrap().contains("spectators"));
+
+    // Bare spectate (no code) picks the human game on this server.
+    let mut second = connect(&url).await;
+    send(
+        &mut second,
+        json!({"type": "spectate", "auth": guest("dave")}),
+    )
+    .await;
+    assert_eq!(
+        recv_until(&mut second, "spectating").await["code"],
+        code.as_str()
+    );
+}
+
+#[tokio::test]
+async fn showcase_supervisor_provides_a_bots_game_to_watch() {
+    // A server with --showcase on and nobody playing: the supervisor's
+    // first tick creates the bots room, and a bare spectate finds it.
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mods_dir = manifest
+        .join("../../mods")
+        .canonicalize()
+        .expect("mods dir");
+    let resolved = parcello_mods::resolve(&mods_dir, &["base".to_string()]).expect("base resolves");
+    let state = AppState {
+        rooms: Rooms::default(),
+        content: Arc::new(resolved),
+        mods_dir: Arc::new(mods_dir),
+        verifier: Arc::new(CompositeVerifier::new(None, None, true)),
+        history: Arc::new(MemoryHistory::new()),
+        turn_timeout: None,
+        time_bank: None,
+        game_timeout: None,
+        default_issuer: None,
+        connections: AppState::connection_limiter(),
+        ranked: None,
+        guest_allowed: true,
+        showcase: true,
+    };
+    parcello_server::showcase::spawn_showcase(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, game_router(state)).await.unwrap();
+    });
+    let url = format!("ws://{addr}/ws");
+
+    // The supervisor ticks every 15s with the first tick immediate; give it
+    // a moment, then watch whatever it made.
+    let mut watcher = connect(&url).await;
+    let mut spectating = None;
+    for _ in 0..50 {
+        send(
+            &mut watcher,
+            json!({"type": "spectate", "auth": guest("eve")}),
+        )
+        .await;
+        let reply = recv(&mut watcher).await;
+        if reply["type"] == "spectating" {
+            spectating = Some(reply);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let spectating = spectating.expect("showcase room becomes watchable");
+    let players = spectating["view"]["players"].as_array().expect("players");
+    assert_eq!(players.len(), 4, "the showcase seats four bots");
+    let seats = spectating["players"].as_array().expect("seat infos");
+    assert!(
+        seats.iter().all(|s| s["is_bot"] == true),
+        "every showcase seat is a bot: {seats:?}"
+    );
 }

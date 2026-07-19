@@ -110,6 +110,11 @@ struct Args {
     #[arg(long, env = "PARCELLO_RANKED")]
     ranked: bool,
 
+    /// Keep a bots showcase game running whenever no humans are playing
+    /// (ADR-0035), so `spectate` always finds something to watch.
+    #[arg(long, env = "PARCELLO_SHOWCASE")]
+    showcase: bool,
+
     /// Enable LAN discovery announcements (multicast) for local network
     /// game browsing.
     #[arg(long, env = "PARCELLO_LAN")]
@@ -150,6 +155,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = build_state(&args)?;
     ranked::spawn_matchmaker(state.clone());
+    parcello_server::showcase::spawn_showcase(state.clone());
 
     if args.lan {
         lan::spawn_broadcaster(
@@ -264,5 +270,7 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
         default_issuer: args.default_issuer.clone(),
         connections: AppState::connection_limiter(),
         ranked,
+        guest_allowed: args.insecure_guest,
+        showcase: args.showcase,
     })
 }

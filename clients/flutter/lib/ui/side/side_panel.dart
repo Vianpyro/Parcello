@@ -9,6 +9,7 @@ import '../../protocol.dart';
 import '../../session.dart';
 import '../../sfx.dart';
 import '../../tokens.dart';
+import '../coach_mark.dart';
 import '../common.dart';
 import 'bid_chip.dart';
 import 'feedback_card.dart';
@@ -24,6 +25,34 @@ class SidePanel extends StatelessWidget {
     final v = s.view;
     final t = AppLocalizations.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // First-game coach mark (one at a time, never modal). In the side
+      // panel, not floating over the board: here it participates in layout
+      // (the panel scrolls, the layout tests size it) and can never cover
+      // a tappable tile or the action panel.
+      if (activeHintId(s) case final hint?)
+        CoachMark(
+          text: hintText(hint, t),
+          onDismiss: () => s.dismissHint(hint),
+        ),
+      // Watching, not playing (ADR-0035): say so where the player card
+      // normally promises agency.
+      if (s.spectating)
+        Card(
+          color: Pc.surface2,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(children: [
+              const Icon(Icons.visibility_outlined, color: Pc.gold, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(t.spectatingBadge,
+                    style: const TextStyle(fontSize: 12, color: Pc.textMuted)),
+              ),
+              hoverSfx(TextButton(
+                  onPressed: s.leaveRoom, child: Text(t.continueLabel))),
+            ]),
+          ),
+        ),
       // Game over: replay together, or go back to the start screen.
       if (v != null && v.finished)
         Card(
@@ -40,15 +69,20 @@ class SidePanel extends StatelessWidget {
                           color: Pc.gold)),
                   const SizedBox(height: 8),
                   Row(children: [
-                    Expanded(child: wideButton(t.playAgain, s.sendPlayAgain)),
-                    const SizedBox(width: 8),
+                    // Spectators cannot replay a game they never sat in
+                    // (ADR-0035); they only get the way out.
+                    if (!s.spectating) ...[
+                      Expanded(child: wideButton(t.playAgain, s.sendPlayAgain)),
+                      const SizedBox(width: 8),
+                    ],
                     Expanded(
                         child: wideButton(t.continueLabel, s.leaveRoom,
                             primary: false)),
                   ]),
-                  Text(t.playAgainHint,
-                      style: const TextStyle(
-                          fontSize: 11, color: Pc.textMuted)),
+                  if (!s.spectating)
+                    Text(t.playAgainHint,
+                        style: const TextStyle(
+                            fontSize: 11, color: Pc.textMuted)),
                 ]),
           ),
         ),
@@ -123,7 +157,10 @@ class SidePanel extends StatelessWidget {
               padding: const EdgeInsets.all(12), child: _trades(context))),
       // Post-game survey: an ordinary side card, never a modal - it must
       // not block anything (no frustration by design).
-      if (s.view?.finished == true && !s.feedbackDone) FeedbackCard(s: s),
+      // The survey asks players about a game they played; a spectator's
+      // submission would only bounce off the server (ADR-0035).
+      if (s.view?.finished == true && !s.feedbackDone && !s.spectating)
+        FeedbackCard(s: s),
       Card(
         child: Padding(
           padding: const EdgeInsets.all(12),

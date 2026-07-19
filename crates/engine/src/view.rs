@@ -102,8 +102,27 @@ impl ClientView {
         view
     }
 
+    /// Projection for a seatless watcher (ADR-0035): everything public,
+    /// nothing seat-private. No trade offers at all (they are private to
+    /// their two parties, ADR-0007), and every pending sealed bid / bribe
+    /// vote masked while its window is open (ADR-0018/0024 secrecy - a
+    /// spectator has no "own" entry to see). Resolution events reveal the
+    /// amounts afterwards, as they do for players.
+    #[must_use]
+    pub fn for_spectator(state: &GameState, content: &GameContent) -> Self {
+        let mut view = Self::of(state, content);
+        view.pending_trades.clear();
+        if let TurnPhase::BlindAuction { bids, .. } = &mut view.turn {
+            bids.fill(None);
+        }
+        if let TurnPhase::BribeVote { votes, .. } = &mut view.turn {
+            votes.fill(None);
+        }
+        view
+    }
+
     /// Omniscient projection (every open offer). Test/replay tooling only:
-    /// the server must always send `for_seat` views.
+    /// the server must always send `for_seat` or `for_spectator` views.
     #[must_use]
     pub fn of(state: &GameState, content: &GameContent) -> Self {
         Self {

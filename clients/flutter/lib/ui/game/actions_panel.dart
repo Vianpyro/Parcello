@@ -116,10 +116,12 @@ class ActionsPanelState extends State<ActionsPanel> {
       final price = marketPrice(s.content!.board[t.tile!], v);
       final cash = v.players[seat].cash;
       final isDiscoverer = v.current == seat;
+      // The floor binds every seat (ADR-0018 amended 2026-07): below it,
+      // the only legal move is to abstain - don't offer a doomed bid.
+      final canBid = cash >= price;
       if (_bidInitTile != t.tile) {
-        // Seed at that price, but never above what you can actually
-        // bid (the sealed-bid invariant validates against cash, ADR-0018).
-        _bid.text = '${price.clamp(0, cash)}';
+        // Seed at the floor: the lowest bid the engine will accept.
+        _bid.text = canBid ? '$price' : '0';
         _bidInitTile = t.tile;
       }
       // Quick raises cap at cash: a bid over your balance would just be
@@ -137,55 +139,67 @@ class ActionsPanelState extends State<ActionsPanel> {
               : loc.actionSealedBid(s.tileName(t.tile!)),
           style: const TextStyle(fontSize: 12),
         ),
-        // The discoverer's edge (ADR-0018): landing there took the risk,
-        // so a contested win above the floor is rewarded with a discount.
+        // The discoverer's edge (ADR-0018 amended): every winner pays in
+        // full, then the bank visibly refunds the discoverer 10%.
         if (isDiscoverer)
           Text(
             loc.actionDiscovererHint,
             style: const TextStyle(fontSize: 10, color: Pc.textFaint),
           ),
-        SizedBox(
-          width: 90,
-          child: TextField(
-            controller: _bid,
-            keyboardType: TextInputType.number,
-            // Digits only, and never more than the seat can afford - the
-            // field itself refuses an over-cash bid as you type (2026-07).
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              MaxValueFormatter(cash),
-            ],
-            style: const TextStyle(color: Pc.text),
-            decoration: const InputDecoration(isDense: true),
+        if (!canBid)
+          // Below the universal floor (ADR-0018 amended 2026-07) any
+          // non-zero bid is a guaranteed rejection: say so and offer the
+          // one legal move instead of a doomed input.
+          Text(
+            loc.actionBidCantAfford(price),
+            style: const TextStyle(fontSize: 10, color: Pc.textFaint),
+          )
+        else ...[
+          SizedBox(
+            width: 90,
+            child: TextField(
+              controller: _bid,
+              keyboardType: TextInputType.number,
+              // Digits only, and never more than the seat can afford - the
+              // field itself refuses an over-cash bid as you type (2026-07).
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                MaxValueFormatter(cash),
+              ],
+              style: const TextStyle(color: Pc.text),
+              decoration: const InputDecoration(isDense: true),
+            ),
           ),
-        ),
-        hoverSfx(FilledButton(
-          // Clamp at submit too, belt-and-suspenders: the field is already
-          // capped, but the amount on the wire must never exceed cash.
-          onPressed: () => s.sendCmd({
-            'type': 'submit_blind_bid',
-            'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
-          }),
-          child: Text(loc.actionBid),
-        )),
-        btn(loc.actionAbstain, {'type': 'submit_blind_bid', 'amount': 0},
-            primary: false),
-        // Quick raises as a percent of the list price, so escalating a bid
-        // doesn't mean typing out full numbers under the clock. Mutating
-        // the controller already repaints the TextField bound to it - no
-        // setState needed (and one less rebuild to guard against).
-        for (final pct in [10, 25, 50, 100])
-          hoverSfx(OutlinedButton(
-            onPressed: () => bumpBid(pct),
-            style: touch,
-            child: Text(loc.actionRaisePct(pct)),
+          hoverSfx(FilledButton(
+            // Clamp at submit too, belt-and-suspenders: the field is
+            // already capped, but the wire amount must never exceed cash.
+            onPressed: () => s.sendCmd({
+              'type': 'submit_blind_bid',
+              'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
+            }),
+            child: Text(loc.actionBid),
           )),
-        // All-in: the highest bid the sealed-bid invariant will accept.
-        hoverSfx(OutlinedButton(
-          onPressed: () => _bid.text = '$cash',
-          style: touch,
-          child: Text(loc.actionMaxBid(cash)),
-        )),
+        ],
+        btn(loc.actionAbstain, {'type': 'submit_blind_bid', 'amount': 0},
+            primary: !canBid),
+        if (canBid) ...[
+          // Quick raises as a percent of the list price, so escalating a
+          // bid doesn't mean typing out full numbers under the clock.
+          // Mutating the controller already repaints the TextField bound
+          // to it - no setState needed.
+          for (final pct in [10, 25, 50, 100])
+            hoverSfx(OutlinedButton(
+              onPressed: () => bumpBid(pct),
+              style: touch,
+              child: Text(loc.actionRaisePct(pct)),
+            )),
+          // All-in: the highest bid the sealed-bid invariant will accept.
+          hoverSfx(OutlinedButton(
+            onPressed: () => _bid.text = '$cash',
+            style: touch,
+            child: Text(loc.actionMaxBid(cash)),
+          )),
+        ],
       ]);
     } else if (t.type == 'bribe_vote') {
       // Every living opponent may vote at once (ADR-0024), not a single

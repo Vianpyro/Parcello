@@ -20,9 +20,13 @@ impl Exec<'_> {
         }
         // The floor is the price *right now* (ADR-0021 amended): during a
         // crash the tile is cheaper to enter, and the number printed on the
-        // board is one a discoverer may legally bid.
+        // board is the one every bidder is held to. It binds ALL seats
+        // (ADR-0018 amended 2026-07): 0 abstains, anything else must reach
+        // the market price - the old discoverer-only floor let a rival buy
+        // for 1$ whenever the discoverer was too broke to hold the implicit
+        // floor bid.
         let floor = self.market_price(tile);
-        if p == self.st.current && amount != 0 && amount < floor {
+        if amount != 0 && amount < floor {
             return Err(CommandError::BidBelowFloor);
         }
         let TurnPhase::BlindAuction { bids, .. } = &mut self.st.turn else {

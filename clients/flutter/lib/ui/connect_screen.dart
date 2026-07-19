@@ -1,6 +1,7 @@
 /// Step 1 of the client: pick a server and an identity.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -50,38 +51,115 @@ class ConnectScreen extends StatefulWidget {
   State<ConnectScreen> createState() => _ConnectScreenState();
 }
 
+/// The typed WebSocket URL's `/config.json` twin (ADR-0032): ws->http,
+/// wss->https, same authority. Null when the URL doesn't parse yet.
+Uri? configUrlFor(String wsUrl) {
+  final uri = Uri.tryParse(wsUrl.trim());
+  if (uri == null || uri.host.isEmpty) return null;
+  final scheme = switch (uri.scheme) {
+    'ws' => 'http',
+    'wss' => 'https',
+    _ => null,
+  };
+  if (scheme == null) return null;
+  return Uri(
+    scheme: scheme,
+    host: uri.host,
+    port: uri.hasPort ? uri.port : null,
+    path: '/config.json',
+  );
+}
+
 class _ConnectScreenState extends State<ConnectScreen> {
   final _url = TextEditingController(text: defaultServerUrl());
   final _name = TextEditingController();
   final _token = TextEditingController();
   String? _signedInAs;
 
-  /// Issuer default advertised by the server that served this web build
-  /// (ADR-0032, `/config.json`). Null until fetched, or when unset/native.
+  /// Issuer default advertised by the target server (ADR-0032,
+  /// `/config.json`). Null until fetched or when unset.
   String? _runtimeIssuer;
+
+  /// Whether the target server accepts guests; null = unknown (old server,
+  /// unreachable, or a cross-origin web fetch the browser blocked). Only a
+  /// definitive `false` hides the guest path - unknown keeps it.
+  bool? _guestAllowed;
+
+  /// Whether `/config.json` answered at all: the newcomer's "is this
+  /// address right?" signal. Null = still unknown (probe pending, or a
+  /// web cross-origin failure that could just be CORS).
+  bool? _reachable;
+
+  Timer? _probeDebounce;
+  int _probeGen = 0;
 
   @override
   void initState() {
     super.initState();
-    // Only the web build is served by a Parcello server it can query for its
-    // configured issuer; a desktop client connects to arbitrary servers, so
-    // it keeps the compile-time default.
-    if (kIsWeb) _loadRuntimeConfig();
+    _probeServer();
+    // Re-probe as the player edits the address, debounced so a keystroke
+    // burst costs one request.
+    _url.addListener(() {
+      _probeDebounce?.cancel();
+      _probeDebounce = Timer(const Duration(milliseconds: 700), _probeServer);
+    });
   }
 
-  /// Best-effort: a missing/broken `/config.json` just leaves the sign-in
-  /// field on its compile-time default. Never blocks or surfaces an error.
-  Future<void> _loadRuntimeConfig() async {
+  @override
+  void dispose() {
+    _probeDebounce?.cancel();
+    super.dispose();
+  }
+
+  /// Best-effort probe of the *typed* server's `/config.json` (ADR-0032):
+  /// a runtime-config fetch and an implicit liveness check in one. Never
+  /// blocks connecting; on the web a cross-origin failure stays "unknown"
+  /// (it may only be CORS), same-origin and desktop failures mean the
+  /// server genuinely did not answer.
+  Future<void> _probeServer() async {
+    final target = configUrlFor(_url.text);
+    final gen = ++_probeGen;
+    if (target == null) {
+      setState(() {
+        _reachable = null;
+        _guestAllowed = null;
+        _runtimeIssuer = null;
+      });
+      return;
+    }
+    final definitiveFailure = !kIsWeb || target.origin == Uri.base.origin;
     try {
-      final resp = await http.get(Uri.base.resolve('/config.json'));
-      if (resp.statusCode != 200) return;
-      final issuer =
-          (jsonDecode(resp.body) as Map<String, dynamic>)['default_issuer'];
-      if (issuer is String && issuer.isNotEmpty && mounted) {
-        setState(() => _runtimeIssuer = issuer);
+      final resp = await http
+          .get(target)
+          .timeout(const Duration(seconds: 3));
+      if (!mounted || gen != _probeGen) return;
+      if (resp.statusCode != 200) {
+        // A failed probe must never keep the PREVIOUS server's answers:
+        // stale guest_allowed=false would wrongly lock Connect against a
+        // server whose policy is simply unknown.
+        setState(() {
+          _reachable = definitiveFailure ? false : null;
+          _guestAllowed = null;
+          _runtimeIssuer = null;
+        });
+        return;
       }
+      final config = jsonDecode(resp.body) as Map<String, dynamic>;
+      final issuer = config['default_issuer'];
+      final guests = config['guest_allowed'];
+      setState(() {
+        _reachable = true;
+        _runtimeIssuer =
+            (issuer is String && issuer.isNotEmpty) ? issuer : null;
+        _guestAllowed = guests is bool ? guests : null;
+      });
     } catch (_) {
-      // ignored on purpose: the default issuer is a convenience, not required.
+      if (!mounted || gen != _probeGen) return;
+      setState(() {
+        _reachable = definitiveFailure ? false : null;
+        _guestAllowed = null;
+        _runtimeIssuer = null;
+      });
     }
   }
 
@@ -168,27 +246,62 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     controller: _url,
                     decoration: InputDecoration(labelText: t.serverUrl),
                   ),
+                  // Implicit liveness signal from the /config.json probe:
+                  // tells a newcomer whether the pre-filled address needs
+                  // changing before they ever hit Connect.
+                  if (_reachable != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _reachable == true
+                            ? t.serverReachable
+                            : t.serverUnreachable,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: _reachable == true
+                                ? Pc.textMuted
+                                : Pc.oxblood),
+                      ),
+                    ),
                   TextField(
                     controller: _name,
                     maxLength: 24,
                     decoration: InputDecoration(labelText: t.displayName),
                   ),
+                  // The server said guests are off: signing in is the only
+                  // way in, so say so instead of letting a guest connect
+                  // bounce off an auth error.
+                  if (_guestAllowed == false && _signedInAs == null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(t.serverRequiresAccount,
+                          style: const TextStyle(
+                              fontSize: 11, color: Pc.textMuted)),
+                    ),
                   const SizedBox(height: 8),
                   wideButton(
                       _signedInAs == null
-                          ? t.signInOptional
+                          ? (_guestAllowed == false
+                              ? t.signIn
+                              : t.signInOptional)
                           : t.signedInAs(_signedInAs!),
                       _signIn,
-                      primary: false),
+                      primary: _guestAllowed == false && _signedInAs == null),
                   const SizedBox(height: 10),
-                  wideButton(t.connect, () {
-                    if (_name.text.trim().isEmpty &&
-                        _token.text.trim().isEmpty) {
-                      return;
-                    }
-                    s.connect(_url.text.trim(), _name.text.trim(),
-                        token: _token.text.trim());
-                  }),
+                  wideButton(
+                      t.connect,
+                      // A guest connect is pointless against a server that
+                      // said no guests: require the sign-in first.
+                      _guestAllowed == false && _token.text.trim().isEmpty
+                          ? null
+                          : () {
+                              if (_name.text.trim().isEmpty &&
+                                  _token.text.trim().isEmpty) {
+                                return;
+                              }
+                              s.connect(_url.text.trim(), _name.text.trim(),
+                                  token: _token.text.trim());
+                            }),
                   const SizedBox(height: 8),
                   Text(s.loginMessage,
                       textAlign: TextAlign.center,

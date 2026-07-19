@@ -29,6 +29,7 @@ pub mod history;
 pub mod lan;
 pub mod ranked;
 pub mod room;
+pub mod showcase;
 pub mod ws;
 
 use auth::IdentityVerifier;
@@ -64,6 +65,14 @@ pub struct AppState {
     /// `None` when `--ranked` is off - every ranked message then answers
     /// with an explicit "disabled" error.
     pub ranked: Option<Arc<RankedService>>,
+    /// Whether this server accepts unauthenticated guests
+    /// (`--insecure-guest`). Advertised via `/config.json` (ADR-0032) so
+    /// clients can hide the guest path instead of offering a login mode the
+    /// server would only reject.
+    pub guest_allowed: bool,
+    /// Keep a bots showcase game running when no humans are playing
+    /// (`--showcase`, ADR-0035), so `spectate` always finds something.
+    pub showcase: bool,
 }
 
 impl AppState {
@@ -83,11 +92,17 @@ impl AppState {
 struct ClientConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     default_issuer: Option<String>,
+    /// Always present (both values are definitive answers): clients hide
+    /// the guest sign-in path when this is false. Absent only on servers
+    /// predating the field, which clients treat as "unknown - keep the
+    /// guest option" for compatibility.
+    guest_allowed: bool,
 }
 
 async fn client_config(State(state): State<AppState>) -> Json<ClientConfig> {
     Json(ClientConfig {
         default_issuer: state.default_issuer,
+        guest_allowed: state.guest_allowed,
     })
 }
 

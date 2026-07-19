@@ -74,6 +74,16 @@ pub enum ClientMessage {
         code: String,
         auth: AuthPayload,
     },
+    /// Watch a room without taking a seat (ADR-0035). Same authentication
+    /// as `Join`. With a `code`, watch that room; without one, the server
+    /// picks the most watch-worthy game (most connected humans, else the
+    /// bots showcase). Answered with `Spectating`; a spectator can only
+    /// watch and `Leave` - every game command is refused.
+    Spectate {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        auth: AuthPayload,
+    },
     /// Host only, from the Lobby: add a server-driven bot seat. Bots fill
     /// empty seats but yield to humans - joining a full room evicts one
     /// (ADR-0014).
@@ -205,6 +215,23 @@ pub enum ServerMessage {
         /// (= false) for ordinary rooms, so old clients are unaffected.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         ranked: bool,
+    },
+    /// The spectator's mirror of `Joined` (ADR-0035): full room context,
+    /// no seat, no reconnect token (a spectator holds nothing to protect).
+    /// Subsequent `Lobby`/`GameStarted`/`Update` messages flow as for
+    /// players, with the seatless spectator view.
+    Spectating {
+        code: String,
+        players: Vec<SeatInfo>,
+        content: Box<ResolvedContent>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        view: Option<Box<ClientView>>,
+        /// Seconds left of a time-boxed game (ADR-0010); mid-game only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_remaining: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_seconds: Option<u64>,
+        settings: RoomSettings,
     },
     /// Broadcast on lobby membership, connection, or settings changes.
     Lobby {
@@ -402,6 +429,21 @@ mod tests {
             serde_json::to_string(&mods).unwrap(),
             r#"{"type":"mods","ids":["base","highroller"]}"#
         );
+    }
+
+    #[test]
+    fn spectate_wire_format_is_stable() {
+        // Watch a specific room, or let the server pick (ADR-0035).
+        let s: ClientMessage =
+            serde_json::from_str(r#"{"type":"spectate","code":"BAKUZ","auth":{"guest_name":"v"}}"#)
+                .unwrap();
+        assert!(matches!(
+            s,
+            ClientMessage::Spectate { code: Some(c), .. } if c == "BAKUZ"
+        ));
+        let any: ClientMessage =
+            serde_json::from_str(r#"{"type":"spectate","auth":{"guest_name":"v"}}"#).unwrap();
+        assert!(matches!(any, ClientMessage::Spectate { code: None, .. }));
     }
 
     #[test]

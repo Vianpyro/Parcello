@@ -39,6 +39,14 @@ class _MenuScreenState extends State<MenuScreen> {
     // the web build rather than shipping dead ends.
     final tiles = <Widget>[
       PrivateTableCard(s: s),
+      // Watch a running game without playing (ADR-0035): the server picks
+      // the fullest human table, else its bots showcase. Doubles as the
+      // "see how a game flows" half of the onboarding.
+      MenuTile(
+          icon: Icons.visibility_outlined,
+          title: t.menuWatchTitle,
+          subtitle: t.menuWatchSubtitle,
+          onTap: s.spectateGame),
       if (!kIsWeb)
         MenuTile(
             icon: Icons.wifi_find_outlined,
@@ -98,6 +106,14 @@ class _MenuScreenState extends State<MenuScreen> {
                 Text(s.loginMessage,
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Pc.oxblood)),
+                // Re-arm the first-game coach marks (they self-dismiss
+                // forever otherwise).
+                TextButton(
+                  onPressed: s.resetHints,
+                  child: Text(t.menuReplayTips,
+                      style:
+                          const TextStyle(fontSize: 12, color: Pc.textMuted)),
+                ),
               ],
             ),
           ),

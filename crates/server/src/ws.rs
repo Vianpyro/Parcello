@@ -76,6 +76,9 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(app): State<AppState>) -> Re
 struct Session {
     room: mpsc::Sender<RoomCmd>,
     player_id: String,
+    /// Watching, not playing (ADR-0035): every room-scoped message except
+    /// leaving is refused at this boundary.
+    spectator: bool,
 }
 
 async fn handle_socket(socket: WebSocket, app: AppState) {
@@ -126,27 +129,18 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
             // Mod discovery for the client's create-room picker (ADR-0006).
             // Connection-scoped like Ping: the answer feeds room *creation*,
             // so it must work before any room exists.
-            (ClientMessage::ListMods, _) => {
-                send(
-                    &tx,
-                    ServerMessage::Mods {
-                        ids: list_mods(&app).await,
-                    },
-                );
-            }
+            (ClientMessage::ListMods, _) => send_mods(&app, &tx).await,
 
             // Ranked queue entry/exit and the ladder query (ADR-0034):
             // connection-scoped like ListMods. Queueing from inside a room
             // is refused; entering a room drops the queue entry below.
             (ClientMessage::QueueRanked { auth }, None) => {
-                // A re-queue replaces this connection's previous entry,
-                // whatever identity it carried: a failed re-auth (or an
-                // identity switch) must never leave an orphan in the pool
-                // that the matchmaker would seat in a table this client
-                // no longer expects.
-                if let (Some(service), Some(old)) = (&app.ranked, queued.take()) {
-                    service.remove(&old, &tx);
-                }
+                // A re-queue first replaces this connection's previous
+                // entry, whatever identity it carried: a failed re-auth (or
+                // an identity switch) must never leave an orphan in the
+                // pool that the matchmaker would seat in a table this
+                // client no longer expects.
+                cancel_queue(&app, &mut queued, &tx);
                 queued = handle_queue_ranked(&app, &auth, &tx).await;
             }
             (ClientMessage::QueueRanked { .. }, Some(_)) => {
@@ -167,19 +161,25 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
                 drop_queue_entry_on_seat(&app, &mut queued, session.is_some(), &tx);
             }
 
-            (ClientMessage::Create { .. } | ClientMessage::Join { .. }, Some(_)) => {
+            // Watch without a seat (ADR-0035); ends any ranked wait too.
+            (ClientMessage::Spectate { code, auth }, None) => {
+                session = handle_spectate(&app, code.as_deref(), &auth, &tx).await;
+                drop_queue_entry_on_seat(&app, &mut queued, session.is_some(), &tx);
+            }
+
+            (
+                ClientMessage::Create { .. }
+                | ClientMessage::Join { .. }
+                | ClientMessage::Spectate { .. },
+                Some(_),
+            ) => {
                 send_error(&tx, "already in a room");
             }
 
             // Leaving keeps the socket open: the session is cleared so a
-            // new Create/Join can follow on the same connection.
+            // new Create/Join/Spectate can follow on the same connection.
             (ClientMessage::Leave, Some(s)) => {
-                let _ = s
-                    .room
-                    .send(RoomCmd::Disconnect {
-                        player_id: s.player_id.clone(),
-                    })
-                    .await;
+                leave_room(s).await;
                 session = None;
             }
 
@@ -187,9 +187,17 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
             // animation ack (harmless - acks release timers, never gate).
             (ClientMessage::Leave | ClientMessage::AnimationDone { .. }, None) => {}
 
-            // Everything else is a room-scoped request: relay it verbatim.
+            // Everything else is a room-scoped request: relay it verbatim -
+            // unless this connection only watches (ADR-0035). Spectator
+            // render acks are dropped silently (they gate nothing, and a
+            // client naturally acks every Update it draws); anything else
+            // from a spectator is refused.
             (msg, Some(s)) => {
-                if s.room.send(relay(msg, &s.player_id)).await.is_err() {
+                if s.spectator {
+                    if !matches!(msg, ClientMessage::AnimationDone { .. }) {
+                        send_error(&tx, "spectators can only watch; leave to stop");
+                    }
+                } else if s.room.send(relay(msg, &s.player_id)).await.is_err() {
                     break;
                 }
             }
@@ -199,12 +207,7 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     }
 
     if let Some(s) = session {
-        let _ = s
-            .room
-            .send(RoomCmd::Disconnect {
-                player_id: s.player_id,
-            })
-            .await;
+        leave_room(&s).await;
     }
     // A closed socket leaves the queue (the matchmaker also prunes dead
     // senders each tick; this just makes it immediate).
@@ -272,6 +275,7 @@ fn relay(msg: ClientMessage, player_id: &str) -> RoomCmd {
         | ClientMessage::GetRating { .. }
         | ClientMessage::Create { .. }
         | ClientMessage::Join { .. }
+        | ClientMessage::Spectate { .. }
         | ClientMessage::Leave => unreachable!("connection-scoped message reached relay"),
     }
 }
@@ -340,6 +344,76 @@ async fn handle_join(
     try_join(room, identity, auth.reconnect, tx).await
 }
 
+/// Spectate flow (ADR-0035): authenticate like a join, resolve which room
+/// to watch (an explicit code, or the server's pick), and attach as a
+/// seatless watcher.
+async fn handle_spectate(
+    app: &AppState,
+    code: Option<&str>,
+    auth: &AuthPayload,
+    tx: &ClientTx,
+) -> Option<Session> {
+    let identity = authenticate(app, auth, tx)?;
+    let room = match code {
+        Some(code) => app.rooms.read().await.get(&code.to_uppercase()).cloned(),
+        None => pick_watchable_room(app).await,
+    };
+    let Some(room) = room else {
+        let message = match code {
+            Some(code) => format!("no room with code {code}"),
+            None => "nothing to watch right now".into(),
+        };
+        send(tx, ServerMessage::Error { message });
+        return None;
+    };
+    let (reply, on_reply) = oneshot::channel();
+    let join = RoomCmd::SpectateJoin {
+        identity,
+        tx: tx.clone(),
+        reply,
+    };
+    if room.send(join).await.is_err() {
+        send_error(tx, "room no longer exists");
+        return None;
+    }
+    match on_reply.await {
+        // The session carries the watcher's unique routing key, not the
+        // bare identity: its Disconnect must never shadow a seat's.
+        Ok(Ok(watcher_key)) => Some(Session {
+            room,
+            player_id: watcher_key,
+            spectator: true,
+        }),
+        Ok(Err(message)) => {
+            send(tx, ServerMessage::Error { message });
+            None
+        }
+        Err(_) => {
+            send_error(tx, "room closed during spectate");
+            None
+        }
+    }
+}
+
+/// The server's pick for "watch anything" (ADR-0035): the Active room with
+/// the most connected humans - which degrades naturally to the bots
+/// showcase (zero humans) when it is the only game running.
+async fn pick_watchable_room(app: &AppState) -> Option<mpsc::Sender<RoomCmd>> {
+    let handles: Vec<mpsc::Sender<RoomCmd>> = app.rooms.read().await.values().cloned().collect();
+    let mut best: Option<(usize, mpsc::Sender<RoomCmd>)> = None;
+    for handle in handles {
+        let (reply, on_reply) = oneshot::channel();
+        if handle.send(RoomCmd::Probe { reply }).await.is_err() {
+            continue; // Room dissolved between listing and probing.
+        }
+        let Ok(probe) = on_reply.await else { continue };
+        if probe.active && best.as_ref().is_none_or(|(h, _)| probe.humans > *h) {
+            best = Some((probe.humans, handle));
+        }
+    }
+    best.map(|(_, handle)| handle)
+}
+
 /// Per-room mod set (ADR-0006): `None` or `[]` selects the server default.
 /// Mod ids come from the wire and end up in filesystem paths, so they are
 /// allowlist-validated here before touching `mods_dir`.
@@ -391,6 +465,27 @@ async fn list_mods(app: &AppState) -> Vec<String> {
     })
     .await
     .unwrap_or_default()
+}
+
+/// Tells the room this connection is gone (seat kept for rejoin, spectator
+/// entry dropped); shared by `Leave` and the socket-close path.
+async fn leave_room(s: &Session) {
+    let _ = s
+        .room
+        .send(RoomCmd::Disconnect {
+            player_id: s.player_id.clone(),
+        })
+        .await;
+}
+
+/// Reply to `ListMods` (ADR-0006): the picker-ready id list.
+async fn send_mods(app: &AppState, tx: &ClientTx) {
+    send(
+        tx,
+        ServerMessage::Mods {
+            ids: list_mods(app).await,
+        },
+    );
 }
 
 /// Directory-name charset only: no separators, no dots, so a wire-supplied
@@ -551,7 +646,11 @@ async fn try_join(
         return None;
     }
     match on_reply.await {
-        Ok(Ok(())) => Some(Session { room, player_id }),
+        Ok(Ok(())) => Some(Session {
+            room,
+            player_id,
+            spectator: false,
+        }),
         Ok(Err(message)) => {
             send(tx, ServerMessage::Error { message });
             None

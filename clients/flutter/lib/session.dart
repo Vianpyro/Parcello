@@ -62,6 +62,10 @@ class GameSession extends ChangeNotifier {
   }
 
   int? seat;
+
+  /// Watching without a seat (ADR-0035): the game screen renders the
+  /// spectator view and offers no actions.
+  bool spectating = false;
   String? code;
   GameContent? content;
   ClientView? view;
@@ -89,6 +93,30 @@ class GameSession extends ChangeNotifier {
 
   /// Post-game survey shown once per game; answering or dismissing hides it.
   bool feedbackDone = false;
+
+  // -- First-game coach marks ------------------------------------------
+
+  /// Hint ids already dismissed, persisted beside the reconnect tokens
+  /// under a reserved key (room codes are 5 uppercase letters, no clash).
+  /// One contextual hint shows at a time, the first time its situation
+  /// comes up; "replay the tips" in the menu clears the set.
+  late final Set<String> _seenHints = {
+    ...?_reconnectTokens['_hints']?.split(',').where((h) => h.isNotEmpty),
+  };
+
+  bool hintSeen(String id) => _seenHints.contains(id);
+
+  void dismissHint(String id) {
+    if (!_seenHints.add(id)) return;
+    _saveToken('_hints', _seenHints.join(','));
+    notifyListeners();
+  }
+
+  void resetHints() {
+    _seenHints.clear();
+    _saveToken('_hints', '');
+    notifyListeners();
+  }
 
   /// When set, the game is time-boxed and ends at this wall-clock instant
   /// (ADR-0010); the UI shows a local countdown. Null for untimed games.
@@ -274,6 +302,12 @@ class GameSession extends ChangeNotifier {
     _ws?.sink.add(jsonEncode({'type': 'join', 'code': c, 'auth': _auth(c)}));
   }
 
+  /// Watch a game without playing (ADR-0035). The server picks the room
+  /// with the most humans, falling back to its bots showcase.
+  void spectateGame() {
+    _ws?.sink.add(jsonEncode({'type': 'spectate', 'auth': _auth('')}));
+  }
+
   void disconnect() {
     // Cancel first so a deliberate close does not fire `_onClosed`.
     _sub?.cancel();
@@ -291,6 +325,8 @@ class GameSession extends ChangeNotifier {
   void leaveRoom() {
     _ws?.sink.add(jsonEncode({'type': 'leave'}));
     joined = false;
+    spectating = false;
+    seat = null;
     view = null;
     _resetDirector();
     code = null;
@@ -307,6 +343,7 @@ class GameSession extends ChangeNotifier {
     disconnect();
     connected = false;
     joined = false;
+    spectating = false;
     view = null;
     code = null;
     loginMessage = '';
@@ -319,6 +356,7 @@ class GameSession extends ChangeNotifier {
     _ws = null;
     connected = false;
     joined = false;
+    spectating = false;
     view = null;
     _resetDirector();
     if (loginMessage.isEmpty || loginMessage == 'Connecting...') {
@@ -383,6 +421,7 @@ class GameSession extends ChangeNotifier {
       case 'joined':
         code = msg['code'] as String;
         seat = msg['seat'] as int;
+        spectating = false;
         content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
         seats = _seatList(msg['players']);
         settings = RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
@@ -407,6 +446,29 @@ class GameSession extends ChangeNotifier {
         if (l10n case final loc?) {
           _log(loc.logJoinedRoom(code ?? '', content!.modIds.join(', ')));
         }
+      case 'spectating':
+        // Watching without a seat (ADR-0035): same room context as a join,
+        // no seat, no reconnect token, no time bank.
+        code = msg['code'] as String;
+        seat = null;
+        spectating = true;
+        content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
+        seats = _seatList(msg['players']);
+        settings =
+            RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
+        if (msg['view'] != null) {
+          view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
+        }
+        gameEndsAt = _deadlineFrom(msg['time_remaining']);
+        turnSeconds = msg['turn_seconds'] as int?;
+        turnEndsAt = _deadlineFrom(_effectiveTurnSeconds());
+        timeBankSeconds = null;
+        banks = null;
+        _resetDirector();
+        _trackTimedWindows();
+        joined = true;
+        loginMessage = '';
+        if (l10n case final loc?) _log(loc.logSpectating(code ?? ''));
       case 'lobby':
         final incoming = _seatList(msg['players']);
         _announceSeatChanges(incoming);

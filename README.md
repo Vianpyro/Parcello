@@ -120,6 +120,19 @@ after a 15s grace with at least 2), and the result is broadcast as
 `ratings_updated`. Ratings persist in the `--history` database; without one
 they are in-memory and reset at restart. CLI: `--queue` to enter the queue
 (auto-joins on `match_found`), `rating` / `cancel-queue` on stdin.
+`--showcase` keeps a bots-only game running whenever no humans are playing
+(ADR-0035), so spectating always finds something to watch; the room replays
+itself and winds down through the normal idle timeout once nobody watches.
+Spectating itself is always available: `spectate {code?}` on the wire
+(CLI: `--spectate [CODE]`, Flutter: the "Watch a game" menu tile) attaches
+a seatless watcher - same authentication as a join, up to 32 per room -
+who receives the game with all trade offers hidden and all pending
+bids/votes masked until they resolve; a watched room never idles out, and
+every game command from a spectator is refused.
+`GET /config.json` also advertises `guest_allowed`, so clients can hide
+the guest sign-in path on servers that would only reject it (the Flutter
+connect screen also uses the fetch as a liveness probe for the typed
+server address).
 `--lan` announces the server on the LAN so clients can find it without a
 URL (multicast `239.255.0.1:55888` by default, override with `--lan-maddr`
 / `--lan-port`; add `--lan-broadcast-fallback` for networks that block
@@ -361,10 +374,13 @@ round bonus (ADR-0020). Sealed-bid auctions on every landing (ADR-0018):
 a 12s window opens the instant a player lands on an unowned property, and
 every living seat - not just the landing player - submits exactly one bid
 at once (`0` abstains); the landing player (the "discoverer") is treated
-as bidding list price if they stay silent and can afford it, and an
-explicit non-zero discoverer bid must meet that floor - landing on an
-affordable tile always commits you to at least the floor, there is no
-plain decline anymore. The window resolves the instant every living seat
+as bidding list price if they stay silent and can afford it, and every
+non-zero bid - anyone's, not only the discoverer's (ADR-0018 amended
+2026-07) - must meet the current market price: landing on an affordable
+tile always commits you to at least the floor, there is no plain decline
+anymore, and the old 1$-snipe against a broke discoverer is gone (a seat
+that cannot afford the price can only abstain). The window resolves the
+instant every living seat
 has bid (or the server auto-abstains whoever's left silent at the
 deadline): highest effective bid wins, ties go to the discoverer then the
 lowest seat, and an all-zero result (only possible when the discoverer is
@@ -570,7 +586,12 @@ side of nothing - Go To Jail is unchanged, only escape is redesigned);
 to the token `sub`, a widening-window queue over the existing WebSocket,
 matchmaker-created auto-starting rooms, a new `RatingStore` port beside
 `GameHistory`; the architecture doc's "no central matchmaking" trade-off
-stands - a global ladder would need signed results and stays deferred).
+stands - a global ladder would need signed results and stays deferred);
+0035 spectators + the bots showcase (a seatless `ClientView::for_spectator`
+that hides all trades and masks pending bids/votes, `spectate` on the
+wire, and a `--showcase` supervisor keeping one all-bot game running as a
+last resort - a deviation from the architecture doc's strict player/seat
+model).
 
 ## Roadmap
 
