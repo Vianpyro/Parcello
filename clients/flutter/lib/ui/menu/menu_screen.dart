@@ -1,7 +1,7 @@
 /// Step 2 of the client: the main menu.
 library;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
@@ -12,6 +12,7 @@ import '../../tokens.dart';
 import '../../typography.dart';
 import '../language_button.dart';
 import 'geometry.dart';
+import '../showcase/showcase_screen.dart';
 import 'menu_tile.dart';
 import 'private_table_card.dart';
 import 'rules_screen.dart';
@@ -65,6 +66,14 @@ class _MenuScreenState extends State<MenuScreen> {
           title: t.rulesTitle,
           subtitle: t.menuRulesSubtitle,
           onTap: () => _push(const RulesScreen())),
+      // Debug-only: the design-system component gallery (not shipped to
+      // players). English labels are fine on this dev surface.
+      if (kDebugMode)
+        MenuTile(
+            icon: Icons.palette_outlined,
+            title: 'Design Showcase',
+            subtitle: 'Component gallery (debug)',
+            onTap: () => _push(const ShowcaseScreen())),
     ];
     return Scaffold(
       appBar: AppBar(
