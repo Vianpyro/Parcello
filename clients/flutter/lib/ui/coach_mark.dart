@@ -63,15 +63,15 @@ class CoachMark extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        padding: const EdgeInsets.fromLTRB(Pc.s12, Pc.s8, Pc.s8, Pc.s8),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           const Icon(Icons.tips_and_updates_outlined,
               color: Pc.gold, size: 18),
-          const SizedBox(width: 8),
+          const SizedBox(width: Pc.s8),
           Flexible(
             child: Text(text, style: const TextStyle(fontSize: 12)),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: Pc.s4),
           hoverSfx(TextButton(
             onPressed: onDismiss,
             child: Text(t.hintDismiss),

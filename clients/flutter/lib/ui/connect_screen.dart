@@ -13,6 +13,7 @@ import '../oidc.dart';
 import '../session.dart';
 import '../sfx.dart';
 import '../tokens.dart';
+import '../typography.dart';
 import 'common.dart';
 import 'language_button.dart';
 
@@ -231,12 +232,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   Align(
                       alignment: Alignment.centerRight,
                       child: LanguageButton(s: s)),
+                  // The wordmark: Fraunces, the brand voice (DDR-018 /
+                  // TYPOGRAPHY.md - Fraunces is reserved for the brand, Inter
+                  // is the default UI face). Was inline Inter here; now the
+                  // same wordmark as the menu, at hero size.
                   Text(t.appTitle,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                          color: Pc.gold)),
+                      style: PcText.wordmark.copyWith(fontSize: 30)),
                   const SizedBox(height: Pc.s2),
                   Text(t.connectSubtitle,
                       textAlign: TextAlign.center,
@@ -275,8 +277,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: Pc.s6),
                       child: Text(t.serverRequiresAccount,
-                          style: const TextStyle(
-                              fontSize: 11, color: Pc.textMuted)),
+                          style: PcText.caption),
                     ),
                   const SizedBox(height: Pc.s8),
                   wideButton(

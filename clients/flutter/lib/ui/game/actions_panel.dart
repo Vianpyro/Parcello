@@ -14,6 +14,7 @@ import '../../protocol.dart';
 import '../../session.dart';
 import '../../sfx.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 
 class MaxValueFormatter extends TextInputFormatter {
   final int max;
@@ -144,7 +145,7 @@ class ActionsPanelState extends State<ActionsPanel> {
         if (isDiscoverer)
           Text(
             loc.actionDiscovererHint,
-            style: const TextStyle(fontSize: 10, color: Pc.textFaint),
+            style: PcText.whisper,
           ),
         if (!canBid)
           // Below the universal floor (ADR-0018 amended 2026-07) any
@@ -152,7 +153,7 @@ class ActionsPanelState extends State<ActionsPanel> {
           // one legal move instead of a doomed input.
           Text(
             loc.actionBidCantAfford(price),
-            style: const TextStyle(fontSize: 10, color: Pc.textFaint),
+            style: PcText.whisper,
           )
         else ...[
           SizedBox(
@@ -285,7 +286,7 @@ class ActionsPanelState extends State<ActionsPanel> {
                   child: Text(loc.actionChooseRoute),
                 )),
                 if (_routeOrder.isNotEmpty) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: Pc.s6),
                   hoverSfx(TextButton(
                     onPressed: () => setState(() => _routeOrder.clear()),
                     child: Text(loc.actionReset),
@@ -328,7 +329,7 @@ class ActionsPanelState extends State<ActionsPanel> {
           children.add(btn(loc.actionEndTurn, {'type': 'end_turn'}));
       }
       children.add(Text(loc.actionTapTilesHint,
-          style: const TextStyle(color: Pc.textFaint, fontSize: 11)));
+          style: PcText.caption.copyWith(color: Pc.textFaint)));
     }
     // Grouped so a controller / Steam Deck traverses the action buttons
     // directionally; the Material buttons are already focus-highlighted and

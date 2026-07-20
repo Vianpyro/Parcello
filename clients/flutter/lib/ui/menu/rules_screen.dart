@@ -28,7 +28,7 @@ class RulesScreen extends StatelessWidget {
         appBar: AppBar(title: Text(t.rulesTitle), backgroundColor: Pc.surface2),
         body: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(Pc.s24),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 640),
               child: Column(
@@ -41,13 +41,15 @@ class RulesScreen extends StatelessWidget {
                           color: Pc.gold)),
                   const SizedBox(height: 20),
                   for (final (title, body) in sections) ...[
+                    // Functional section headings -> Inter (DDR-018 rule:
+                    // Fraunces is the brand voice only, not "any heading that
+                    // wants to feel important"). Bespoke size 20 (no role).
                     Text(title,
                         style: const TextStyle(
-                            fontFamily: 'Fraunces',
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
                             color: Pc.text)),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: Pc.s6),
                     Text(body,
                         style: const TextStyle(
                             fontSize: 15, height: 1.4, color: Pc.text)),

@@ -9,6 +9,7 @@ import '../../protocol.dart';
 import '../../session.dart';
 import '../../sfx.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 import '../coach_mark.dart';
 import '../common.dart';
 import 'bid_chip.dart';
@@ -43,10 +44,10 @@ class SidePanel extends StatelessWidget {
             padding: const EdgeInsets.all(10),
             child: Row(children: [
               const Icon(Icons.visibility_outlined, color: Pc.gold, size: 18),
-              const SizedBox(width: 8),
+              const SizedBox(width: Pc.s8),
               Expanded(
                 child: Text(t.spectatingBadge,
-                    style: const TextStyle(fontSize: 12, color: Pc.textMuted)),
+                    style: PcText.label.copyWith(color: Pc.textMuted)),
               ),
               hoverSfx(TextButton(
                   onPressed: s.leaveRoom, child: Text(t.continueLabel))),
@@ -58,7 +59,7 @@ class SidePanel extends StatelessWidget {
         Card(
           color: Pc.surface2,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(Pc.s12),
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -67,13 +68,13 @@ class SidePanel extends StatelessWidget {
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: Pc.gold)),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: Pc.s8),
                   Row(children: [
                     // Spectators cannot replay a game they never sat in
                     // (ADR-0035); they only get the way out.
                     if (!s.spectating) ...[
                       Expanded(child: wideButton(t.playAgain, s.sendPlayAgain)),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: Pc.s8),
                     ],
                     Expanded(
                         child: wideButton(t.continueLabel, s.leaveRoom,
@@ -81,14 +82,13 @@ class SidePanel extends StatelessWidget {
                   ]),
                   if (!s.spectating)
                     Text(t.playAgainHint,
-                        style: const TextStyle(
-                            fontSize: 11, color: Pc.textMuted)),
+                        style: PcText.caption),
                 ]),
           ),
         ),
       Card(
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(Pc.s12),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
@@ -109,7 +109,7 @@ class SidePanel extends StatelessWidget {
                   onPressed: () => copyCode(context, s.code!),
                 )),
             ]),
-            const SizedBox(height: 6),
+            const SizedBox(height: Pc.s6),
             // The seat list is the only part of the side panel the stage drives
             // (chit anchors, the sealed-bid reveal), so it is the only part that
             // repaints on an animation frame. The trade panel and the settings
@@ -117,20 +117,20 @@ class SidePanel extends StatelessWidget {
             ListenableBuilder(
                 listenable: s.stage, builder: (context, _) => _players(t)),
             if (s.view == null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: Pc.s8),
               wideButton(t.startGame,
                   s.seat == 0 && s.seats.length >= 2 ? s.sendStart : null),
               // Host-only bot controls. Bots fill empty seats but yield to
               // humans, so they never block a join (ADR-0014).
               if (s.seat == 0)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.only(top: Pc.s6),
                   child: Row(children: [
                     Expanded(
                         child: wideButton(t.addBot,
                             s.seats.length < 6 ? s.addBot : null,
                             primary: false)),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: Pc.s6),
                     Expanded(
                         child: wideButton(t.removeBot,
                             s.seats.any((x) => x.isBot) ? s.removeBot : null,
@@ -139,14 +139,14 @@ class SidePanel extends StatelessWidget {
                 ),
               if (s.code != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.only(top: Pc.s6),
                   child: wideButton(t.copyCodeToShare, () => copyCode(context, s.code!),
                       primary: false),
                 ),
               if (s.settings != null) SettingsPanel(s: s),
               // Cancel: leave the room (dissolves it for the host) and return
               // to the main menu. Keyboard/controller reachable like any button.
-              const SizedBox(height: 6),
+              const SizedBox(height: Pc.s6),
               wideButton(t.backToMenu, s.leaveRoom, primary: false),
             ],
           ]),
@@ -154,7 +154,7 @@ class SidePanel extends StatelessWidget {
       ),
       Card(
           child: Padding(
-              padding: const EdgeInsets.all(12), child: _trades(context))),
+              padding: const EdgeInsets.all(Pc.s12), child: _trades(context))),
       // Post-game survey: an ordinary side card, never a modal - it must
       // not block anything (no frustration by design).
       // The survey asks players about a game they played; a spectator's
@@ -163,7 +163,7 @@ class SidePanel extends StatelessWidget {
         FeedbackCard(s: s),
       Card(
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(Pc.s12),
           child: hoverSfx(OutlinedButton(
             style: OutlinedButton.styleFrom(
                 foregroundColor: Pc.oxblood),
@@ -255,8 +255,8 @@ class SidePanel extends StatelessWidget {
       ].join(' ');
       rows.add(AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.symmetric(vertical: 2),
-        padding: EdgeInsets.symmetric(horizontal: 6, vertical: isActive ? 5 : 2),
+        margin: const EdgeInsets.symmetric(vertical: Pc.s2),
+        padding: EdgeInsets.symmetric(horizontal: Pc.s6, vertical: isActive ? 5 : 2),
         decoration: BoxDecoration(
           color: isActive
               ? Pc.gold.withValues(alpha: 0.16)
@@ -273,7 +273,7 @@ class SidePanel extends StatelessWidget {
           opacity: p?.bankrupt == true ? 0.4 : 1,
           child: Row(children: [
             SizedBox(
-              width: 16,
+              width: Pc.s16,
               child: isActive
                   ? const Icon(Icons.play_arrow,
                       size: 16, color: Pc.goldDark)
@@ -300,7 +300,7 @@ class SidePanel extends StatelessWidget {
                               fontWeight: FontWeight.bold,
                               color: Pc.text)),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: Pc.s8),
             Expanded(
               child: Text('$name $tags',
                   overflow: TextOverflow.ellipsis,
@@ -324,7 +324,7 @@ class SidePanel extends StatelessWidget {
                 // Net worth decides a timed game (ADR-0010), so surface it then.
                 if (s.gameEndsAt != null)
                   Text(t.sideNetWorth(s.netWorth(i)),
-                      style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+                      style: PcText.caption),
                 // Victory-point race (ADR-0020): "the race IS the game".
                 if ((s.content?.winVictoryPoints ?? 0) > 0)
                   Text(t.sideVictoryPoints(p.victoryPoints, s.content!.winVictoryPoints),
@@ -359,12 +359,12 @@ class SidePanel extends StatelessWidget {
       Text(t.tradesHeader,
           style: const TextStyle(
               fontSize: 12, color: Pc.textMuted, letterSpacing: 1)),
-      const SizedBox(height: 6),
+      const SizedBox(height: Pc.s6),
       if (offers.isEmpty)
         Text(t.tradeNoOffers, style: const TextStyle(color: Pc.textMuted)),
       for (final o in offers)
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: Pc.s4),
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(t.tradeOffer(

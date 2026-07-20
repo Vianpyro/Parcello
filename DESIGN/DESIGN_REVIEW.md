@@ -72,7 +72,11 @@ distilled form of the rules in this bible.
 ### 8. Design debt & regression
 
 - Any hard-coded hex/duration at a use site? (Bug - belongs in
-  tokens.dart / motion.dart.)
+  tokens.dart / motion.dart.) Colours and on-grid spacing are
+  machine-enforced by the **C2 guard** (`test/design_c2_guard_test.dart`,
+  ERROR mode) - a raw `Color(0x..)` or an on-grid `EdgeInsets`/`SizedBox`
+  value fails the test. Durations stay a review-only check (an animation
+  duration belongs in `motion.dart`; a network timeout does not).
 - Did it duplicate an existing component instead of reusing it? Add a
   variant, don't fork.
 - Did it quietly change a bible rule? Then it needs a DDR + the bible

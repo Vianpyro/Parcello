@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import 'back_on_escape.dart';
 import 'sfx.dart';
+import 'tokens.dart';
 
 /// Best-effort default path to the bundled server binary.
 ///
@@ -125,30 +126,30 @@ class _ServerManagerState extends State<ServerManager> {
         child: Scaffold(
       appBar: AppBar(title: const Text('Server Manager')),
       body: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(Pc.s12),
         child: Column(children: [
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(Pc.s12),
               child: Column(children: [
                 TextField(controller: _bin, decoration: const InputDecoration(labelText: 'Server binary path')),
                 TextField(controller: _args, decoration: const InputDecoration(labelText: 'Arguments (space-separated)')),
-                const SizedBox(height: 8),
+                const SizedBox(height: Pc.s8),
                 Row(children: [
                   hoverSfx(ElevatedButton(onPressed: running ? null : _startProcess, child: const Text('Start'))),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: Pc.s8),
                   hoverSfx(ElevatedButton(onPressed: running ? () => _stopProcess(force: false) : null, child: const Text('Stop'))),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: Pc.s8),
                   hoverSfx(ElevatedButton(onPressed: running ? _restartProcess : null, child: const Text('Restart'))),
                 ])
               ]),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: Pc.s8),
           Expanded(
             child: Card(
               child: Padding(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(Pc.s8),
                 child: SingleChildScrollView(
                   reverse: true,
                   child: Text(_logs.join('\n')),

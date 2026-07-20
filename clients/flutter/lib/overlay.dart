@@ -14,6 +14,7 @@ import 'motion.dart';
 import 'reveal.dart';
 import 'stage.dart';
 import 'tokens.dart';
+import 'typography.dart';
 
 class StageOverlay extends StatefulWidget {
   final StageState stage;
@@ -145,7 +146,7 @@ class _ChitView extends StatelessWidget {
             boxShadow: Pc.hairShadow,
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: Pc.s2),
             child: Text(
               chit.text,
               textAlign: TextAlign.center,
@@ -185,7 +186,7 @@ class _ArrestView extends StatelessWidget {
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 // The rule sweeps in from nothing to full width.
                 Container(
-                    height: 2,
+                    height: Pc.s2,
                     width: 420 * t,
                     color: accent),
                 Container(
@@ -203,15 +204,14 @@ class _ArrestView extends StatelessWidget {
                           color: Pc.text),
                     ),
                     if (arrest.detail case final d?) ...[
-                      const SizedBox(height: 6),
+                      const SizedBox(height: Pc.s6),
                       Text(d,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 13, color: Pc.textMuted)),
+                          style: PcText.body.copyWith(color: Pc.textMuted)),
                     ],
                   ]),
                 ),
-                Container(height: 2, width: 420 * t, color: accent),
+                Container(height: Pc.s2, width: 420 * t, color: accent),
               ]),
             ),
           ),

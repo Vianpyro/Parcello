@@ -127,7 +127,7 @@ class BannerFlashState extends State<BannerFlash> {
         duration: Motion.ambient,
         child: Container(
           constraints: const BoxConstraints(maxWidth: 320),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: Pc.s12),
           decoration: BoxDecoration(
             color: paper ? Pc.parchment : Pc.surface,
             borderRadius: Pc.radius,

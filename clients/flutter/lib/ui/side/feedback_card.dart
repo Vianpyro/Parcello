@@ -26,7 +26,7 @@ class FeedbackCardState extends State<FeedbackCard> {
     final t = AppLocalizations.of(context);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(Pc.s12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(
@@ -58,7 +58,7 @@ class FeedbackCardState extends State<FeedbackCard> {
             decoration: InputDecoration(
                 labelText: t.feedbackCommentHint, counterText: ''),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: Pc.s6),
           hoverSfx(FilledButton(
             onPressed: _rating == 0
                 ? null

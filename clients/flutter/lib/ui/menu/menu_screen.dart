@@ -9,6 +9,7 @@ import '../../lan_discovery.dart';
 import '../../server_manager.dart';
 import '../../session.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 import '../language_button.dart';
 import 'geometry.dart';
 import 'menu_tile.dart';
@@ -68,11 +69,7 @@ class _MenuScreenState extends State<MenuScreen> {
     return Scaffold(
       appBar: AppBar(
         // Wordmark in Fraunces (display face, visual-identity.md).
-        title: Text(t.appTitle,
-            style: const TextStyle(
-                fontFamily: 'Fraunces',
-                fontWeight: FontWeight.w700,
-                color: Pc.gold)),
+        title: Text(t.appTitle, style: PcText.wordmark),
         backgroundColor: Pc.surface2,
         actions: [
           LanguageButton(s: s),
@@ -111,8 +108,7 @@ class _MenuScreenState extends State<MenuScreen> {
                 TextButton(
                   onPressed: s.resetHints,
                   child: Text(t.menuReplayTips,
-                      style:
-                          const TextStyle(fontSize: 12, color: Pc.textMuted)),
+                      style: PcText.label.copyWith(color: Pc.textMuted)),
                 ),
               ],
             ),

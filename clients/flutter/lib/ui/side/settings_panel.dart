@@ -7,6 +7,7 @@ import '../../l10n/app_localizations.dart';
 import '../../protocol.dart';
 import '../../session.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 import '../common.dart';
 
 class SettingsPanel extends StatefulWidget {
@@ -137,11 +138,11 @@ class SettingsPanelState extends State<SettingsPanel> {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 8),
+        childrenPadding: const EdgeInsets.only(bottom: Pc.s8),
         title: Text(t.settingsTitle,
             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
         subtitle: Text(_summary(s, t),
-            style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+            style: PcText.caption),
         children: host ? _hostFields(t) : _readOnly(s, t),
       ),
     );
@@ -178,7 +179,7 @@ class SettingsPanelState extends State<SettingsPanel> {
               ),
             ]),
           ),
-        const SizedBox(height: 4),
+        const SizedBox(height: Pc.s4),
         wideButton(t.settingApply, _apply, primary: false),
       ];
 
@@ -245,7 +246,7 @@ class SettingsPanelState extends State<SettingsPanel> {
     return [
       for (final (label, value) in rows)
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: Pc.s2),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [

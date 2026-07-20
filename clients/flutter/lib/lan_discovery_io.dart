@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'back_on_escape.dart';
 import 'session.dart';
 import 'sfx.dart';
+import 'tokens.dart';
 
 /// Simple LAN browser that listens for multicase announcements and shows
 /// discovered Parcello servers. Defaults match the server defaults.
@@ -106,10 +107,10 @@ class _LanBrowserState extends State<LanBrowser> {
         child: Scaffold(
       appBar: AppBar(title: const Text('LAN servers')),
       body: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(Pc.s12),
         child: Column(children: [
           const Text('Detected servers on the local network'),
-          const SizedBox(height: 8),
+          const SizedBox(height: Pc.s8),
           Expanded(
             child: ListView.builder(
               itemCount: list.length,

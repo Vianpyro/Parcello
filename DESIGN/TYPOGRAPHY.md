@@ -16,13 +16,27 @@ The three-voice split is doing register work: brand (rare, ceremonial),
 machine (constant, neutral), world (paper objects). A fourth voice
 needs a DDR and probably doesn't exist.
 
+**The family rule (owner-set 2026-07, load-bearing):** *Fraunces is
+reserved for the BRAND* - the logo, wordmarks, and large emblematic
+titles (the "Parcello" on the connect and menu screens, end-screen
+titles). *Inter is the default face of the ENTIRE interface* - every
+functional string, at every size. Source Serif 4 is only the paper voice
+(tile/property names). Consequences a reviewer enforces: a big title is
+Fraunces ONLY if it is the brand speaking (never merely "a heading that
+wants to feel important"); nothing functional is ever Fraunces; the
+`PcText.wordmark` role is the single Fraunces entry point in code (any
+other inline `fontFamily: 'Fraunces'` is a smell). This is why the
+connect title was moved off inline Inter onto `wordmark` - the wordmark
+must read identically wherever the brand appears.
+
 ## Scale ladder (Inter unless noted)
 
-30 display (connect title, Fraunces on end screens) / 16-18 section
-titles (700) / 14 emphasized row (700) / 13 default body / 12 dense
-body & buttons in panels / 11 captions & hints / 10 whispers
+30 wordmark (the "Parcello" title - Fraunces, the brand) / 16-18 section
+titles (Inter 700) / 14 emphasized row (Inter 700) / 13 default body /
+12 dense body & buttons in panels / 11 captions & hints / 10 whispers
 (`pc-text-faint` pair). Minimum functional size is 10 at 1024x600 -
-nothing interactive may label itself below 11.
+nothing interactive may label itself below 11. Everything except the
+wordmark and paper tile-names is Inter.
 
 ## Numbers (the money rules)
 

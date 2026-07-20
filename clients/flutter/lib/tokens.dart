@@ -48,6 +48,10 @@ abstract final class Pc {
     BoxShadow(color: Color(0x66000000), blurRadius: 2, offset: Offset(0, 1)),
   ];
 
+  /// A faint gold rule for a ceremonial divider on dark (`goldDark` at ~0x33
+  /// alpha). The gold cousin of [border]; scarce, for framing only.
+  static const hairlineGold = Color(0x33A9812F);
+
   // -- Spacing scale ---------------------------------------------------------
   // The 4-px grid the UI already uses (values audited 2026-07: 12/8/6/4/2 are
   // the workhorses, 16/24 the section gaps). Reach for these instead of a raw

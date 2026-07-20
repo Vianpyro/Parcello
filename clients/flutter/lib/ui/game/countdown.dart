@@ -103,7 +103,7 @@ class CountdownState extends State<Countdown> {
         warn ? Pc.oxblood : Pc.text;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(widget.icon, size: 18, color: color),
-      const SizedBox(width: 4),
+      const SizedBox(width: Pc.s4),
       Text(mmss,
           style: TextStyle(
             fontWeight: FontWeight.bold,

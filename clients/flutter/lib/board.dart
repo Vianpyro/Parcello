@@ -140,8 +140,8 @@ class _BoardWidgetState extends State<BoardWidget> {
             width: w * (d - 2),
             height: h * (d - 2),
             child: Container(
-              margin: const EdgeInsets.all(2),
-              padding: const EdgeInsets.all(8),
+              margin: const EdgeInsets.all(Pc.s2),
+              padding: const EdgeInsets.all(Pc.s8),
               // The centre plaza (visual-identity.md), not a white sheet.
               color: Pc.sage,
               child: widget.center,
@@ -179,10 +179,10 @@ class _BoardWidgetState extends State<BoardWidget> {
                 child: _tile(i, cellW: 110, staticPawns: true)),
         ],
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: Pc.s8),
       Expanded(
         child: Container(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(Pc.s8),
           color: Pc.sage,
           child: widget.center,
         ),
@@ -268,7 +268,7 @@ class _BoardWidgetState extends State<BoardWidget> {
                   : hovering
                       ? Border.all(color: Pc.gold, width: 1.5)
                       : focused
-                          ? Border.all(color: Pc.gold, width: 2)
+                          ? Border.all(color: Pc.gold, width: Pc.s2)
                           : null,
               borderRadius: Pc.radius,
             ),
@@ -393,14 +393,14 @@ class _BoardWidgetState extends State<BoardWidget> {
                       ]),
                   if (spotlit)
                     const Positioned(
-                        top: 2,
-                        left: 2,
+                        top: Pc.s2,
+                        left: Pc.s2,
                         child: Icon(Icons.auto_awesome,
                             size: 12, color: Pc.goldDark)),
                   if (owner != null)
                     Positioned(
-                      top: 2,
-                      right: 2,
+                      top: Pc.s2,
+                      right: Pc.s2,
                       child: AnimatedContainer(
                         duration: Motion.bandSweep,
                         curve: Motion.arrive,
@@ -440,8 +440,8 @@ class _BoardWidgetState extends State<BoardWidget> {
       child: Row(children: [
         for (final s in here)
           Container(
-            width: 16,
-            height: 16,
+            width: Pc.s16,
+            height: Pc.s16,
             margin: const EdgeInsets.only(right: 3),
             decoration: BoxDecoration(
               color: pawnColor(s),
@@ -734,7 +734,7 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: p.color,
           shape: BoxShape.circle,
-          border: Border.all(color: Pc.text, width: 2),
+          border: Border.all(color: Pc.text, width: Pc.s2),
           boxShadow: Pc.hairShadow,
         ),
         child: Center(

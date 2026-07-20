@@ -24,8 +24,8 @@ class BidChip extends StatelessWidget {
         child: Opacity(opacity: t, child: child),
       ),
       child: Container(
-        margin: const EdgeInsets.only(right: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        margin: const EdgeInsets.only(right: Pc.s6),
+        padding: const EdgeInsets.symmetric(horizontal: Pc.s6, vertical: 1),
         decoration: BoxDecoration(
           color: won ? Pc.gold : Pc.parchment,
           borderRadius: Pc.radius,

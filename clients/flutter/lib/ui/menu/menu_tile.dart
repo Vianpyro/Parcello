@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 import '../../sfx.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 import 'geometry.dart';
 
 /// One large action card in the main menu. Stateful so it can paint a visible
@@ -67,18 +68,14 @@ class MenuTileState extends State<MenuTile> {
                     child: Text(widget.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: Pc.text)),
+                        style: PcText.tileTitle),
                   ),
                   const SizedBox(height: Pc.s4),
                   Flexible(
                     child: Text(widget.subtitle,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 13, color: Pc.textMuted)),
+                        style: PcText.body.copyWith(color: Pc.textMuted)),
                   ),
                 ],
               ),

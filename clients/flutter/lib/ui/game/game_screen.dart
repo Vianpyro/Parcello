@@ -13,6 +13,7 @@ import '../../board.dart';
 import '../../l10n/app_localizations.dart';
 import '../../overlay.dart';
 import '../../session.dart';
+import '../../tokens.dart';
 import '../side/side_panel.dart';
 import 'center_panel.dart';
 import 'flashes.dart';
@@ -43,7 +44,7 @@ class GameScreen extends StatelessWidget {
           autofocus: true,
           child: Stack(children: [
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(Pc.s12),
               child:
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
@@ -82,7 +83,7 @@ class GameScreen extends StatelessWidget {
                     ),
                   ]),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: Pc.s12),
                 // The panel grows with the room - open trade offers (up to
                 // four per proposer), the post-game survey, the settings
                 // expander - so it has to scroll. Not a small-screen nicety:

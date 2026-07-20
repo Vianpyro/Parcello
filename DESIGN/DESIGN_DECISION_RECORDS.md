@@ -68,6 +68,7 @@ the cited bible section / doc; this is the index.
 | DDR-015 | Speed stays the default; accessibility answered by configurability (untimed rooms) not slower defaults | ACCESSIBILITY | with a "relaxed" preset |
 | **DDR-016** | Design system in-tree (`lib/design/`) FOR NOW; package extraction DEFERRED not refused, gated on explicit criteria (2nd consumer / replay viewer / companion app / DS stabilization / boundary not holding) - owner-accepted 2026-07 | [ddr/0016](ddr/0016-design-system-in-tree-not-package.md) | when an extraction criterion fires (else 12-mo backstop) |
 | **DDR-017** | The board stays flat for now; isometric deferred to its own future chantier (owner-decided 2026-07) | [ddr/0017](ddr/0017-board-stays-flat-for-now.md) | when isometric is proposed |
+| **DDR-018** | Typography roles carry size+weight+family + a DEFAULT colour (overridable); some omit size to inherit it - the Phase 2 taxonomy | [ddr/0018](ddr/0018-typography-roles-carry-default-colour.md) | at high typography coverage, or if the default-colour ergonomics prove wrong |
 
 ## Stability tiers (which decisions are load-bearing identity)
 

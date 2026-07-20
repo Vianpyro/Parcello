@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../../session.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 import 'actions_panel.dart';
 import 'countdown.dart';
 import 'event_log.dart';
@@ -29,7 +30,7 @@ class CenterPanel extends StatelessWidget {
         border: Border.all(color: Pc.goldDark, width: 1.5),
       ),
       child: DefaultTextStyle(
-        style: const TextStyle(color: Pc.text, fontSize: 13),
+        style: PcText.body,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             // The wordmark yields first when the board's centre gets tight:
@@ -49,18 +50,18 @@ class CenterPanel extends StatelessWidget {
             // part of the result (a bankruptcy win keeps time on the clock).
             if (s.gameEndsAt != null) ...[
               Countdown(endsAt: s.gameEndsAt!),
-              const SizedBox(width: 8),
+              const SizedBox(width: Pc.s8),
             ],
             MotionButton(s: s),
             const MuteButton(),
           ]),
-        const SizedBox(height: 4),
+        const SizedBox(height: Pc.s4),
         Row(children: [
           Expanded(
               child: Text(_status(t),
                   style: const TextStyle(fontWeight: FontWeight.w600))),
           if (s.turnEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: Pc.s6),
             Countdown(
                 endsAt: s.turnEndsAt!,
                 icon: Icons.hourglass_bottom,
@@ -74,7 +75,7 @@ class CenterPanel extends StatelessWidget {
           // plain turn window, then counts down to the hard stop. Never
           // refilled.
           if (s.bankEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: Pc.s6),
             Countdown(
                 endsAt: s.bankEndsAt!,
                 holdUntil: s.turnEndsAt,
@@ -87,7 +88,7 @@ class CenterPanel extends StatelessWidget {
           // closes, and its clock waits for the whole table's acks
           // (ADR-0028).
           if (s.bidEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: Pc.s6),
             Countdown(
                 endsAt: s.bidEndsAt!,
                 icon: Icons.gavel,
@@ -96,7 +97,7 @@ class CenterPanel extends StatelessWidget {
           ],
           // Corruption bribe vote window (ADR-0024): same pattern.
           if (s.voteEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: 6),
+            const SizedBox(width: Pc.s6),
             Countdown(
                 endsAt: s.voteEndsAt!,
                 icon: Icons.how_to_vote,
@@ -105,27 +106,27 @@ class CenterPanel extends StatelessWidget {
           ],
         ]),
           if (_poolsLine(t) != null) ...[
-            const SizedBox(height: 2),
+            const SizedBox(height: Pc.s2),
             Text(_poolsLine(t)!,
-                style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+                style: PcText.caption),
           ],
           if (_forecastLine(t) != null) ...[
-            const SizedBox(height: 2),
+            const SizedBox(height: Pc.s2),
             Text(_forecastLine(t)!,
-                style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+                style: PcText.caption),
           ],
           if (_spotlightLine(t) != null) ...[
-            const SizedBox(height: 2),
+            const SizedBox(height: Pc.s2),
             Text(_spotlightLine(t)!,
-                style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+                style: PcText.caption),
           ],
           if (_vpLegend(t) != null) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: Pc.s6),
             _vpLegend(t)!,
           ],
-          const SizedBox(height: 6),
+          const SizedBox(height: Pc.s6),
           ActionsPanel(s: s),
-          const SizedBox(height: 6),
+          const SizedBox(height: Pc.s6),
           Expanded(child: EventLog(log: s.log)),
         ]),
       ),
@@ -145,7 +146,7 @@ class CenterPanel extends StatelessWidget {
       ('+2', t.vpLegendRoundBonus),
     ];
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(Pc.s8),
       decoration: BoxDecoration(
         color: Pc.gold.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(4),
@@ -164,7 +165,7 @@ class CenterPanel extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 1),
             child: Row(children: [
               SizedBox(
-                width: 24,
+                width: Pc.s24,
                 child: Text(pts,
                     style: const TextStyle(
                         fontSize: 12,
@@ -173,7 +174,7 @@ class CenterPanel extends StatelessWidget {
               ),
               Expanded(
                 child: Text(what,
-                    style: const TextStyle(fontSize: 11, color: Pc.textMuted)),
+                    style: PcText.caption),
               ),
             ]),
           ),
@@ -206,8 +207,8 @@ class CenterPanel extends StatelessWidget {
       if (v.players[i].cash > v.players[leader].cash) leader = i;
     }
     return [
-      const SizedBox(height: 6),
-      const Divider(height: 1, color: Color(0x33A9812F)),
+      const SizedBox(height: Pc.s6),
+      const Divider(height: 1, color: Pc.hairlineGold),
       const SizedBox(height: 5),
       Row(children: [
         Text(t.roundLabel(round + 1),
@@ -216,7 +217,7 @@ class CenterPanel extends StatelessWidget {
                 fontWeight: FontWeight.bold,
                 color: Pc.goldDark,
                 letterSpacing: 1)),
-        const SizedBox(width: 8),
+        const SizedBox(width: Pc.s8),
         // One pip per surviving player: filled once they have cycled their
         // hand for this round. All filled = the bonus fires.
         for (final i in alive)
@@ -233,20 +234,20 @@ class CenterPanel extends StatelessWidget {
                   color: pawnColor(i), width: 1.5),
             ),
           ),
-        const SizedBox(width: 4),
+        const SizedBox(width: Pc.s4),
         // The pips already say who the table waits on; the count is the part
         // that can be clipped when the centre is tight.
         Flexible(
           child: Text(t.roundHandsCycled(done.length, alive.length),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10, color: Pc.textFaint)),
+              style: PcText.whisper),
         ),
       ]),
-      const SizedBox(height: 2),
+      const SizedBox(height: Pc.s2),
       Text(
         t.roundBonusHint(s.playerName(leader)),
-        style: const TextStyle(fontSize: 10, color: Pc.textMuted),
+        style: PcText.whisper.copyWith(color: Pc.textMuted),
       ),
     ];
   }

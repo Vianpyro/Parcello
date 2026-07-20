@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../../session.dart';
 import '../../sfx.dart';
+import '../../tokens.dart';
 
 class TradeDialog extends StatefulWidget {
   final GameSession s;
@@ -93,7 +94,7 @@ class _TradeDialogState extends State<TradeDialog> {
             cashField(_giveCash),
             tileList(s.seat, _giveTiles),
           ]),
-          const SizedBox(width: 12),
+          const SizedBox(width: Pc.s12),
           Column(children: [
             Text(t.tradeYouWant),
             cashField(_receiveCash),

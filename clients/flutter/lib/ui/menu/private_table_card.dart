@@ -7,6 +7,7 @@ import '../../motion.dart';
 import '../../session.dart';
 import '../../sfx.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 import '../common.dart';
 import 'geometry.dart';
 
@@ -73,7 +74,7 @@ class PrivateTableCardState extends State<PrivateTableCard> {
     );
   }
 
-  Widget _hairline() => Container(width: 1, height: 24, color: Pc.border);
+  Widget _hairline() => Container(width: 1, height: Pc.s24, color: Pc.border);
 
   /// One selectable mod chip; picked chips show their play position, tapping
   /// again removes them (mirrors `_routeChip` on the board).
@@ -103,14 +104,14 @@ class PrivateTableCardState extends State<PrivateTableCard> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (mods == null)
         Text(t.modsLoading,
-            style: const TextStyle(fontSize: 12, color: Pc.textMuted))
+            style: PcText.label.copyWith(color: Pc.textMuted))
       else if (mods.isEmpty)
         Text(t.modsUnavailable,
-            style: const TextStyle(fontSize: 12, color: Pc.textMuted))
+            style: PcText.label.copyWith(color: Pc.textMuted))
       else ...[
         Text(t.modsOrderHint,
-            style: const TextStyle(fontSize: 11, color: Pc.textFaint)),
-        const SizedBox(height: 6),
+            style: PcText.caption.copyWith(color: Pc.textFaint)),
+        const SizedBox(height: Pc.s6),
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (final id in mods) _modChip(id),
         ]),
@@ -135,7 +136,7 @@ class PrivateTableCardState extends State<PrivateTableCard> {
               labelText: t.roomCode, counterText: '', isDense: true),
         ),
       ),
-      const SizedBox(width: 8),
+      const SizedBox(width: Pc.s8),
       hoverSfx(FilledButton(onPressed: _join, child: Text(t.join))),
     ]);
   }
@@ -160,25 +161,21 @@ class PrivateTableCardState extends State<PrivateTableCard> {
                 child: Column(children: [
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(Pc.s16),
                       child: Row(children: [
                         const Icon(Icons.casino_outlined,
                             size: 40, color: Pc.gold),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: Pc.s12),
                         Expanded(
                           child: Column(
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(t.menuPrivateTitle,
-                                    style: const TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w700,
-                                        color: Pc.text)),
-                                const SizedBox(height: 4),
+                                    style: PcText.tileTitle),
+                                const SizedBox(height: Pc.s4),
                                 Text(t.menuPrivateSubtitle,
-                                    style: const TextStyle(
-                                        fontSize: 13, color: Pc.textMuted)),
+                                    style: PcText.body.copyWith(color: Pc.textMuted)),
                               ]),
                         ),
                       ]),
