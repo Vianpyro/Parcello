@@ -547,6 +547,21 @@ deck rotation once drawn.
   `set game 45`, `set turn off`, `set bank 60`, `set expropriation 0`,
   `set subsidiary_pool 6`).
 
+## Documentation
+
+For contributors (human or AI), in reading order: `CLAUDE.md` (the
+index and hard constraints), `docs/INVARIANTS.md` (what must never
+change, with enforcement locations), `docs/AI_ENGINEERING.md` (how to
+work here), `docs/extension-guides.md` (recipes for common changes).
+Reference: `docs/architecture.typ` (the design document, read as
+amended by `docs/adr/`), `docs/domain-model.md`,
+`docs/security-model.md`, `docs/testing.md`, `docs/performance.md`,
+`docs/technical-debt.md`, `docs/roadmap-and-product.md`,
+`docs/LLM_CONTEXT/` (short per-subsystem summaries), and
+`docs/LEGACY.md` (the project's spirit and open questions). Game
+design: `docs/business-tour-direction.md`, `docs/motion-language.md`,
+`docs/visual-identity.md`; operations: `docs/deployment.md`.
+
 ## Deviations from the architecture doc
 
 See `docs/adr/`: 0001 `apply` returns `Result`; 0002 PRNG seed inside

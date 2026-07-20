@@ -43,6 +43,24 @@ Authoritative documents, in order of precedence:
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
+Companion documentation (derived from the three above - they never
+override them; added 2026-07 as the maintainer handbook):
+- `docs/INVARIANTS.md` - the canonical must-always/must-never catalogue
+  with per-entry enforcement locations. Audit any plan against it FIRST.
+- `docs/AI_ENGINEERING.md` - how to work here: reading order, decision
+  process, ADR how-to, review methodology, repo-specific pitfalls.
+- `docs/extension-guides.md` - step-by-step recipes (new command, event,
+  rule, message, timer, flag, mod, port...) with review checklists.
+- `docs/domain-model.md` - every game concept -> type, invariants,
+  lifecycle, owning ADR; plus the deliberate-simplification list.
+- `docs/security-model.md`, `docs/testing.md`, `docs/performance.md` -
+  threat model, test philosophy/map, and the anti-optimization list.
+- `docs/technical-debt.md` - the known-debt register (delete entries as
+  they are repaid); `docs/roadmap-and-product.md` - phased product path.
+- `docs/LLM_CONTEXT/` - self-contained per-subsystem summaries for
+  partial-context readers; update in the same change as their sources.
+- `docs/LEGACY.md` - the project's spirit, lessons, and open questions.
+
 ## Hard constraints (do not break)
 
 - **MSRV is Rust 1.96** (`rust-version` in the workspace; tracks recent

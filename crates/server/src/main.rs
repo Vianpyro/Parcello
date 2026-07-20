@@ -82,7 +82,7 @@ struct Args {
     history: Option<PathBuf>,
 
     /// Default per-turn limit for new rooms (seconds): auto-play the
-    /// canonical action (roll/decline/pass/end turn) for the acting player
+    /// canonical action (movement card / Legal Route / end turn) for the acting player
     /// after this long without progress, unless their personal time bank
     /// covers the overage (ADR-0023). 0 disables. The host can change it per
     /// room in the lobby (ADR-0015).
