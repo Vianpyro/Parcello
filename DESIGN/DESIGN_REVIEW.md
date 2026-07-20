@@ -81,6 +81,12 @@ distilled form of the rules in this bible.
   variant, don't fork.
 - Did it quietly change a bible rule? Then it needs a DDR + the bible
   update in the SAME change.
+- **Design-system public API (DDR-0019)**: does the diff rename, remove,
+  change the signature of, or shift the SEMANTICS of a `lib/design`
+  export (`Pc`/`PcText`/`Motion`/a component or its props)? That needs a
+  DDR or an in-diff justification - call sites across `lib/ui/` depend on
+  it. A pure ADDITION (a new token/role/component) is free; design it to
+  last. Re-tuning a value (a hex, a duration) is not an interface change.
 - Screenshot the before/after at 1280x800 AND 1024x600; a pumped
   overflow or a shifted seat marker (chits would miss) is a regression.
 

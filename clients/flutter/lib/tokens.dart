@@ -6,6 +6,12 @@
 ///
 /// Home of the in-tree design system (DDR-0016: `lib/design/` is the target
 /// folder, realized incrementally; this file is its `tokens` today).
+///
+/// PUBLIC API - STABILITY CONTRACT (DDR-0019): everything exported here (`Pc`,
+/// `groupColors`, `pawnColors`, `pawnColor`) is consumed app-wide. Add freely
+/// (design new tokens to last); renaming, removing, or changing the meaning
+/// of an existing member needs a DDR or an in-diff justification. Values may
+/// be re-tuned; the interface is a contract.
 library;
 
 import 'package:flutter/material.dart';

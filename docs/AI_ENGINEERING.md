@@ -146,6 +146,13 @@ justified workspace-list entry.
   Rust variants - free from serde, never hand-written.
 - Derived docs (LLM_CONTEXT, INVARIANTS) update IN THE SAME CHANGE as
   their sources, or the change is incomplete (X3).
+- Client (Flutter) design changes follow the Design Bible (`DESIGN/`) and
+  its review (`DESIGN/DESIGN_REVIEW.md`); the design system's public API
+  (`lib/tokens.dart` `Pc`, `lib/typography.dart` `PcText`, `lib/motion.dart`
+  `Motion`) is a stability contract (DDR-0019) - add freely, but a
+  rename/removal/semantic change needs a DDR. Colours, on-grid spacing, and
+  the Fraunces brand font are machine-enforced by the C2 guard
+  (`clients/flutter/test/design_c2_guard_test.dart`).
 - When you learn something non-obvious the hard way, the lesson goes in
   this file's pitfalls list or technical-debt.md - immediately, in the
   same change.

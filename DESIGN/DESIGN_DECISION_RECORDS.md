@@ -69,6 +69,7 @@ the cited bible section / doc; this is the index.
 | **DDR-016** | Design system in-tree (`lib/design/`) FOR NOW; package extraction DEFERRED not refused, gated on explicit criteria (2nd consumer / replay viewer / companion app / DS stabilization / boundary not holding) - owner-accepted 2026-07 | [ddr/0016](ddr/0016-design-system-in-tree-not-package.md) | when an extraction criterion fires (else 12-mo backstop) |
 | **DDR-017** | The board stays flat for now; isometric deferred to its own future chantier (owner-decided 2026-07) | [ddr/0017](ddr/0017-board-stays-flat-for-now.md) | when isometric is proposed |
 | **DDR-018** | Typography roles carry size+weight+family + a DEFAULT colour (overridable); some omit size to inherit it - the Phase 2 taxonomy | [ddr/0018](ddr/0018-typography-roles-carry-default-colour.md) | at high typography coverage, or if the default-colour ergonomics prove wrong |
+| **DDR-019** | The design system's PUBLIC API (`Pc`/`PcText`/`Motion`/components) is a stability contract: internals free, additions free, but renames/removals/semantic changes need a DDR or in-diff justification (owner-set 2026-07) | [ddr/0019](ddr/0019-design-system-public-api-is-a-stability-contract.md) | on package extraction (DDR-0016), when a real semver policy replaces it |
 
 ## Stability tiers (which decisions are load-bearing identity)
 

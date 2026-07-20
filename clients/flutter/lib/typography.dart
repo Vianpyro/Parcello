@@ -14,6 +14,11 @@
 /// folder, realized incrementally; this file is its `typography` today).
 /// The role set GROWS as migration proceeds - add a role when a real
 /// recurring combo appears, never speculatively.
+///
+/// PUBLIC API - STABILITY CONTRACT (DDR-0019): `PcText` is consumed app-wide.
+/// Adding a role is free (design it to last); renaming/removing one or
+/// changing its size/weight/family/default-colour semantics needs a DDR or
+/// an in-diff justification, because it silently restyles every call site.
 library;
 
 import 'package:flutter/material.dart';

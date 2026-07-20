@@ -6,6 +6,12 @@
 /// director re-computed by hand what the pawn layer was doing, and its own
 /// comment admitted it - so the two could silently drift. Both now read the
 /// same constants.
+///
+/// PUBLIC API - STABILITY CONTRACT (DDR-0019): `Motion`, `Tier`, `Lane`,
+/// `MotionProfile` are consumed app-wide (and their contract is bound to the
+/// server's `ANIM_ACK_CAP` via ADR-0030). Values may be re-tuned; renaming or
+/// removing a member, or changing a tier's meaning, needs a DDR - here it is
+/// doubly so, because the budget is a cross-layer contract.
 library;
 
 import 'package:flutter/animation.dart';
