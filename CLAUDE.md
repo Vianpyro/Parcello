@@ -597,15 +597,20 @@ section, is complete - `mods/classic` was removed at step 6.
    palette, FR+EN via gen-l10n, ranked menu greyed until a matchmaking
    service exists); the motion language and game feel in
    `docs/motion-language.md` + ADR-0030. The palette and the motion
-   architecture landed 2026-07; its section 13 is the authoritative list
-   of what is still missing. In priority order, the known gaps are:
-   **anchoring the sealed-bid input to the lifted tile** (the window clock
-   as a hairline draining on the tile's own edge, not a number in a
-   corner - the biggest remaining spec/build gap), trade animations, the
-   AFK auto-play marker (the server plays your turn and nothing tells
-   you), bundling the three OFL fonts, then gen-l10n, then the audio pass
-   (the clip set is placeholder; `assets/sfx/README.md` lists the four
-   category earcons that are still silent).
+   architecture landed 2026-07. `DESIGN/IMPLEMENTATION_ROADMAP.md` is now
+   the maintained, re-audited list of what is built vs not (it supersedes
+   motion-language section 13's honesty list, which drifted - fonts, the
+   discoverer rebate chit, and rent-to-the-earner are all built, contrary
+   to older revisions). In rough priority order the remaining client gaps
+   are: **anchoring the sealed-bid input to the lifted tile** (the tile
+   already lifts/recedes; the gap is the INPUT and the window clock as a
+   hairline draining on the tile's own edge, not a corner number - the
+   biggest remaining spec/build gap), trade animations, the AFK auto-play
+   marker (the server plays your turn and nothing tells you), the
+   time-bank alarm / bot-thinking pulse / reconnect re-orientation, then
+   the audio pass (the clip set is placeholder; `assets/sfx/README.md`
+   lists the four category earcons that are still silent). gen-l10n and
+   the three OFL fonts are DONE.
 2. Identity: verifier DONE (`eddsa.rs`, ADR-0009); OIDC login flow DONE in
    the Flutter client (`oidc.dart`: PKCE + system browser + loopback; web
    and CLI paste the token manually). Remaining: run the deploy on the

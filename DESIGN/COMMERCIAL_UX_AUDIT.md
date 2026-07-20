@@ -23,9 +23,8 @@ effect on a real player's session.
 | Gap | Impact | Notes |
 |---|---|---|
 | Real multi-human playtest, then tune | Everything downstream is a bet until this happens | Owns the whole roadmap; the UI decisions here await its verdict (roadmap-and-product) |
-| Sealed-bid input not anchored to the tile; clock still a corner number | The GAME'S CORE LOOP lacks its designed moment; auctions feel like a form, not a decision | motion-language 8.2 + 13; DESIGN_SYSTEM auction widget. #1 authored gap |
+| Sealed-bid input not anchored to the tile; clock still a corner number | The GAME'S CORE LOOP lacks its designed moment; auctions feel like a form, not a decision | motion-language 8.2 + 13; DESIGN_SYSTEM auction widget. #1 authored gap. (Note: the tile-lift/recede half IS built - the gap is the input + clock) |
 | Web OIDC sign-in never verified against a real IdP | On guest-off servers this is the ONLY way in; if it's broken, the door doesn't open | technical-debt D2 |
-| Fonts not bundled (renders in Material default) | The typographic identity - a third of the brand - isn't on screen yet | TYPOGRAPHY; visual-identity.md; motion-language 13 |
 
 ## High
 
@@ -33,7 +32,6 @@ effect on a real player's session.
 |---|---|---|
 | Audio: 4 earcons silent, dice stand-in on card play | The game is half-mute; sound is huge feel-per-effort | AUDIO_DIRECTION; sfx README; motion-language 14 |
 | AFK auto-played marker missing | "The server played my turn and nothing told me" - a trust break | motion-language 8.4; a persistent marker, not a toast |
-| Rent invisible to the EARNER (only payer's loss floats) | The core income moment isn't felt by the person earning it | The money-travels chit rule fixes it; motion-language 4.2 |
 | Ranked UI (queue screen, MMR on player card) | Ranked exists but is CLI-only; no felt progression | roadmap Beta; PLAYER_EXPERIENCE rank |
 | Match history surfaced to players | No sense of a journey between sessions | Data exists in `--history`; needs a read path (ADR-0005) |
 | Trade animations (still log-only) | Negotiation - a social pillar - has no felt moment | motion-language 13 |

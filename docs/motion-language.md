@@ -818,10 +818,14 @@ bankruptcy, and all five win conditions.
 - The AFK auto-play marker, the hand-refill beat, the bot-thinking pulse and
   the time-bank P2 alarm (section 8.4) are not implemented.
 - Reconnect snaps to truth (the correct half) but does not re-orient
-  (section 9).
-- Fonts are not bundled: Fraunces / Inter / Source Serif 4 are specified in
-  `visual-identity.md` and the client still renders in Material's default.
+  (`Motion.reorient` is defined but unused, section 9).
 - The board is still flat, not isometric.
+
+(Corrected 2026-07: the fonts ARE now bundled and wired - Fraunces / Inter /
+Source Serif 4 under `assets/fonts/`, `fontFamily: 'Inter'` in the theme, the
+other two applied at their use sites. An earlier revision of this list wrongly
+carried them as not built; see `DESIGN/IMPLEMENTATION_ROADMAP.md`, which
+re-audited the built/not-built state and is the maintained source for it.)
 
 ## 14. Future work
 

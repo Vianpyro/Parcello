@@ -56,7 +56,7 @@ the cited bible section / doc; this is the index.
 | DDR-003 | Three type voices (Fraunces/Inter/Source Serif 4), bundled offline | TYPOGRAPHY; visual-identity.md | stable |
 | DDR-004 | No third valence colour (no amber warning) | COLOR_SYSTEM law #1 | stable |
 | DDR-005 | No bounce/spring anywhere; threat is the only asymmetric curve | motion-language 4.4 | stable (identity) |
-| DDR-006 | Tabler + in-house glyphs, NOT mascot illustration | ICONOGRAPHY | on first styled screen |
+| DDR-006 | Tabler + in-house glyphs, NOT mascot illustration (owner-confirmed 2026-07) | ICONOGRAPHY | on first styled screen |
 | DDR-007 | Money travels as a chit; never a ticking delta | motion-language 4.2; GAME_FEEL | stable (identity) |
 | DDR-008 | Gold-in-motion is reserved for victory points | motion-language 4.3; COLOR_SYSTEM law #2 | stable (identity) |
 | DDR-009 | Fixed camera, always; attention via staging not motion | motion-language 2 | stable (identity) |
@@ -64,8 +64,10 @@ the cited bible section / doc; this is the index.
 | DDR-011 | Coach marks in the side panel, not floating over the board | DESIGN_SYSTEM; INVARIANTS C5 | stable |
 | DDR-012 | Per-server rank framing in UI (no global-league promise) | PLAYER_EXPERIENCE; ADR-0034 | if global ladder lands |
 | DDR-013 | No chat / no shop / no XP-passes (recorded non-goals) | DESIGN_PHILOSOPHY non-goals | requires reversal DDR+ADR |
-| DDR-014 | Four audio-earcon categories; silence as default; no in-game music | AUDIO_DIRECTION | on audio pass (confirm) |
+| DDR-014 | Four audio-earcon categories; silence as default; no in-game music; audio pass DEFERRED until the events exist (owner-confirmed 2026-07) | AUDIO_DIRECTION | on audio pass (confirm sound identity) |
 | DDR-015 | Speed stays the default; accessibility answered by configurability (untimed rooms) not slower defaults | ACCESSIBILITY | with a "relaxed" preset |
+| **DDR-016** | Design system in-tree (`lib/design/`) FOR NOW; package extraction DEFERRED not refused, gated on explicit criteria (2nd consumer / replay viewer / companion app / DS stabilization / boundary not holding) - owner-accepted 2026-07 | [ddr/0016](ddr/0016-design-system-in-tree-not-package.md) | when an extraction criterion fires (else 12-mo backstop) |
+| **DDR-017** | The board stays flat for now; isometric deferred to its own future chantier (owner-decided 2026-07) | [ddr/0017](ddr/0017-board-stays-flat-for-now.md) | when isometric is proposed |
 
 ## Stability tiers (which decisions are load-bearing identity)
 

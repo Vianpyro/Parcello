@@ -47,9 +47,10 @@ canon wins and DESIGN/ has a bug - fix it via a DDR
 | SCREEN_ARCHITECTURE.md | per-screen rules (not layouts) |
 | UX_GUIDELINES.md | cognitive load, feedback, inputs, empty/error states |
 | ACCESSIBILITY.md | the non-negotiables |
-| DESIGN_DECISION_RECORDS.md | the DDR process + the seed record index |
+| DESIGN_DECISION_RECORDS.md | the DDR process + the record index; full records in `ddr/` |
 | DESIGN_REVIEW.md | how to review any UI change |
-| COMMERCIAL_UX_AUDIT.md | what is missing, prioritized |
+| IMPLEMENTATION_ROADMAP.md | the Flutter BUILD ORDER (foundations->components->screens->polish) + the maintained built-vs-not-built truth |
+| COMMERCIAL_UX_AUDIT.md | what is missing, prioritized by player impact |
 | SELF_CRITIQUE.md | where this bible is weak; what may evolve vs must not |
 
 ## How to use it
