@@ -271,7 +271,19 @@ validation / rollback**. Statuses: NOT STARTED unless noted.
   spectate (and the future ranked-queue screen) to the components; apply
   SCREEN_ARCHITECTURE rules (one primary action, fixed positions, no
   reflow on state change).
-- **Depends on**: Phases 5-6.
+- **Started**: **Connect Screen is the reference implementation, now fully
+  DS-native** - PcButton + PcCard + PcTextField + PcDialog + tokens, no legacy
+  widget left (flat card, disabled-with-reason, variant switch, hairline
+  inputs, raised sign-in dialog). The migration doubled as a DS validation
+  pass and **drove the build order**: its two findings (inputs, dialogs)
+  promoted PcTextField/PcDialog ahead of the decorative primitives, both then
+  built and validated back on Connect. Findings + classification in
+  `DESIGN/DESIGN_FEEDBACK.md` (the durable log of what each migration taught
+  us). Rule enforced: **no component is finished until a real screen uses
+  it** - Connect satisfies it for PcButton, PcCard, PcTextField, PcDialog.
+- **Depends on**: Phases 5-6 (but a screen may migrate against whatever
+  components exist - Connect proved this, and surfaced the next-needed
+  components by trying).
 - **Risk**: MED (per-screen; incremental).
 - **Validation**: `layout_test` at three sizes WITH localized strings
   (the longer of EN/FR); DESIGN_REVIEW per screen; screenshot diffs.
@@ -370,9 +382,9 @@ never as the first Flutter chantier.
 | 2 Typography | IN PROGRESS (role-mappable done) | `lib/typography.dart` (`PcText` roles, DDR-0018). ~27 sites migrated to roles value-preservingly (caption x11, whisper, label, body, tileTitle, wordmark). The **family rule** (DDR-0018/TYPOGRAPHY.md, owner-set): Fraunces = brand only, Inter = default UI. Applied: connect title -> `wordmark` (Fraunces, was inline Inter); rules-page section headings Fraunces -> Inter (flagged - revert if they were meant as "emblematic"). **C2 guard extended** to enforce inline `fontFamily: 'Fraunces'` (must be `PcText.wordmark`), verified live. The remaining ~46 inline `TextStyle`s are NOT role-mappable value-preservingly: (a) size-only styles that INHERIT their colour - deferred until the theme's default text colour is made explicit `Pc.text` (a separate reviewed change), which then unblocks the **`fontSize` C2 guard**; (b) genuine bespoke (letterSpacing headers, italic, computed sizes `size*0.5`/`nameSize`, conditional colours, off-role sizes 15/20/26, tabular amounts - already correct). |
 | 3 Theme | NOT STARTED | base ThemeData exists |
 | 4 Anim primitives | PARTIAL | engine done; marker/pulse/re-orient missing |
-| 5 Core widgets | IN PROGRESS | inventory + dependency order in DESIGN/COMPONENT_INVENTORY.md; **Design Showcase** (`lib/ui/showcase/`, debug-only) now covering per-section a11y edge cases (text zoom, narrow width) + a keyboard/focus section + a running a11y-coverage note. Landed, API frozen (DDR-0019), demoed + tested: **PcButton**, **PcCard** (flat). Next in order: PcHairline, PcChip, PcBadge, PcTextField. Adoption (`wideButton`->`PcButton`, `Card`->`PcCard`) is incremental; the `Card`->`PcCard` swap is also a flat correction (drops the stray Material shadow) |
+| 5 Core widgets | IN PROGRESS | inventory + dependency order in DESIGN/COMPONENT_INVENTORY.md; **Design Showcase** (`lib/ui/showcase/`, debug-only) covering per-section a11y edge cases (text zoom, narrow width) + a keyboard/focus section + a running a11y-coverage note. Landed, API frozen (DDR-0019), demoed + tested: **PcButton**, **PcCard** (flat), **PcTextField** (hairline underline, gold focus), **PcDialog** (raised confirm/prompt). **Build order revised** (COMPONENT_INVENTORY + DESIGN_FEEDBACK #1): the Connect migration promoted PcTextField/PcDialog ahead of the decorative trio (PcHairline/PcChip/PcBadge, now deferred) - a real screen needs inputs and dialogs, not rules and pills. Adoption is incremental; `Card`->`PcCard` is also a flat correction (drops the stray Material shadow). |
 | 6 Composite (incl. AuctionWidget) | NOT STARTED | highest risk; auction anchor is #1 gap |
-| 7 Screens | FUNCTIONAL, UNSTYLED-TO-SYSTEM | exist; consume ad-hoc widgets today |
+| 7 Screens | STARTED (Connect fully migrated - the reference) | **Connect Screen is fully DS-native** (PcButton + PcCard + PcTextField + PcDialog + tokens; no legacy widget left) and is the reference implementation. The migration doubled as the DS validation pass (DESIGN_FEEDBACK.md). Remaining screens (menu, lobby, game, finished, rules, spectate) still consume ad-hoc widgets. |
 | 8 Polish + audio | NOT STARTED | AFK marker, trade/bribe, alarms, earcons |
 | 9 Accessibility | NOT STARTED | Semantics is the big one |
 | 10 Optimization | DEFERRED | only on a measurement |

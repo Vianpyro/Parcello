@@ -13,6 +13,8 @@ import 'package:flutter/material.dart';
 
 import '../../design/components/pc_button.dart';
 import '../../design/components/pc_card.dart';
+import '../../design/components/pc_dialog.dart';
+import '../../design/components/pc_textfield.dart';
 import '../../tokens.dart';
 import '../../typography.dart';
 
@@ -31,6 +33,8 @@ class ShowcaseScreen extends StatelessWidget {
         children: const [
           _ButtonsSection(),
           _CardsSection(),
+          _TextFieldsSection(),
+          _DialogsSection(),
           _KeyboardSection(),
           _A11yNote(),
           // Future component sections append here, in inventory order.
@@ -134,6 +138,97 @@ class _CardsSection extends StatelessWidget {
           _TextScaled(
               1.5,
               PcCard(child: Text('Scales with text', style: PcText.body)))),
+    ]);
+  }
+}
+
+/// PcTextField: the DS single-line input in its real states (empty with hint,
+/// filled, length-capped with a counter) plus the standing edge cases (narrow
+/// width, high text zoom). Stateful only because inputs need live controllers.
+class _TextFieldsSection extends StatefulWidget {
+  const _TextFieldsSection();
+
+  @override
+  State<_TextFieldsSection> createState() => _TextFieldsSectionState();
+}
+
+class _TextFieldsSectionState extends State<_TextFieldsSection> {
+  final _empty = TextEditingController();
+  final _filled = TextEditingController(text: 'ws://127.0.0.1:7878/ws');
+  final _capped = TextEditingController(text: 'alice');
+  final _narrow = TextEditingController();
+  final _zoom = TextEditingController(text: 'scales');
+
+  @override
+  void dispose() {
+    for (final c in [_empty, _filled, _capped, _narrow, _zoom]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _Section('PcTextField', [
+      _Demo('empty + hint',
+          PcTextField(controller: _empty, label: 'Server URL', hint: 'ws://...')),
+      _Demo('filled', PcTextField(controller: _filled, label: 'Server URL')),
+      _Demo('length-capped (counter)',
+          PcTextField(controller: _capped, label: 'Display name', maxLength: 24)),
+      // Edge case: narrow width - label and text must ellipsize, not overflow.
+      _Demo(
+          'narrow (120px)',
+          SizedBox(
+              width: 120,
+              child: PcTextField(controller: _narrow, label: 'Cash'))),
+      // Accessibility: high text zoom - the field grows with its content.
+      _Demo(
+          'text zoom 1.5x',
+          _TextScaled(
+              1.5, PcTextField(controller: _zoom, label: 'Display name'))),
+    ]);
+  }
+}
+
+/// PcDialog: modal confirm/prompt, opened from a trigger button (it can only
+/// be shown, not embedded). Both shapes: a two-action prompt (title + field +
+/// cancel/confirm) and a single-action confirm (no cancel).
+class _DialogsSection extends StatelessWidget {
+  const _DialogsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return _Section('PcDialog', [
+      _Demo(
+        'prompt (title + field + cancel/confirm)',
+        PcButton('Open prompt', wide: false, onPressed: () {
+          final c = TextEditingController();
+          showDialog<bool>(
+            context: context,
+            builder: (ctx) => PcDialog(
+              title: 'Sign in',
+              content: PcTextField(controller: c, label: 'Identity provider'),
+              cancelLabel: 'Cancel',
+              primaryLabel: 'Open browser',
+              onPrimary: () => Navigator.pop(ctx, true),
+            ),
+          ).whenComplete(c.dispose);
+        }),
+      ),
+      _Demo(
+        'single action (no cancel)',
+        PcButton('Open notice', wide: false, onPressed: () {
+          showDialog<void>(
+            context: context,
+            builder: (ctx) => PcDialog(
+              title: 'Heads up',
+              content: const Text('A one-way message.', style: PcText.body),
+              primaryLabel: 'OK',
+              onPrimary: () => Navigator.pop(ctx),
+            ),
+          );
+        }),
+      ),
     ]);
   }
 }

@@ -36,14 +36,24 @@ on them.
 
 Leaves first. These are the alphabet every screen and composite reuses.
 
-| # | Component | Purpose | Replaces | Status |
-|---|---|---|---|---|
-| 1 | **PcButton** | the one button: primary/secondary/destructive/quiet, optional icon, hover earcon, disabled-with-reason | `wideButton`, ad-hoc Filled/Outlined/TextButton | DONE (frozen) |
-| 2 | **PcCard** | dark surface container (radius, surface vs surface2, optional hairline border) - FLAT (no shadow); replacing a `Card` also drops its stray Material shadow (a flat correction) | scattered `Card(...)` | DONE (frozen) |
-| 3 | **PcHairline** | a 1-2 px rule: neutral (`border`) or gold (`hairlineGold`) | raw `Divider`, inline hairlines | TODO |
-| 4 | **PcChip** | small dense chip: quick-value (bid +50k) / toggle | `bid_chip`, quick-raise buttons | TODO |
-| 5 | **PcBadge** | small status pill: spectator / bot / "you" / "unranked" | inline badge Rows | TODO |
-| 6 | **PcTextField** | themed single-line input | inline `TextField` (url/name/bid/comment) | TODO |
+**Order revised 2026-07** after the Connect Screen migration (the first
+real-screen migration, DESIGN_FEEDBACK.md #1): the migration proved that
+**inputs and dialogs - not decorative primitives - are what a real screen is
+made of**. `PcTextField` and `PcDialog` are therefore promoted AHEAD of the
+decorative trio (`PcHairline`/`PcChip`/`PcBadge`), which is deferred until the
+blocking components exist. The `#` column keeps each component's original
+identity; the **Build priority** column is the order we actually build in.
+Rationale + findings: DESIGN_FEEDBACK.md action items A1/A2.
+
+| # | Component | Purpose | Replaces | Build priority | Status |
+|---|---|---|---|---|---|
+| 1 | **PcButton** | the one button: primary/secondary/destructive/quiet, optional icon, hover earcon, disabled-with-reason | `wideButton`, ad-hoc Filled/Outlined/TextButton | 1 | DONE (frozen) |
+| 2 | **PcCard** | dark surface container (radius, surface vs surface2, optional hairline border) - FLAT (no shadow); replacing a `Card` also drops its stray Material shadow (a flat correction) | scattered `Card(...)` | 2 | DONE (frozen) |
+| 6 | **PcTextField** | themed single-line input (muted label, hairline underline, gold focus) | inline `TextField` (url/name/bid/comment) | **3 (promoted - A1)** | DONE (frozen) |
+| 9 | **PcDialog** | confirm dialog: title + body + primary/cancel (L2, but promoted with PcTextField - Connect's sign-in needs both) | ad-hoc `AlertDialog` | **4 (promoted - A2)** | DONE (frozen) |
+| 3 | **PcHairline** | a 1-2 px rule: neutral (`border`) or gold (`hairlineGold`) | raw `Divider`, inline hairlines | 5 (deferred) | TODO |
+| 4 | **PcChip** | small dense chip: quick-value (bid +50k) / toggle | `bid_chip`, quick-raise buttons | 6 (deferred) | TODO |
+| 5 | **PcBadge** | small status pill: spectator / bot / "you" / "unranked" | inline badge Rows | 7 (deferred) | TODO |
 
 ## Level 2 - Structural composites (deps: L1)
 
@@ -51,7 +61,7 @@ Leaves first. These are the alphabet every screen and composite reuses.
 |---|---|---|---|---|
 | 7 | **PcPanel** | titled section = PcCard + title row + PcHairline | PcCard, PcHairline, PcText | TODO |
 | 8 | **PcListRow** | leading / title / subtitle / trailing row | PcText (+ PcBadge) | TODO |
-| 9 | **PcDialog** | confirm dialog: title + body + primary/cancel | PcButton | TODO |
+| 9 | **PcDialog** | confirm dialog: title + body + primary/cancel | PcButton | DONE (frozen) - built early (promoted, see L1 note) |
 | 10 | **PcMarker** | persistent, dismissible marker card (AFK auto-play, connection, coach mark base) | PcCard, PcButton | TODO |
 
 ## Level 3 - Domain composites (deps: L1/L2 + engine view types)
@@ -79,15 +89,19 @@ whole system pays off.
 
 ```
 [showcase scaffold]
-  -> 1 PcButton -> 2 PcCard -> 3 PcHairline -> 4 PcChip -> 5 PcBadge -> 6 PcTextField   (L1)
-  -> 7 PcPanel -> 8 PcListRow -> 9 PcDialog -> 10 PcMarker                               (L2)
+  -> 1 PcButton -> 2 PcCard                          (L1, done)
+  -> 6 PcTextField -> 9 PcDialog                     (promoted - real-screen blockers, A1/A2)
+  -> 3 PcHairline -> 4 PcChip -> 5 PcBadge           (L1 decorative, deferred)
+  -> 7 PcPanel -> 8 PcListRow -> 10 PcMarker         (rest of L2)
   -> 11 MoneyChit -> 12 PropertyCard -> 13 SeatTile -> 14 TradeOfferCard -> 15 SettingsField  (L3)
   -> 16 AuctionWidget                                                                    (L4)
 ```
 
-Within a level the order is by reuse/impact (PcButton before PcChip
-because more sites need it), not a hard dependency. A composite may only
-start once ALL its listed deps are DONE (frozen).
+Within a level the order is by reuse/impact and by what real screens
+actually block on (the Connect migration promoted PcTextField/PcDialog
+over the decorative trio - DESIGN_FEEDBACK.md), not a hard dependency. A
+composite may only start once ALL its listed deps are DONE (frozen);
+PcDialog depends only on PcButton, so its promotion is dependency-safe.
 
 ## Not components (do not build)
 
@@ -102,15 +116,15 @@ Update this in the SAME PR as the component lands.
 
 | Component | PR / status | Frozen? | Showcase section |
 |---|---|---|---|
-| PcButton | DONE 2026-07 (`lib/design/components/pc_button.dart`) | YES (DDR-0019) | Yes (PcButton) + `test/design_components_test.dart` |
-| PcCard | DONE 2026-07 (`lib/design/components/pc_card.dart`) | YES (DDR-0019) | Yes (PcCard: variants + narrow + text-zoom edge cases) + tests |
-| PcHairline | TODO | - | - |
-| PcChip | TODO | - | - |
-| PcBadge | TODO | - | - |
-| PcTextField | TODO | - | - |
+| PcButton | DONE 2026-07 (`lib/design/components/pc_button.dart`) - **used in a real screen: Connect** | YES (DDR-0019) | Yes (PcButton) + `test/design_components_test.dart` |
+| PcCard | DONE 2026-07 (`lib/design/components/pc_card.dart`) - **used in a real screen: Connect** | YES (DDR-0019) | Yes (PcCard: variants + narrow + text-zoom edge cases) + tests |
+| PcTextField | DONE 2026-07 (`lib/design/components/pc_textfield.dart`) - **used in a real screen: Connect** (url/name/issuer) | YES (DDR-0019) | Yes (PcTextField: empty/filled/counter + narrow + text-zoom) + tests |
+| PcDialog | DONE 2026-07 (`lib/design/components/pc_dialog.dart`) - **used in a real screen: Connect** (sign-in) | YES (DDR-0019) | Yes (PcDialog: prompt + single-action) + tests |
+| PcHairline | TODO (deferred) | - | - |
+| PcChip | TODO (deferred) | - | - |
+| PcBadge | TODO (deferred) | - | - |
 | PcPanel | TODO | - | - |
 | PcListRow | TODO | - | - |
-| PcDialog | TODO | - | - |
 | PcMarker | TODO | - | - |
 | MoneyChit | TODO | - | - |
 | PropertyCard | TODO | - | - |

@@ -9,12 +9,14 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../l10n/app_localizations.dart';
+import '../design/components/pc_button.dart';
+import '../design/components/pc_card.dart';
+import '../design/components/pc_dialog.dart';
+import '../design/components/pc_textfield.dart';
 import '../oidc.dart';
 import '../session.dart';
-import '../sfx.dart';
 import '../tokens.dart';
 import '../typography.dart';
-import 'common.dart';
 import 'language_button.dart';
 
 /// The pre-filled server URL. A community server (ADR-0025) serves its own
@@ -175,22 +177,16 @@ class _ConnectScreenState extends State<ConnectScreen> {
             : (_runtimeIssuer ?? _defaultIssuer));
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(t.signIn),
-        content: TextField(
+      builder: (ctx) => PcDialog(
+        title: t.signIn,
+        content: PcTextField(
           controller: issuer,
-          decoration: InputDecoration(
-              labelText: t.identityProviderUrl,
-              hintText: 'https://auth.example.com'),
+          label: t.identityProviderUrl,
+          hint: 'https://auth.example.com',
         ),
-        actions: [
-          hoverSfx(TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(t.cancel))),
-          hoverSfx(FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(t.openBrowser))),
-        ],
+        cancelLabel: t.cancel,
+        primaryLabel: t.openBrowser,
+        onPrimary: () => Navigator.pop(ctx, true),
       ),
     );
     if (ok != true || !mounted) return;
@@ -218,12 +214,20 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Widget build(BuildContext context) {
     final s = widget.s;
     final t = AppLocalizations.of(context);
+    // Guests-off + not signed in: sign-in is the ONLY way in, so it becomes
+    // the primary action and Connect is disabled with a reason.
+    final guestsOff = _guestAllowed == false && _signedInAs == null;
+    final connectDisabled =
+        _guestAllowed == false && _token.text.trim().isEmpty;
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
-          child: Card(
-            child: Container(
-              width: 380,
+          // PcCard is FLAT (no Material shadow) - the reference screen now
+          // demonstrates the flat register. Width is the screen's concern,
+          // not the card's, so it is constrained from outside.
+          child: SizedBox(
+            width: 380,
+            child: PcCard(
               padding: const EdgeInsets.all(Pc.s24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -232,25 +236,23 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   Align(
                       alignment: Alignment.centerRight,
                       child: LanguageButton(s: s)),
-                  // The wordmark: Fraunces, the brand voice (DDR-018 /
+                  // The wordmark: Fraunces, the brand voice (DDR-0018 /
                   // TYPOGRAPHY.md - Fraunces is reserved for the brand, Inter
-                  // is the default UI face). Was inline Inter here; now the
-                  // same wordmark as the menu, at hero size.
+                  // is the default UI face), at hero size.
                   Text(t.appTitle,
                       textAlign: TextAlign.center,
                       style: PcText.wordmark.copyWith(fontSize: 30)),
                   const SizedBox(height: Pc.s2),
+                  // FRICTION (typography/API): no PcText role expresses "muted
+                  // at the ambient size" - roles carry a size (DDR-0018), and
+                  // the theme sets no default text colour. Left bespoke; see
+                  // DESIGN/DESIGN_FEEDBACK.md.
                   Text(t.connectSubtitle,
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: Pc.textMuted)),
                   const SizedBox(height: Pc.s16),
-                  TextField(
-                    controller: _url,
-                    decoration: InputDecoration(labelText: t.serverUrl),
-                  ),
-                  // Implicit liveness signal from the /config.json probe:
-                  // tells a newcomer whether the pre-filled address needs
-                  // changing before they ever hit Connect.
+                  PcTextField(controller: _url, label: t.serverUrl),
+                  // Implicit liveness signal from the /config.json probe.
                   if (_reachable != null)
                     Padding(
                       padding: const EdgeInsets.only(top: Pc.s4),
@@ -258,51 +260,43 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         _reachable == true
                             ? t.serverReachable
                             : t.serverUnreachable,
-                        style: TextStyle(
-                            fontSize: 11,
+                        style: PcText.caption.copyWith(
                             color: _reachable == true
                                 ? Pc.textMuted
                                 : Pc.oxblood),
                       ),
                     ),
-                  TextField(
-                    controller: _name,
-                    maxLength: 24,
-                    decoration: InputDecoration(labelText: t.displayName),
-                  ),
-                  // The server said guests are off: signing in is the only
-                  // way in, so say so instead of letting a guest connect
-                  // bounce off an auth error.
-                  if (_guestAllowed == false && _signedInAs == null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: Pc.s6),
-                      child: Text(t.serverRequiresAccount,
-                          style: PcText.caption),
-                    ),
+                  PcTextField(
+                      controller: _name, label: t.displayName, maxLength: 24),
                   const SizedBox(height: Pc.s8),
-                  wideButton(
-                      _signedInAs == null
-                          ? (_guestAllowed == false
-                              ? t.signIn
-                              : t.signInOptional)
-                          : t.signedInAs(_signedInAs!),
-                      _signIn,
-                      primary: _guestAllowed == false && _signedInAs == null),
+                  PcButton(
+                    _signedInAs == null
+                        ? (guestsOff ? t.signIn : t.signInOptional)
+                        : t.signedInAs(_signedInAs!),
+                    onPressed: _signIn,
+                    variant: guestsOff
+                        ? PcButtonVariant.primary
+                        : PcButtonVariant.secondary,
+                  ),
                   const SizedBox(height: 10),
-                  wideButton(
-                      t.connect,
-                      // A guest connect is pointless against a server that
-                      // said no guests: require the sign-in first.
-                      _guestAllowed == false && _token.text.trim().isEmpty
-                          ? null
-                          : () {
-                              if (_name.text.trim().isEmpty &&
-                                  _token.text.trim().isEmpty) {
-                                return;
-                              }
-                              s.connect(_url.text.trim(), _name.text.trim(),
-                                  token: _token.text.trim());
-                            }),
+                  PcButton(
+                    t.connect,
+                    onPressed: connectDisabled
+                        ? null
+                        : () {
+                            if (_name.text.trim().isEmpty &&
+                                _token.text.trim().isEmpty) {
+                              return;
+                            }
+                            s.connect(_url.text.trim(), _name.text.trim(),
+                                token: _token.text.trim());
+                          },
+                    // The disabled reason now lives ON the button (the DS
+                    // pattern), replacing the former separate caption above -
+                    // it now sits under the control it explains.
+                    disabledReason:
+                        connectDisabled ? t.serverRequiresAccount : null,
+                  ),
                   const SizedBox(height: Pc.s8),
                   Text(s.loginMessage,
                       textAlign: TextAlign.center,

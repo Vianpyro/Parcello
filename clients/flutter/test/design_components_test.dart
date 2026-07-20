@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parcello_client/design/components/pc_button.dart';
 import 'package:parcello_client/design/components/pc_card.dart';
+import 'package:parcello_client/design/components/pc_dialog.dart';
+import 'package:parcello_client/design/components/pc_textfield.dart';
 import 'package:parcello_client/tokens.dart';
 import 'package:parcello_client/ui/showcase/showcase_screen.dart';
 
@@ -73,6 +75,138 @@ void main() {
           child: PcCard(child: Text('Holds at a narrow width')))));
       // A pumped overflow throws during layout; reaching here means no overflow.
       expect(find.byType(PcCard), findsOneWidget);
+    });
+  });
+
+  group('PcTextField', () {
+    testWidgets('renders its label and reflects typing', (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+          _host(PcTextField(controller: c, label: 'Server URL')));
+      expect(find.text('Server URL'), findsOneWidget);
+      await tester.enterText(find.byType(PcTextField), 'ws://host');
+      expect(c.text, 'ws://host');
+    });
+
+    testWidgets('maxLength shows a counter and caps input', (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(
+          PcTextField(controller: c, label: 'Display name', maxLength: 5)));
+      await tester.enterText(find.byType(PcTextField), 'abcdefghij');
+      expect(c.text, 'abcde', reason: 'input is capped at maxLength');
+      expect(find.textContaining('/5'), findsOneWidget,
+          reason: 'the length counter shows');
+    });
+
+    testWidgets('shows a hint while empty', (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(
+          PcTextField(controller: c, label: 'Server URL', hint: 'ws://...')));
+      expect(find.text('ws://...'), findsOneWidget);
+    });
+
+    testWidgets('holds up at a very narrow width without overflow',
+        (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(SizedBox(
+          width: 90, child: PcTextField(controller: c, label: 'Cash'))));
+      expect(find.byType(PcTextField), findsOneWidget);
+    });
+  });
+
+  group('PcDialog', () {
+    // Opens a PcDialog from a button and returns the showDialog future's value,
+    // so a test can assert what confirm/cancel resolved to.
+    Future<bool?> openAndReturn(
+        WidgetTester tester, PcDialog Function(BuildContext ctx) build) async {
+      bool? result;
+      await tester.pumpWidget(_host(Builder(builder: (context) {
+        return PcButton('open', onPressed: () async {
+          result = await showDialog<bool>(
+              context: context, builder: (ctx) => build(ctx));
+        });
+      })));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      return result;
+    }
+
+    testWidgets('shows title, content and both actions', (tester) async {
+      await openAndReturn(
+          tester,
+          (ctx) => PcDialog(
+                title: 'Sign in',
+                content: const Text('body'),
+                cancelLabel: 'Cancel',
+                primaryLabel: 'Open browser',
+                onPrimary: () => Navigator.pop(ctx, true),
+              ));
+      expect(find.text('Sign in'), findsOneWidget);
+      expect(find.text('body'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+      expect(find.text('Open browser'), findsOneWidget);
+    });
+
+    testWidgets('primary fires onPrimary and confirms', (tester) async {
+      late Future<bool?> pending;
+      await tester.pumpWidget(_host(Builder(builder: (context) {
+        return PcButton('open', onPressed: () {
+          pending = showDialog<bool>(
+            context: context,
+            builder: (ctx) => PcDialog(
+              title: 'T',
+              primaryLabel: 'Yes',
+              cancelLabel: 'No',
+              onPrimary: () => Navigator.pop(ctx, true),
+            ),
+          );
+        });
+      })));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Yes'));
+      await tester.pumpAndSettle();
+      expect(await pending, isTrue, reason: 'primary resolves the dialog true');
+    });
+
+    testWidgets('cancel dismisses without confirming', (tester) async {
+      late Future<bool?> pending;
+      await tester.pumpWidget(_host(Builder(builder: (context) {
+        return PcButton('open', onPressed: () {
+          pending = showDialog<bool>(
+            context: context,
+            builder: (ctx) => PcDialog(
+              title: 'T',
+              primaryLabel: 'Yes',
+              cancelLabel: 'No',
+              onPrimary: () => Navigator.pop(ctx, true),
+            ),
+          );
+        });
+      })));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('No'));
+      await tester.pumpAndSettle();
+      expect(find.text('T'), findsNothing, reason: 'cancel closes the dialog');
+      expect(await pending, isNot(isTrue),
+          reason: 'cancel never resolves confirmed');
+    });
+
+    testWidgets('single-action dialog has no cancel', (tester) async {
+      await openAndReturn(
+          tester,
+          (ctx) => PcDialog(
+                title: 'Notice',
+                primaryLabel: 'OK',
+                onPrimary: () => Navigator.pop(ctx),
+              ));
+      expect(find.text('OK'), findsOneWidget);
+      expect(find.text('Cancel'), findsNothing);
     });
   });
 
