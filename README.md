@@ -560,7 +560,10 @@ amended by `docs/adr/`), `docs/domain-model.md`,
 `docs/LLM_CONTEXT/` (short per-subsystem summaries), and
 `docs/LEGACY.md` (the project's spirit and open questions). Game
 design: `docs/business-tour-direction.md`, `docs/motion-language.md`,
-`docs/visual-identity.md`; operations: `docs/deployment.md`.
+`docs/visual-identity.md`; operations: `docs/deployment.md`. Visual/UX
+design bible: `DESIGN/` (start at `DESIGN/README.md`) - philosophy, art
+direction, colour/type/motion/audio systems, component and screen rules,
+accessibility, the DDR process, and a commercial UX audit.
 
 ## Deviations from the architecture doc
 

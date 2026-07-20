@@ -60,6 +60,15 @@ override them; added 2026-07 as the maintainer handbook):
 - `docs/LLM_CONTEXT/` - self-contained per-subsystem summaries for
   partial-context readers; update in the same change as their sources.
 - `docs/LEGACY.md` - the project's spirit, lessons, and open questions.
+- `DESIGN/` - the Design Bible: the visual/UX equivalent of the above,
+  added 2026-07. It sits UNDER architecture and the two canonical design
+  docs (`docs/visual-identity.md` = palette/fonts/board spec,
+  `docs/motion-language.md` = motion doctrine + event catalogue, binding
+  via ADR-0030); DESIGN/ builds on them, never restates their tables.
+  Start at `DESIGN/README.md`; changes to visual rules use the DDR
+  process (`DESIGN/DESIGN_DECISION_RECORDS.md`), review via
+  `DESIGN/DESIGN_REVIEW.md`. Design adapts to the architecture, never the
+  reverse.
 
 ## Hard constraints (do not break)
 

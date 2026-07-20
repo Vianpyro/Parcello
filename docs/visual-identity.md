@@ -167,7 +167,7 @@ fights for room later:
 - the two shared pool counters (ADR-0019, the doom-clock fuse);
 - the 3-slot market forecast strip (ADR-0021);
 - every player's movement hand, public (ADR-0017);
-- the 5 s sealed-bid overlay (ADR-0018) and the jail choice dialog
+- the 12 s sealed-bid overlay (ADR-0018) and the jail choice dialog
   (ADR-0024), both under the 12 s rhythm.
 
 ## Flutter implementation notes

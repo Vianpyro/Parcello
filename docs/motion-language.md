@@ -474,9 +474,13 @@ game is built on, and it has no moment.
   their marker simultaneously** - this is the single most information-dense
   moment in Parcello and it is currently invisible. Beat: flip (300 ms),
   hold (300 ms) so the table can compare, then the winner's chit travels to
-  the tile and the band takes their colour (500 ms). The 90 % contested-win
-  discount, if it applied, shows as the chit *shrinking* mid-flight - the
-  discount is a thing that happens to the money on its way.
+  the tile at its FULL bid and the band takes their colour (500 ms). If the
+  winner is the discoverer, a second chit (`DiscovererRefunded`, the 10 %
+  rebate of ADR-0018 as amended 2026-07) travels **back** from the bank a
+  beat later - the edge is two visible motions (pay in full, get paid back),
+  not an invisible discount. (The abandoned earlier design shrank the chit
+  in flight; the rebate replaced it precisely because a discount the table
+  cannot see rewards nobody - the amendment's own reasoning.)
 - Unsold (all-zero): the tile drops back with no band, and a single
   `pc-text-faint` rule strikes through it. Deadpan. That is the joke.
 
@@ -807,8 +811,10 @@ bankruptcy, and all five win conditions.
   the single biggest remaining gap between this document and the build.
 - Trade animations (`TradeProposed`/`Accepted`) are still log-only.
 - The bribe vote reveals as a banner, not as votes flipping face-up.
-- The contested-win discount does not yet shrink the chit in flight
-  (`BidReveal.discounted` is computed and unused).
+- The discoverer's rebate renders as its own `DiscovererRefunded` chit
+  (ADR-0018 amended); the abandoned in-flight "discount shrink" is gone
+  (`BidReveal.discounted` is computed but unused - safe to delete when the
+  auction anchor lands).
 - The AFK auto-play marker, the hand-refill beat, the bot-thinking pulse and
   the time-bank P2 alarm (section 8.4) are not implemented.
 - Reconnect snaps to truth (the correct half) but does not re-orient
