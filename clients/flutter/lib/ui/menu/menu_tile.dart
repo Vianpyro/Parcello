@@ -53,7 +53,7 @@ class MenuTileState extends State<MenuTile> {
             focusColor: Pc.gold.withValues(alpha: 0.12),
             onTap: widget.onTap,
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(Pc.s16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -72,7 +72,7 @@ class MenuTileState extends State<MenuTile> {
                             fontWeight: FontWeight.w700,
                             color: Pc.text)),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: Pc.s4),
                   Flexible(
                     child: Text(widget.subtitle,
                         maxLines: 2,

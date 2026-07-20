@@ -85,7 +85,7 @@ class _MenuScreenState extends State<MenuScreen> {
       ),
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(Pc.s24),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 680),
             child: Column(
@@ -102,7 +102,7 @@ class _MenuScreenState extends State<MenuScreen> {
                     children: tiles,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: Pc.s16),
                 Text(s.loginMessage,
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Pc.oxblood)),

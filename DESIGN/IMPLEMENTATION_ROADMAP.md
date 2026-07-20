@@ -366,7 +366,7 @@ never as the first Flutter chantier.
 | Phase | Status | Notes |
 |---|---|---|
 | 0 Structure decision | DONE | in-tree `lib/design/` (DDR-0016 accepted; package extraction deferred w/ criteria) |
-| 1 Tokens | NOT STARTED | spacing scale + elevation helpers missing |
+| 1 Tokens | IN PROGRESS | spacing scale (`Pc.s2..s24` + `cardInset`) landed in `lib/tokens.dart`; connect + menu + menu_tile migrated as proof (value-preserving, pixel-identical, 50 tests green); off-grid one-offs (e.g. a lone `10`) left literal by policy. Remaining: migrate the other widgets incrementally + an elevation helper if a use case appears + the C2 lint once coverage is high |
 | 2 Typography | NOT STARTED | roles missing; fonts done |
 | 3 Theme | NOT STARTED | base ThemeData exists |
 | 4 Anim primitives | PARTIAL | engine done; marker/pulse/re-orient missing |

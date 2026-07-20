@@ -223,7 +223,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
           child: Card(
             child: Container(
               width: 380,
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(Pc.s24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -237,11 +237,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
                           fontSize: 30,
                           fontWeight: FontWeight.bold,
                           color: Pc.gold)),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: Pc.s2),
                   Text(t.connectSubtitle,
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: Pc.textMuted)),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: Pc.s16),
                   TextField(
                     controller: _url,
                     decoration: InputDecoration(labelText: t.serverUrl),
@@ -251,7 +251,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   // changing before they ever hit Connect.
                   if (_reachable != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.only(top: Pc.s4),
                       child: Text(
                         _reachable == true
                             ? t.serverReachable
@@ -273,12 +273,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   // bounce off an auth error.
                   if (_guestAllowed == false && _signedInAs == null)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.only(bottom: Pc.s6),
                       child: Text(t.serverRequiresAccount,
                           style: const TextStyle(
                               fontSize: 11, color: Pc.textMuted)),
                     ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: Pc.s8),
                   wideButton(
                       _signedInAs == null
                           ? (_guestAllowed == false
@@ -302,7 +302,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                               s.connect(_url.text.trim(), _name.text.trim(),
                                   token: _token.text.trim());
                             }),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: Pc.s8),
                   Text(s.loginMessage,
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: Pc.textMuted)),

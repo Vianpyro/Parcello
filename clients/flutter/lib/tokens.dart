@@ -1,7 +1,11 @@
 /// Design tokens: the single source of truth for Parcello's palette and
-/// geometry (`docs/visual-identity.md`). A colour exists here or it does not
-/// exist - a hex literal at a use site is a bug, because a visual grammar
+/// geometry (`docs/visual-identity.md`, `DESIGN/VISUAL_LANGUAGE.md`). A
+/// colour, spacing or radius exists here or it does not exist - a raw
+/// literal at a use site is a bug (INVARIANTS C2), because a visual grammar
 /// cannot be enforced when every widget invents its own values.
+///
+/// Home of the in-tree design system (DDR-0016: `lib/design/` is the target
+/// folder, realized incrementally; this file is its `tokens` today).
 library;
 
 import 'package:flutter/material.dart';
@@ -43,6 +47,26 @@ abstract final class Pc {
   static const hairShadow = [
     BoxShadow(color: Color(0x66000000), blurRadius: 2, offset: Offset(0, 1)),
   ];
+
+  // -- Spacing scale ---------------------------------------------------------
+  // The 4-px grid the UI already uses (values audited 2026-07: 12/8/6/4/2 are
+  // the workhorses, 16/24 the section gaps). Reach for these instead of a raw
+  // number in an `EdgeInsets` or `SizedBox` (INVARIANTS C2). Off-grid one-offs
+  // (3/5/7/10/18) intentionally have NO token - they stay literals pending a
+  // visual-review pass that aligns them to the grid; do not invent `s3`/`s7`.
+  static const double s2 = 2;
+  static const double s4 = 4;
+  static const double s6 = 6;
+  static const double s8 = 8;
+  static const double s12 = 12;
+  static const double s16 = 16;
+  static const double s24 = 24;
+
+  /// The recurring body padding of a card or panel (12 px on every side).
+  /// A semantic preset over the bare `EdgeInsets.all(s12)` because "card
+  /// body" is a meaning, not just a number - migrate card/panel padding to
+  /// this, not every incidental 12.
+  static const cardInset = EdgeInsets.all(s12);
 }
 
 /// The 8 property groups plus `utility`, in the muted tones of the identity
