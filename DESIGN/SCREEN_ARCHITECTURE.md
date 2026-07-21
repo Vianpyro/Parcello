@@ -6,6 +6,12 @@ error/loading behaviour, accessibility. The client's actual screens
 (`clients/flutter/lib/ui/`) implement these; when they diverge, either
 the screen or this file has a bug - reconcile via DESIGN_REVIEW.
 
+The player behaviour these screens serve and the information they must
+present are defined upstream and screen-independently in `DESIGN/product/`
+(PLAYER_BEHAVIOR, INFORMATION_ARCHITECTURE). This file only PLACES those
+requirements per screen; it is never the source of which information is
+permanent vs contextual - product/ is.
+
 The app is a linear spine with one branch:
 
 ```

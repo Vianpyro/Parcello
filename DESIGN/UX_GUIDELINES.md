@@ -1,8 +1,9 @@
 # UX guidelines
 
 The behavioural rules that sit under every screen and component. Where
-DESIGN_SYSTEM says what things ARE and SCREEN_ARCHITECTURE says where
-they go, this says how they must BEHAVE toward the player.
+DESIGN_SYSTEM says what things ARE, SCREEN_ARCHITECTURE says where they
+go, and `DESIGN/product/` says what the player does and which information
+they need, this says how the interface must BEHAVE toward the player.
 
 ## Discoverability
 
@@ -24,10 +25,11 @@ they go, this says how they must BEHAVE toward the player.
 - Spatial constancy: recurring elements never move (banners center,
   clock on the subject tile, log bottom, seats fixed). A moved element
   costs a re-scan the turn cannot afford.
-- Information is generous but LAYERED: cash/VP/hand always visible; rent
-  ladders and full property detail on demand (tile tap). Density is
-  framed (every zone ruled and titled) so it reads as calm, not busy
-  (the CONCEPT_CRITIQUE framing lesson).
+- Information is generous but LAYERED: the permanent set stays available
+  and contextual detail comes on demand (which information is permanent vs
+  contextual is owned by `DESIGN/product/INFORMATION_ARCHITECTURE`, not
+  here). Density is framed (every zone ruled and titled) so it reads as
+  calm, not busy (the CONCEPT_CRITIQUE framing lesson).
 
 ## Attention management
 
