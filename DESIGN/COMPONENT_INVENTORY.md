@@ -70,7 +70,7 @@ Rationale + findings: DESIGN_FEEDBACK.md action items A1/A2.
 |---|---|---|---|---|
 | 11 | **MoneyChit** | the parchment chit's STATIC presentation (`+/-amount`, sage/oxblood) - the travel is the director's | Pc, PcText.amount | TODO |
 | 12 | **PropertyCard** | parchment face, group-colour band, rent ladder, mortgaged/conglomerate states | Pc, PcText, PcHairline | TODO |
-| 13 | **SeatTile** (PlayerCard) | identity + cash + VP + connection/bot/acting state; the chit TARGET (fixed position) | Pc, PcText, PcBadge, MoneyChit | TODO |
+| 13 | **SeatTile** (PlayerCard) | identity + cash + VP + connection/bot/acting state; the chit TARGET (fixed position) | Pc, PcText (NOT PcBadge/MoneyChit - see note) | DONE (frozen) |
 | 14 | **TradeOfferCard** | an offer's give/receive + accept/refuse/cancel | PcCard, PcButton, PropertyCard | TODO |
 | 15 | **SettingsField** | a labelled setting row (clamped input/chip) | PcListRow, PcTextField/PcChip | TODO |
 
@@ -128,7 +128,7 @@ Update this in the SAME PR as the component lands.
 | PcMarker | TODO | - | - |
 | MoneyChit | TODO | - | - |
 | PropertyCard | TODO | - | - |
-| SeatTile | TODO | - | - |
+| SeatTile | DONE 2026-07 (`lib/design/components/seat_tile.dart`) - **used in the Game HUD / side panel** | YES (DDR-0019) | Yes (SeatTile: leader/idle/bot/bankrupt/lobby + narrow) + tests |
 | TradeOfferCard | TODO | - | - |
 | SettingsField | TODO | - | - |
 | AuctionWidget | TODO | - | - |

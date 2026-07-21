@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../design/components/pc_button.dart';
 import '../../design/components/pc_card.dart';
 import '../../design/components/pc_dialog.dart';
+import '../../design/components/seat_tile.dart';
 import '../../l10n/app_localizations.dart';
 import '../../protocol.dart';
 import '../../session.dart';
@@ -224,6 +225,11 @@ class SidePanel extends StatelessWidget {
             .where((e) => !e.value.bankrupt)
             .map((e) => e.value.handsCycled)
             .fold<int?>(null, (m, h) => m == null || h < m ? h : m);
+    // A sealed bid, face-up (ADR-0018): every seat's bid flips at once and is
+    // held long enough to compare - the single most information-dense moment in
+    // Parcello, which the old client never rendered (the auction just resolved).
+    final reveal = s.stage.bidReveal;
+    final showVp = (s.content?.winVictoryPoints ?? 0) > 0;
     for (var i = 0; i < count; i++) {
       final p = v?.players.elementAtOrNull(i);
       final seatInfo = s.seats.elementAtOrNull(i);
@@ -231,7 +237,6 @@ class SidePanel extends StatelessWidget {
       // Whose turn is it: bold text alone read as too subtle in playtests
       // (2026-07) - a highlighted row + a leading marker reads at a glance.
       final isActive = v != null && !v.finished && v.current == i;
-      final rank = ranks[i];
       final cycled =
           round != null && p != null && !p.bankrupt && p.handsCycled > round;
       final tags = [
@@ -245,89 +250,26 @@ class SidePanel extends StatelessWidget {
         else if (seatInfo?.connected == false)
           t.playerTagOffline,
       ].join(' ');
-      rows.add(AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.symmetric(vertical: Pc.s2),
-        padding: EdgeInsets.symmetric(horizontal: Pc.s6, vertical: isActive ? 5 : 2),
-        decoration: BoxDecoration(
-          color: isActive
-              ? Pc.gold.withValues(alpha: 0.16)
-              : null,
-          borderRadius: BorderRadius.circular(4),
-          border: Border(
-            left: BorderSide(
-              color: isActive ? Pc.gold : Colors.transparent,
-              width: 3,
-            ),
-          ),
-        ),
-        child: Opacity(
-          opacity: p?.bankrupt == true ? 0.4 : 1,
-          child: Row(children: [
-            SizedBox(
-              width: Pc.s16,
-              child: isActive
-                  ? const Icon(Icons.play_arrow,
-                      size: 16, color: Pc.goldDark)
-                  : null,
-            ),
-            // Pawn circle doubles as the live VP leaderboard - and as the
-            // anchor every chit addressed to this player flies to. Money that
-            // lands somewhere is money you can see arriving.
-            Container(
-              key: s.stage.anchors.seatKey(i),
-              width: 18,
-              height: 18,
-              alignment: Alignment.center,
-              decoration:
-                  BoxDecoration(color: pawnColor(i), shape: BoxShape.circle),
-              child: rank == null
-                  ? null
-                  : rank == 1
-                      ? const Icon(Icons.workspace_premium,
-                          size: 12, color: Pc.text)
-                      : Text('$rank',
-                          style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Pc.text)),
-            ),
-            const SizedBox(width: Pc.s8),
-            Expanded(
-              child: Text('$name $tags',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: isActive ? FontWeight.bold : null,
-                    decoration:
-                        p?.bankrupt == true ? TextDecoration.lineThrough : null,
-                  )),
-            ),
-            // A sealed bid, face-up (ADR-0018). Every seat's bid flips at once
-            // and is held long enough to compare - this is the single most
-            // information-dense moment in Parcello, and the old client never
-            // rendered it at all: the auction just silently resolved.
-            if (s.stage.bidReveal case final r?)
-              if (i < r.bids.length) BidChip(bid: r.bids[i], won: r.winner == i),
-            if (p != null)
-              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text('\$${p.cash}',
-                    style: const TextStyle(
-                        fontFeatures: [FontFeature.tabularFigures()])),
-                // Net worth decides a timed game (ADR-0010), so surface it then.
-                if (s.gameEndsAt != null)
-                  Text(t.sideNetWorth(s.netWorth(i)),
-                      style: PcText.caption),
-                // Victory-point race (ADR-0020): "the race IS the game".
-                if ((s.content?.winVictoryPoints ?? 0) > 0)
-                  Text(t.sideVictoryPoints(p.victoryPoints, s.content!.winVictoryPoints),
-                      style: const TextStyle(
-                          fontSize: 11,
-                          color: Pc.goldDark,
-                          fontWeight: FontWeight.w700,
-                          fontFeatures: [FontFeature.tabularFigures()])),
-              ]),
-          ]),
-        ),
+      rows.add(SeatTile(
+        seat: i,
+        name: name,
+        tags: tags,
+        active: isActive,
+        bankrupt: p?.bankrupt == true,
+        rank: ranks[i],
+        anchorKey: s.stage.anchors.seatKey(i),
+        cash: p != null ? '\$${p.cash}' : null,
+        // Net worth decides a timed game (ADR-0010), so surface it only then.
+        netWorthLabel: p != null && s.gameEndsAt != null
+            ? t.sideNetWorth(s.netWorth(i))
+            : null,
+        // Victory-point race (ADR-0020): "the race IS the game".
+        vpLabel: p != null && showVp
+            ? t.sideVictoryPoints(p.victoryPoints, s.content!.winVictoryPoints)
+            : null,
+        trailingBid: reveal != null && i < reveal.bids.length
+            ? BidChip(bid: reveal.bids[i], won: reveal.winner == i)
+            : null,
       ));
     }
     // The VP scoring breakdown lives in the center panel now

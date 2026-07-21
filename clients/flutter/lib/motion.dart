@@ -161,6 +161,11 @@ abstract final class Motion {
   /// P4 implicit transitions. Barely noticed, by design.
   static const ambient = Duration(milliseconds: 120);
 
+  /// A UI element changing state in place - a seat row highlighting on its
+  /// turn, dimming on bankruptcy. Longer than `ambient` (it IS meant to be
+  /// noticed) but still a background transition, not a director beat.
+  static const stateFade = Duration(milliseconds: 200);
+
   /// Re-orientation after a reconnect: "here is you, here is now". Never a
   /// catch-up replay - a reconnecting client is already late.
   static const reorient = Duration(milliseconds: 900);

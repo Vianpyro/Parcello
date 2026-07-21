@@ -9,6 +9,7 @@ import 'package:parcello_client/design/components/pc_button.dart';
 import 'package:parcello_client/design/components/pc_card.dart';
 import 'package:parcello_client/design/components/pc_dialog.dart';
 import 'package:parcello_client/design/components/pc_textfield.dart';
+import 'package:parcello_client/design/components/seat_tile.dart';
 import 'package:parcello_client/tokens.dart';
 import 'package:parcello_client/ui/showcase/showcase_screen.dart';
 
@@ -243,6 +244,78 @@ void main() {
               ));
       expect(find.text('OK'), findsOneWidget);
       expect(find.text('Cancel'), findsNothing);
+    });
+  });
+
+  group('SeatTile', () {
+    testWidgets('shows name, tags and the cash figures', (tester) async {
+      await tester.pumpWidget(_host(const SeatTile(
+        seat: 0,
+        name: 'Alice',
+        tags: '(you)',
+        active: false,
+        bankrupt: false,
+        cash: r'$1200',
+        vpLabel: 'VP 8/20',
+      )));
+      expect(find.text('Alice (you)'), findsOneWidget);
+      expect(find.text(r'$1200'), findsOneWidget);
+      expect(find.text('VP 8/20'), findsOneWidget);
+    });
+
+    testWidgets('an active seat shows the turn marker', (tester) async {
+      await tester.pumpWidget(_host(const SeatTile(
+          seat: 0,
+          name: 'A',
+          tags: '',
+          active: true,
+          bankrupt: false,
+          cash: r'$1')));
+      expect(find.byIcon(Icons.play_arrow), findsOneWidget,
+          reason: 'the acting seat is marked');
+    });
+
+    testWidgets('rank 1 shows the crown, other ranks a number', (tester) async {
+      await tester.pumpWidget(_host(const SeatTile(
+          seat: 0,
+          name: 'A',
+          tags: '',
+          active: false,
+          bankrupt: false,
+          rank: 1,
+          cash: r'$1')));
+      expect(find.byIcon(Icons.workspace_premium), findsOneWidget);
+
+      await tester.pumpWidget(_host(const SeatTile(
+          seat: 0,
+          name: 'A',
+          tags: '',
+          active: false,
+          bankrupt: false,
+          rank: 3,
+          cash: r'$1')));
+      expect(find.text('3'), findsOneWidget, reason: 'non-leaders show a rank');
+    });
+
+    testWidgets('a bankrupt seat is struck through', (tester) async {
+      await tester.pumpWidget(_host(const SeatTile(
+          seat: 0,
+          name: 'Gone',
+          tags: '',
+          active: false,
+          bankrupt: true,
+          cash: r'$0')));
+      final text = tester.widget<Text>(find.text('Gone'));
+      expect(text.style?.decoration, TextDecoration.lineThrough);
+    });
+
+    testWidgets('a lobby seat (no cash) shows no figures column',
+        (tester) async {
+      await tester.pumpWidget(_host(const SeatTile(
+          seat: 0, name: 'Open', tags: '', active: false, bankrupt: false)));
+      expect(find.text('Open'), findsOneWidget);
+      expect(find.textContaining(r'$'), findsNothing,
+          reason: 'no cash before the game starts');
     });
   });
 

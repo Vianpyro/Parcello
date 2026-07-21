@@ -285,6 +285,70 @@ sizes without overflow.
 
 ---
 
+## Migration #4 - Game HUD, first domain component: `SeatTile`
+
+New phase (owner directive): stop chasing residual Material widgets; **build the
+BUSINESS components that give Parcello its identity**, and let real game surfaces
+pull them. The Game HUD's richest, most-repeated, most Parcello-specific element
+is the **seat row** - identity, live cash, victory points, net worth, turn /
+bankruptcy / VP-rank state, the chit target, the sealed-bid reveal slot. It was
+the standing legacy (`#13`, migration #3's C2 watch item). So the first domain
+component is **SeatTile** (`lib/design/components/seat_tile.dart`).
+
+### Design decision - the DS boundary for a domain component
+
+The seat row is entangled with `GameSession` and the stage. A naive SeatTile
+would take the whole session. Instead it is **presentational**: it takes
+already-resolved, already-**localized** strings (cash, VP label, net-worth
+label, joined status tags), plus the stage-owned `anchorKey` (the chit target,
+on the pawn circle) and an optional `trailingBid` widget. It imports neither
+`session.dart` nor `l10n` - INVARIANTS C1 keeps localization in the app layer.
+The parent (`_players`) still computes the cross-seat bits (VP rank, the round
+metronome) and formats the labels; SeatTile only draws. This keeps it testable
+with plain values (5 unit tests, no session) and correctly layered.
+
+### Pull-based restraint (what was NOT built)
+
+| Classification | Finding |
+|---|---|
+| **PcBadge NOT pulled** | The inventory listed `PcBadge`/`MoneyChit` as SeatTile deps. Neither was built: the status tags are **inline text** (`(you) (bot)`), and turning them into pill badges is a REDESIGN, not a value-preserving migration - so SeatTile v1 keeps text tags (recorded as Visual Debt VD-1, the gap to the Bible's badge vision). The chit is the overlay's travelling widget; SeatTile is only its TARGET (the `anchorKey`), so `MoneyChit` is pulled by an overlay migration, not this one. Building either here would have been speculative. |
+| **Additive `Motion.stateFade`** | The row's 200 ms highlight/dim was an inline `Duration` - a motion-layer bug (`motion.dart` owns every duration). Added `Motion.stateFade` (200 ms, "a UI element changing state in place") additively. A real component surfaced the missing token. |
+
+### Internal type consolidation
+
+The bespoke tabular styles the row used inline (cash, the gold VP figure) moved
+INTO SeatTile as `PcText.amount` / `PcText.amount.copyWith(...)` - the component
+now owns its type, so the figures are consistent by construction instead of
+re-specified at the one call site.
+
+### What this taught us
+
+1. **A domain component can be presentational without leaking the session.**
+   Passing formatted strings + the two stage handles kept SeatTile inside the
+   DS boundary and unit-testable - the pattern the remaining domain composites
+   (PropertyCard, TradeOfferCard) should follow.
+2. **The identity gap is now visible, not hidden.** Text-tags-vs-badges is
+   logged as Visual Debt rather than silently "fixed" mid-migration - the
+   pull-based rule again choosing *don't* until a real decision/screen calls.
+
+### Action items
+
+- **D1 (watch) - `MoneyChit`** is pulled by an overlay migration (the chit's
+  static face), **`PropertyCard`** by the board/tile-detail, **`TradeOfferCard`**
+  by the trades list, **`AuctionWidget`** by the sealed-bid input. None built
+  until their surface migrates.
+- **D2 (owner) - decide tags-as-badges** (VD-1): if the Bible's badge vision is
+  the target, that decision pulls `PcBadge` and reshapes SeatTile's tag slot.
+
+### Verification
+
+`flutter analyze` clean; full suite green (**76 tests**, +5 SeatTile);
+**`layout_test` green at all three sizes** (SeatTile IS the seat row, so this is
+the load-bearing check - a loaded 6-seat panel must not overflow a Deck); C2
+guard green.
+
+---
+
 ## Design System Coverage (living snapshot - updated each migration)
 
 Maturity ladder: **Experimental** (built + in Showcase, no real screen yet) ->
@@ -300,16 +364,71 @@ battle-tested).
 | `PcCard` | **Stable** | Connect, Lobby (x5 cards) | unchanged |
 | `PcTextField` | **Stable** | Connect, Settings | grew additively (numeric/dense/optional-label) |
 | `PcDialog` | **Stable** | Connect (sign-in), Lobby (resign) | grew additively (`destructive`) |
-| `Motion` | **Stable (engine)** | director/board/stage - but NO migrated *screen* exercises it yet (F6) | additive only |
+| `SeatTile` | **Validated** | Game HUD / side panel | frozen (new) |
+| `Motion` | **Stable (engine)** | director/board/stage + now `SeatTile` (`stateFade`) - but NO migrated *screen* validates it as motion yet (F6) | grew additively (`stateFade`) |
 | `PcHairline` / `PcChip` / `PcBadge` | *deferred* | none - no real screen demands them value-preservingly | not built |
 | `PcListRow` | *deferred* | sighted once (Settings rows); awaits 2nd consumer | not built |
-| `SeatTile` / `TradeOfferCard` / `MoneyChit` / `PropertyCard` / `SettingsField` / `AuctionWidget` | *not started* | L3/L4 domain composites | not built |
+| `TradeOfferCard` / `MoneyChit` / `PropertyCard` / `SettingsField` / `AuctionWidget` | *not started* | L3/L4 domain composites, pulled by their surface | not built |
 
 **Screens migrated:** Connect (100% DS-native), Settings (100% of its
-controls), Lobby controls (side panel chrome; domain composites pending).
+controls), Lobby controls (side panel chrome), Game HUD (seat rows ->
+SeatTile; the rest of the HUD pending).
 
 **Legacy building-block widgets remaining** (use sites outside the design
 system, approx.): raw `Card` x6, raw `TextField` x7, `AlertDialog` x1,
 `wideButton` x2, other raw `*Button` x~28 - all in NOT-yet-migrated surfaces
 (menu, game HUD, board, trades, feedback, rules). These are the backlog the
 next screen migrations retire.
+
+---
+
+## Gameplay Coverage (living - the game's identity surfaces)
+
+Distinct from the component table above (which tracks *primitives*): this tracks
+the **game-identity surfaces** - the things a player actually looks at in a match
+- and whether each is served by a purpose-built domain component or still ad-hoc.
+This is where "Parcello looks like Parcello" is won.
+
+| Gameplay surface | Component | State |
+|---|---|---|
+| Seat / player card | **`SeatTile`** | **DONE** (domain component, side panel) |
+| Sealed-bid reveal chip | `BidChip` (pre-existing, on SeatTile's `trailingBid`) | works; not yet a DS component (candidate to fold in) |
+| Property / tile face | `PropertyCard` (#12) | **legacy** - board draws tiles inline; parchment/rent-ladder/mortgaged not componentized |
+| Money chit (travelling) | `MoneyChit` (#11) | **legacy** - lives in `overlay.dart`; static face not extracted |
+| Trade offer | `TradeOfferCard` (#14) | **legacy** - `_trades()` renders text + TextButtons |
+| Sealed-bid INPUT (anchored to the tile) | `AuctionWidget` (#16) | **NOT built** - the #1 UX gap (motion-language 8.2); input is a corner field, clock is a corner number |
+| VP legend / round metronome | (center panel, bespoke) | ad-hoc; reads acceptably, no component yet |
+| Market forecast / pools / spotlight lines | (center panel, `PcText.caption`) | text-only, DS-typed; fine as-is |
+| Clocks (turn / bank / bid / vote / game) | `Countdown` (pre-existing) | works; not a DS component |
+| Event log | `EventLog` (pre-existing) | works; DS-typed |
+| Board tiles / pawns / board motion | `board.dart` (+ director/stage) | rich already; flat by DDR-0017 (a decision, not debt) |
+
+**Read:** the identity backbone is now started (SeatTile). The two highest-value
+domain builds left are **`AuctionWidget`** (the signature moment, and the #1 UX
+gap) and **`PropertyCard`** (every landing shows a tile). `TradeOfferCard` and
+`MoneyChit` follow their surfaces (trades panel, overlay).
+
+---
+
+## Visual Debt (living register - shipped look vs. the Design Bible)
+
+Technical debt tracks code; **Visual Debt** tracks the gap between what ships
+today and the vision in the Design Bible (`DESIGN/`, `docs/visual-identity.md`,
+`docs/motion-language.md`). An entry is a KNOWN, ACCEPTED divergence - logged so
+it is a decision on a list, not a surprise. Severity: **P1** (hurts identity /
+readability now) -> **P3** (cosmetic / nice-to-have).
+
+| ID | Area | Shipped today | Bible vision / target | Severity | Owner? |
+|---|---|---|---|---|---|
+| VD-1 | Seat status | tags are inline text (`(you) (bot) (jail)`) | status **pills/badges** (`PcBadge`), colour-coded | P2 | decision pulls PcBadge (#4/D2) |
+| VD-2 | Sealed-bid input | corner field + corner number clock | input **anchored to the lifted tile**, clock a hairline draining on the tile edge (motion-language 8.2) | **P1** | `AuctionWidget` (#16) |
+| VD-3 | Property tiles | drawn inline in `board.dart` | parchment `PropertyCard`: group band, rent ladder, mortgaged/conglomerate states | P2 | `PropertyCard` (#12) |
+| VD-4 | Trade offers | text lines + plain TextButtons | `TradeOfferCard`: give/receive columns, accept/refuse affordances | P2 | `TradeOfferCard` (#14) |
+| VD-5 | Resign trigger | bespoke outlined-oxblood button | no restrained-destructive PcButton variant exists (#3/D2) | P3 | defer to 2nd sighting |
+| VD-6 | Muted ambient text | 2 bespoke `TextStyle(color: textMuted)` (Connect subtitle, login line) | a "muted at ambient size" affordance, or accept as intentional (F3 residual) | P3 | after theme pass |
+| VD-7 | Off-grid spacing | one-off `3/5/10` insets remain literal | align to the 4-px grid in a visual-review pass, or add tokens | P3 | visual-review pass |
+| VD-8 | Rules headings | Inter (were Fraunces) | owner to confirm Inter, or revert to Fraunces if "emblematic" was intended | P3 | owner |
+| VD-9 | Audio | placeholder clip set; one cancel earcon dropped (#3/D4) | the four category earcons (AUDIO_DIRECTION) | P2 | roadmap Phase 8 |
+
+**Not debt (deliberate decisions, do not "fix"):** the flat board (DDR-0017),
+flat cards (no elevation shadow, ART_DIRECTION), sharp corners everywhere.

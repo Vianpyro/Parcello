@@ -15,6 +15,7 @@ import '../../design/components/pc_button.dart';
 import '../../design/components/pc_card.dart';
 import '../../design/components/pc_dialog.dart';
 import '../../design/components/pc_textfield.dart';
+import '../../design/components/seat_tile.dart';
 import '../../tokens.dart';
 import '../../typography.dart';
 
@@ -35,6 +36,7 @@ class ShowcaseScreen extends StatelessWidget {
           _CardsSection(),
           _TextFieldsSection(),
           _DialogsSection(),
+          _SeatTilesSection(),
           _KeyboardSection(),
           _A11yNote(),
           // Future component sections append here, in inventory order.
@@ -257,6 +259,85 @@ class _DialogsSection extends StatelessWidget {
             ),
           );
         }),
+      ),
+    ]);
+  }
+}
+
+/// SeatTile: the player seat row in its states - active leader, an idle seat,
+/// a bot, an eliminated seat, a lobby seat before cash exists. Wrapped in a
+/// PcCard because that is where it lives (the side panel). The chit anchor and
+/// the sealed-bid `trailingBid` are stage-driven and omitted here.
+class _SeatTilesSection extends StatelessWidget {
+  const _SeatTilesSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return _Section('SeatTile', const [
+      PcCard(
+        child: Column(children: [
+          SeatTile(
+            seat: 0,
+            name: 'Alice',
+            tags: '(you)',
+            active: true,
+            bankrupt: false,
+            rank: 1,
+            cash: r'$1450',
+            vpLabel: 'VP 8/20',
+          ),
+          SeatTile(
+            seat: 1,
+            name: 'Bob',
+            tags: '',
+            active: false,
+            bankrupt: false,
+            rank: 2,
+            cash: r'$920',
+            vpLabel: 'VP 5/20',
+          ),
+          SeatTile(
+            seat: 2,
+            name: 'Carol',
+            tags: '(bot)',
+            active: false,
+            bankrupt: false,
+            rank: 3,
+            cash: r'$300',
+            netWorthLabel: r'Net $410',
+          ),
+          SeatTile(
+            seat: 3,
+            name: 'Dave',
+            tags: '(offline)',
+            active: false,
+            bankrupt: true,
+            cash: r'$0',
+          ),
+          // Lobby seat: no cash yet, so no figures column.
+          SeatTile(
+            seat: 4,
+            name: 'Open seat',
+            tags: '',
+            active: false,
+            bankrupt: false,
+          ),
+        ]),
+      ),
+      // Edge case: a narrow panel - a long name must ellipsize, not overflow.
+      SizedBox(
+        width: 160,
+        child: PcCard(
+          child: SeatTile(
+            seat: 5,
+            name: 'A very long player name that must clip',
+            tags: '(you)',
+            active: true,
+            bankrupt: false,
+            rank: 1,
+            cash: r'$12000',
+          ),
+        ),
       ),
     ]);
   }
