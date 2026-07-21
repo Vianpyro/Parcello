@@ -52,7 +52,7 @@ Rationale + findings: DESIGN_FEEDBACK.md action items A1/A2.
 | 6 | **PcTextField** | themed single-line input (muted label, hairline underline, gold focus) | inline `TextField` (url/name/bid/comment) | **3 (promoted - A1)** | DONE (frozen) |
 | 9 | **PcDialog** | confirm dialog: title + body + primary/cancel (L2, but promoted with PcTextField - Connect's sign-in needs both) | ad-hoc `AlertDialog` | **4 (promoted - A2)** | DONE (frozen) |
 | 3 | **PcHairline** | a 1-2 px rule: neutral (`border`) or gold (`hairlineGold`) | raw `Divider`, inline hairlines | 5 (deferred) | TODO |
-| 4 | **PcChip** | small dense chip: quick-value (bid +50k) / toggle | `bid_chip`, quick-raise buttons | 6 (deferred) | TODO |
+| 4 | **PcChip** | small dense tap-to-order/toggle chip (gold when selected) | route/mod bespoke `OutlinedButton`s | **built (pulled - blocked ActionsPanel + menu)** | DONE (frozen) |
 | 5 | **PcBadge** | small status pill: spectator / bot / "you" / "unranked" | inline badge Rows | 7 (deferred) | TODO |
 
 ## Level 2 - Structural composites (deps: L1)
@@ -121,7 +121,7 @@ Update this in the SAME PR as the component lands.
 | PcTextField | DONE 2026-07 (`lib/design/components/pc_textfield.dart`) - **used in real screens: Connect** (url/name/issuer) **+ Settings** (dense numeric); grew `keyboardType`/`textAlign`/`dense`/optional-label additively for Settings (DESIGN_FEEDBACK #2/D1) | YES (DDR-0019; additive growth only) | Yes (PcTextField: empty/filled/counter + narrow + text-zoom + dense-numeric) + tests |
 | PcDialog | DONE 2026-07 (`lib/design/components/pc_dialog.dart`) - **used in real screens: Connect** (sign-in) **+ Lobby** (resign); grew `destructive` additively for the resign confirm (DESIGN_FEEDBACK #3/D1) | YES (DDR-0019; additive growth only) | Yes (PcDialog: prompt + single-action + destructive) + tests |
 | PcHairline | TODO (deferred) | - | - |
-| PcChip | TODO (deferred) | - | - |
+| PcChip | DONE 2026-07 (`lib/design/components/pc_chip.dart`) - **used in 2 real screens: ActionsPanel** (Legal Route builder) **+ menu** (mod picker) | YES (DDR-0019) | Yes (PcChip: idle/selected/disabled + tap-to-order) + tests |
 | PcBadge | TODO (deferred) | - | - |
 | PcPanel | TODO | - | - |
 | PcListRow | TODO | - | - |

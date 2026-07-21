@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../design/components/pc_chip.dart';
 import '../../l10n/app_localizations.dart';
 import '../../motion.dart';
 import '../../session.dart';
@@ -80,22 +81,17 @@ class PrivateTableCardState extends State<PrivateTableCard> {
   Widget _modChip(String id) {
     final pos = _picked.indexOf(id);
     final picked = pos >= 0;
-    return hoverSfx(OutlinedButton(
-      onPressed: () => setState(() {
+    return PcChip(
+      picked ? '$id  #${pos + 1}' : id,
+      selected: picked,
+      onTap: () => setState(() {
         if (picked) {
           _picked.remove(id);
         } else {
           _picked.add(id);
         }
       }),
-      style: OutlinedButton.styleFrom(
-        shape: const RoundedRectangleBorder(borderRadius: Pc.radius),
-        backgroundColor: picked ? Pc.gold.withValues(alpha: 0.3) : null,
-        side: BorderSide(color: picked ? Pc.goldDark : Pc.textMuted),
-        minimumSize: const Size(0, 40),
-      ),
-      child: Text(picked ? '$id  #${pos + 1}' : id),
-    ));
+    );
   }
 
   Widget _modPicker(AppLocalizations t) {

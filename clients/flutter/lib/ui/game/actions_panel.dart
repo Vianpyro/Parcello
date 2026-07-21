@@ -9,6 +9,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../design/components/pc_chip.dart';
 import '../../l10n/app_localizations.dart';
 import '../../protocol.dart';
 import '../../session.dart';
@@ -268,7 +269,7 @@ class ActionsPanelState extends State<ActionsPanel> {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  for (final value in sorted) _routeChip(value, touch),
+                  for (final value in sorted) _routeChip(value),
                 ],
               ),
               Row(mainAxisSize: MainAxisSize.min, children: [
@@ -349,25 +350,19 @@ class ActionsPanelState extends State<ActionsPanel> {
   /// append it to `_routeOrder`, tap an already-picked one to remove it
   /// again (no need for a full reset just to fix one misclick). Picked
   /// chips show their position in the sequence.
-  Widget _routeChip(int value, ButtonStyle style) {
+  Widget _routeChip(int value) {
     final pos = _routeOrder.indexOf(value);
     final picked = pos >= 0;
-    return hoverSfx(OutlinedButton(
-      onPressed: () => setState(() {
+    return PcChip(
+      picked ? '$value  #${pos + 1}' : '$value',
+      selected: picked,
+      onTap: () => setState(() {
         if (picked) {
           _routeOrder.remove(value);
         } else {
           _routeOrder.add(value);
         }
       }),
-      style: style.copyWith(
-        backgroundColor: WidgetStateProperty.all(
-            picked ? Pc.gold.withValues(alpha: 0.3) : null),
-        side: WidgetStateProperty.all(BorderSide(
-            color:
-                picked ? Pc.goldDark : Pc.textMuted)),
-      ),
-      child: Text(picked ? '$value  #${pos + 1}' : '$value'),
-    ));
+    );
   }
 }

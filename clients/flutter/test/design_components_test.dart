@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parcello_client/design/components/pc_button.dart';
 import 'package:parcello_client/design/components/pc_card.dart';
+import 'package:parcello_client/design/components/pc_chip.dart';
 import 'package:parcello_client/design/components/pc_dialog.dart';
 import 'package:parcello_client/design/components/pc_textfield.dart';
 import 'package:parcello_client/design/components/seat_tile.dart';
@@ -244,6 +245,38 @@ void main() {
               ));
       expect(find.text('OK'), findsOneWidget);
       expect(find.text('Cancel'), findsNothing);
+    });
+  });
+
+  group('PcChip', () {
+    testWidgets('renders its label and fires onTap', (tester) async {
+      var taps = 0;
+      await tester
+          .pumpWidget(_host(PcChip('Wi-Fi', onTap: () => taps++)));
+      expect(find.text('Wi-Fi'), findsOneWidget);
+      await tester.tap(find.text('Wi-Fi'));
+      expect(taps, 1);
+    });
+
+    testWidgets('is disabled when onTap is null', (tester) async {
+      await tester.pumpWidget(_host(const PcChip('Locked')));
+      final button =
+          tester.widget<OutlinedButton>(find.byType(OutlinedButton));
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('selected fills gold, unselected outlines muted',
+        (tester) async {
+      await tester.pumpWidget(_host(PcChip('S', selected: true, onTap: () {})));
+      final sel = tester.widget<OutlinedButton>(find.byType(OutlinedButton));
+      final selBg = sel.style?.backgroundColor?.resolve({});
+      expect(selBg, isNotNull,
+          reason: 'a selected chip has a gold fill');
+
+      await tester.pumpWidget(_host(PcChip('U', onTap: () {})));
+      final un = tester.widget<OutlinedButton>(find.byType(OutlinedButton));
+      final unBg = un.style?.backgroundColor?.resolve({});
+      expect(unBg, isNull, reason: 'an unselected chip has no fill');
     });
   });
 

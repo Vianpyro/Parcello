@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../../design/components/pc_button.dart';
 import '../../design/components/pc_card.dart';
+import '../../design/components/pc_chip.dart';
 import '../../design/components/pc_dialog.dart';
 import '../../design/components/pc_textfield.dart';
 import '../../design/components/seat_tile.dart';
@@ -35,6 +36,7 @@ class ShowcaseScreen extends StatelessWidget {
           _ButtonsSection(),
           _CardsSection(),
           _TextFieldsSection(),
+          _ChipsSection(),
           _DialogsSection(),
           _SeatTilesSection(),
           _KeyboardSection(),
@@ -201,6 +203,49 @@ class _TextFieldsSectionState extends State<_TextFieldsSection> {
                 textAlign: TextAlign.end,
                 dense: true,
               ))),
+    ]);
+  }
+}
+
+/// PcChip: the tap-to-order selection chip (Legal Route builder, mod picker).
+/// Stateful to show the real behaviour - tap to pick (a gold chip with its
+/// order badge), tap again to drop - plus a disabled chip.
+class _ChipsSection extends StatefulWidget {
+  const _ChipsSection();
+
+  @override
+  State<_ChipsSection> createState() => _ChipsSectionState();
+}
+
+class _ChipsSectionState extends State<_ChipsSection> {
+  final List<int> _order = [];
+
+  @override
+  Widget build(BuildContext context) {
+    return _Section('PcChip', [
+      const _Demo('unselected / selected / disabled', SizedBox.shrink()),
+      Wrap(spacing: Pc.s6, runSpacing: Pc.s6, children: [
+        const PcChip('Idle'),
+        PcChip('Idle', onTap: () {}),
+        const PcChip('Picked  #1', selected: true),
+        const PcChip('Disabled'),
+      ]),
+      const SizedBox(height: Pc.s12),
+      const _Demo('tap to order (route / mod picker)', SizedBox.shrink()),
+      Wrap(spacing: Pc.s6, runSpacing: Pc.s6, children: [
+        for (final value in const [2, 3, 4, 5, 6])
+          Builder(builder: (_) {
+            final pos = _order.indexOf(value);
+            final picked = pos >= 0;
+            return PcChip(
+              picked ? '$value  #${pos + 1}' : '$value',
+              selected: picked,
+              onTap: () => setState(() {
+                picked ? _order.remove(value) : _order.add(value);
+              }),
+            );
+          }),
+      ]),
     ]);
   }
 }

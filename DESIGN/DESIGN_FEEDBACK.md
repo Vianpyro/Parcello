@@ -349,6 +349,56 @@ guard green.
 
 ---
 
+## Migration #5 - ActionsPanel chips: `PcChip` (blocker-driven)
+
+Methodology sharpened (owner): pick the next component NOT by business/visual
+importance but as **the one whose absence blocks the clean migration of the next
+real screen**; among candidates, prefer the one that maximizes immediate reuse.
+
+The next screen is the rest of the Game HUD - **`ActionsPanel`**. Surveying it,
+the one thing with NO design-system equivalent is the **Legal Route builder
+chips** (`_routeChip`): a tap-to-order TOGGLE chip (gold when picked, showing its
+order `#2`), a bespoke `OutlinedButton`. It is not a PcButton (it has a selected
+state); nothing in the DS covers it. So it BLOCKS a clean ActionsPanel migration.
+And its exact twin is the **mod-picker chip** in the menu (`_modChip`,
+`private_table_card.dart`) - identical toggle-order styling. Two consumers on two
+different screens => highest immediate reuse. The pull is unambiguous: **PcChip**.
+
+### What was built and migrated
+
+- **`PcChip(label, selected, onTap)`** - built on `OutlinedButton` so it keeps
+  keyboard/controller focus + the gold ring (Steam Deck); sharp corners; gold
+  fill + gold border when selected, muted hairline when not. Minimal surface.
+- Migrated **both** consumers the same PR: `_routeChip` (ActionsPanel) and
+  `_modChip` (menu). Each helper collapsed to a `PcChip(...)`; the selection-order
+  `#N` badge stays caller-composed (it is the caller's list state).
+
+### Frictions / notes
+
+| # | Classification | Finding |
+|---|---|---|
+| E1 | **visual (minor densification)** | The route chip was button-sized (h46, via the shared `touch` style); the mod chip was already h40. PcChip standardizes both at a dense h40 / `PcText.label` - so the route chips shrink slightly to the correct chip register (consistency is the point of the shared component). Recorded as Visual Debt VD-10 (accepted register correction, like the flat-card F4). |
+| E2 | **scope held** | ActionsPanel still has bespoke ACTION buttons (the `touch`-styled Filled/Outlined buttons for Bid / Play-card / End-turn) and two numeric `TextField`s (bid, bribe). Neither is blocked by a MISSING component: the buttons are a PcButton *sizing decision* (visual - not made speculatively), the inputs need a `PcTextField.inputFormatters` *additive extension*. Both are follow-ons, not this step's blocker - so, per the methodology, untouched here. |
+
+### What this taught us
+
+- **Blocker-driven selection converged on the same answer as reuse-driven would
+  have**, but for the right reason: PcChip was chosen because `_routeChip` cannot
+  be migrated without it, not because chips are "important". The two-consumer
+  reuse was the tie-breaker, not the motivation.
+- **The next ActionsPanel step is now a named, small thing**: extend
+  `PcTextField` with `inputFormatters` (the bid/bribe fields' only blocker), then
+  the button-sizing decision. Neither is a new component.
+
+### Verification
+
+`flutter analyze` clean; full suite green (**79 tests**, +3 PcChip); C2 guard
+green; **`bid_input_test` green** (the bid field sits beside the migrated route
+chips - its half-typed-bid-survives-a-frame guard still passes), `layout_test`
+green.
+
+---
+
 ## Design System Coverage (living snapshot - updated each migration)
 
 Maturity ladder: **Experimental** (built + in Showcase, no real screen yet) ->
@@ -366,7 +416,8 @@ battle-tested).
 | `PcDialog` | **Stable** | Connect (sign-in), Lobby (resign) | grew additively (`destructive`) |
 | `SeatTile` | **Validated** | Game HUD / side panel | frozen (new) |
 | `Motion` | **Stable (engine)** | director/board/stage + now `SeatTile` (`stateFade`) - but NO migrated *screen* validates it as motion yet (F6) | grew additively (`stateFade`) |
-| `PcHairline` / `PcChip` / `PcBadge` | *deferred* | none - no real screen demands them value-preservingly | not built |
+| `PcChip` | **Stable** | ActionsPanel (route builder) + menu (mod picker) | frozen (new) |
+| `PcHairline` / `PcBadge` | *deferred* | none - no real screen demands them value-preservingly | not built |
 | `PcListRow` | *deferred* | sighted once (Settings rows); awaits 2nd consumer | not built |
 | `TradeOfferCard` / `MoneyChit` / `PropertyCard` / `SettingsField` / `AuctionWidget` | *not started* | L3/L4 domain composites, pulled by their surface | not built |
 
@@ -397,6 +448,9 @@ This is where "Parcello looks like Parcello" is won.
 | Money chit (travelling) | `MoneyChit` (#11) | **legacy** - lives in `overlay.dart`; static face not extracted |
 | Trade offer | `TradeOfferCard` (#14) | **legacy** - `_trades()` renders text + TextButtons |
 | Sealed-bid INPUT (anchored to the tile) | `AuctionWidget` (#16) | **NOT built** - the #1 UX gap (motion-language 8.2); input is a corner field, clock is a corner number |
+| Legal Route builder / mod picker chips | **`PcChip`** | **DONE** (tap-to-order, both screens) |
+| Action buttons (Bid / Play card / End turn) | bespoke `touch`-styled buttons | legacy - a PcButton sizing decision, not a missing component |
+| Bid / bribe numeric inputs | raw `TextField` | legacy - needs `PcTextField.inputFormatters` (additive) |
 | VP legend / round metronome | (center panel, bespoke) | ad-hoc; reads acceptably, no component yet |
 | Market forecast / pools / spotlight lines | (center panel, `PcText.caption`) | text-only, DS-typed; fine as-is |
 | Clocks (turn / bank / bid / vote / game) | `Countdown` (pre-existing) | works; not a DS component |
@@ -429,6 +483,7 @@ readability now) -> **P3** (cosmetic / nice-to-have).
 | VD-7 | Off-grid spacing | one-off `3/5/10` insets remain literal | align to the 4-px grid in a visual-review pass, or add tokens | P3 | visual-review pass |
 | VD-8 | Rules headings | Inter (were Fraunces) | owner to confirm Inter, or revert to Fraunces if "emblematic" was intended | P3 | owner |
 | VD-9 | Audio | placeholder clip set; one cancel earcon dropped (#3/D4) | the four category earcons (AUDIO_DIRECTION) | P2 | roadmap Phase 8 |
+| VD-10 | Route chips | densified h46 -> h40 by PcChip (#5/E1) | accepted register correction (chips are dense) - resolved, logged for traceability | P3 | resolved |
 
 **Not debt (deliberate decisions, do not "fix"):** the flat board (DDR-0017),
 flat cards (no elevation shadow, ART_DIRECTION), sharp corners everywhere.
