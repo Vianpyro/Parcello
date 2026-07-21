@@ -261,6 +261,15 @@ class ActionsPanelState extends State<ActionsPanel> {
               _bribeSeeded = true;
             }
             final routeComplete = _routeOrder.length == sorted.length;
+            // One submit path shared by the Offer button and Enter/Done, read
+            // at PRESS time - typing does not rebuild this panel, so a command
+            // built at build time would send the last-rendered amount (the
+            // seeded ceiling), not the one the player just typed. The bid field
+            // already reads at press time; the bribe now matches it.
+            void submitBribe() => s.sendCmd({
+                  'type': 'offer_bribe',
+                  'amount': int.tryParse(_bribe.text) ?? 0,
+                });
             children.addAll([
               Text(loc.actionLegalRouteHint,
                   style: PcText.label),
@@ -300,15 +309,16 @@ class ActionsPanelState extends State<ActionsPanel> {
                   controller: _bribe,
                   keyboardType: TextInputType.number,
                   dense: true,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => submitBribe(),
                 ),
               ),
-              btn(
-                  loc.actionOfferBribe,
-                  {
-                    'type': 'offer_bribe',
-                    'amount': int.tryParse(_bribe.text) ?? 0
-                  },
-                  primary: false),
+              PcButton(
+                loc.actionOfferBribe,
+                dense: true,
+                variant: PcButtonVariant.secondary,
+                onPressed: submitBribe,
+              ),
             ]);
           } else {
             // Hand of movement cards (ADR-0017): one button per card
