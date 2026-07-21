@@ -48,6 +48,9 @@ canon wins and DESIGN/ has a bug - fix it via a DDR
 | UX_GUIDELINES.md | cognitive load, feedback, inputs, empty/error states |
 | ACCESSIBILITY.md | the non-negotiables |
 | DESIGN_DECISION_RECORDS.md | the DDR process + the record index; full records in `ddr/` |
+| car/README.md | the CAR process (Component Architecture Records): every L3/L4 domain component needs a ratified CAR in `car/` BEFORE implementation |
+| COMPONENT_INVENTORY.md | the component list, dependency order, build tracker + the CAR gate for L3/L4 |
+| DESIGN_FEEDBACK.md | what each real-screen migration taught us; the living Design-System / Gameplay / Visual-Debt coverage registers |
 | DESIGN_REVIEW.md | how to review any UI change |
 | IMPLEMENTATION_ROADMAP.md | the Flutter BUILD ORDER (foundations->components->screens->polish) + the maintained built-vs-not-built truth |
 | COMMERCIAL_UX_AUDIT.md | what is missing, prioritized by player impact |
@@ -60,7 +63,9 @@ DESIGN_SYSTEM + COLOR/TYPOGRAPHY as you work, DESIGN_REVIEW before you
 ship. Adding motion or sound: motion-language.md first, then
 MOTION_GUIDELINES/AUDIO_DIRECTION. Changing the look of anything:
 check DDR index - it may be a recorded decision; amend via a new DDR,
-never silently.
+never silently. Building an L3/L4 domain component (SeatTile, PropertyCard,
+MoneyChit, TradeOfferCard, AuctionWidget, ...): write and ratify its CAR
+(`car/`) FIRST - implementation does not start before the record.
 
 Update discipline is the technical repo's X3 invariant applied here:
 these are living documents; a shipped visual change that contradicts

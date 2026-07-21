@@ -66,19 +66,26 @@ Rationale + findings: DESIGN_FEEDBACK.md action items A1/A2.
 
 ## Level 3 - Domain composites (deps: L1/L2 + engine view types)
 
+> **CAR GATE (owner, 2026-07):** every L3/L4 domain composite requires a
+> ratified **Component Architecture Record** (`DESIGN/car/`, see its README)
+> BEFORE implementation - responsibility, boundaries, public API, invariants,
+> extensibility, and Motion/Accessibility/Localization interactions, validated
+> first. Pull-based still decides WHICH is next; the CAR is the gate between
+> "next" and "start coding". `SeatTile` = CAR-0001 (ratified retroactively).
+
 | # | Component | Purpose | Deps | Status |
 |---|---|---|---|---|
-| 11 | **MoneyChit** | the parchment chit's STATIC presentation (`+/-amount`, sage/oxblood) - the travel is the director's | Pc, PcText.amount | TODO |
-| 12 | **PropertyCard** | parchment face, group-colour band, rent ladder, mortgaged/conglomerate states | Pc, PcText, PcHairline | TODO |
-| 13 | **SeatTile** (PlayerCard) | identity + cash + VP + connection/bot/acting state; the chit TARGET (fixed position) | Pc, PcText (NOT PcBadge/MoneyChit - see note) | DONE (frozen) |
-| 14 | **TradeOfferCard** | an offer's give/receive + accept/refuse/cancel | PcCard, PcButton, PropertyCard | TODO |
-| 15 | **SettingsField** | a labelled setting row (clamped input/chip) | PcListRow, PcTextField/PcChip | TODO |
+| 11 | **MoneyChit** | the parchment chit's STATIC presentation (`+/-amount`, sage/oxblood) - the travel is the director's | Pc, PcText.amount | TODO - CAR first |
+| 12 | **PropertyCard** | parchment face, group-colour band, rent ladder, mortgaged/conglomerate states | Pc, PcText, PcHairline | TODO - CAR first |
+| 13 | **SeatTile** (PlayerCard) | identity + cash + VP + connection/bot/acting state; the chit TARGET (fixed position) | Pc, PcText (NOT PcBadge/MoneyChit - see note) | DONE (frozen) - **CAR-0001** |
+| 14 | **TradeOfferCard** | an offer's give/receive + accept/refuse/cancel | PcCard, PcButton, PropertyCard | TODO - CAR first |
+| 15 | **SettingsField** | a labelled setting row (clamped input/chip) | PcListRow, PcTextField/PcChip | TODO - CAR first |
 
 ## Level 4 - The hard one (deps: everything)
 
 | # | Component | Purpose | Deps | Status |
 |---|---|---|---|---|
-| 16 | **AuctionWidget** | the anchored sealed-bid input + the tile-edge draining clock (motion-language 8.2, the #1 UX gap) | PcTextField, PcChip, PcButton + board/stage integration | TODO |
+| 16 | **AuctionWidget** | the anchored sealed-bid input + the tile-edge draining clock (motion-language 8.2, the #1 UX gap) | PcTextField, PcChip, PcButton + board/stage integration | TODO - CAR first (the highest-stakes CAR) |
 
 AuctionWidget is deliberately last: it needs the input, chip, and button
 primitives proven first, it is the highest-risk surface (the 1024x600
@@ -128,7 +135,7 @@ Update this in the SAME PR as the component lands.
 | PcMarker | TODO | - | - |
 | MoneyChit | TODO | - | - |
 | PropertyCard | TODO | - | - |
-| SeatTile | DONE 2026-07 (`lib/design/components/seat_tile.dart`) - **used in the Game HUD / side panel** | YES (DDR-0019) | Yes (SeatTile: leader/idle/bot/bankrupt/lobby + narrow) + tests |
+| SeatTile | DONE 2026-07 (`lib/design/components/seat_tile.dart`) - **used in the Game HUD / side panel**; **CAR-0001** | YES (DDR-0019) | Yes (SeatTile: leader/idle/bot/bankrupt/lobby + narrow) + tests |
 | TradeOfferCard | TODO | - | - |
 | SettingsField | TODO | - | - |
 | AuctionWidget | TODO | - | - |
