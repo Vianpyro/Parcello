@@ -16,7 +16,7 @@ class EventLog extends StatelessWidget {
       decoration: BoxDecoration(
         color: Pc.bg,
         border: Border.all(color: Pc.border),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: Pc.radius,
       ),
       padding: const EdgeInsets.symmetric(horizontal: Pc.s8, vertical: Pc.s4),
       child: ListView.builder(

@@ -61,7 +61,7 @@ class CoachMark extends StatelessWidget {
       color: Pc.surface2,
       shape: RoundedRectangleBorder(
         side: const BorderSide(color: Pc.gold, width: 1),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: Pc.radius,
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Pc.s12, Pc.s8, Pc.s8, Pc.s8),

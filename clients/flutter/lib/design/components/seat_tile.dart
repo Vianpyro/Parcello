@@ -84,7 +84,7 @@ class SeatTile extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: Pc.s6, vertical: active ? 5 : 2),
       decoration: BoxDecoration(
         color: active ? Pc.gold.withValues(alpha: 0.16) : null,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: Pc.radius,
         border: Border(
           left: BorderSide(
             color: active ? Pc.gold : Colors.transparent,

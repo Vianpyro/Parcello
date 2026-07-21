@@ -149,7 +149,7 @@ class CenterPanel extends StatelessWidget {
       padding: const EdgeInsets.all(Pc.s8),
       decoration: BoxDecoration(
         color: Pc.gold.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: Pc.radius,
         border: Border.all(color: Pc.gold, width: 1),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
