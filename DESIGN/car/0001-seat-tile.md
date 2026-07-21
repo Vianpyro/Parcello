@@ -6,6 +6,13 @@ Level: L3    Inventory: #13    Pulled by: Game HUD / side panel (DESIGN_FEEDBACK
 > Retroactive record: SeatTile shipped (migration #4) before the CAR gate
 > existed. This CAR documents the as-built architecture and ratifies it, and is
 > the worked example the template is validated against. No behaviour change.
+>
+> **DDR-0020 conformance (confirmed):** SeatTile already takes a strictly
+> semantic param list (ids + localized strings + numbers) + the
+> `anchorKey`/`trailingBid` slots + no intents (it is non-interactive). It holds
+> **zero rendering information** - it receives `seat: int` and resolves
+> `pawnColor(seat)` from tokens INTERNALLY, never a colour. When the param list
+> is promoted to a named `SeatTileModel` type, that type inherits this invariant.
 
 ## 1. Responsibility
 

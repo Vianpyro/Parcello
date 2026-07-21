@@ -122,4 +122,40 @@ void main() {
       print('C2 guard WARNING (not enforced):\n$message');
     }
   });
+
+  // DDR-0020: a design-system component takes a strictly-semantic Semantic
+  // Model - it must not reach into the engine/session. Skins and preview/
+  // replay/spectator parity depend on this boundary, so it is guarded, not
+  // just asked in the CAR. Any import of the session or the engine view types
+  // (`protocol.dart`) from under `lib/design/` is a violation.
+  test('DDR-0020 guard: lib/design never imports session or engine views', () {
+    // Anchored to a path boundary so `session.dart`/`protocol.dart` match only
+    // as a whole file (never inside a `foo_session.dart`).
+    final forbidden =
+        RegExp('''import\\s+['"](?:[^'"]*/)?(session|protocol)\\.dart['"]''');
+    final violations = <String>[];
+    final root = Directory('lib${Platform.pathSeparator}design');
+    if (root.existsSync()) {
+      for (final entity in root.listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        final lines = entity.readAsLinesSync();
+        for (var i = 0; i < lines.length; i++) {
+          if (forbidden.hasMatch(lines[i])) {
+            violations.add('${entity.path}:${i + 1}  ${lines[i].trim()}');
+          }
+        }
+      }
+    }
+    if (violations.isEmpty) return;
+    final message =
+        'DDR-0020 violated: a design-system component reaches into the engine/'
+        'session (its input must be a pre-mapped, engine-free Semantic Model):'
+        '\n  ${violations.join('\n  ')}';
+    if (_enforce) {
+      fail(message);
+    } else {
+      // ignore: avoid_print
+      print('DDR-0020 guard WARNING (not enforced):\n$message');
+    }
+  });
 }

@@ -11,8 +11,13 @@ component-scoped sibling of the two existing record types:
   responsibility, boundaries, public API, invariants, and how it meets Motion,
   Accessibility, and Localization.
 
-A CAR may cite ADRs and DDRs; it never contradicts them (DDR-0019 governs the
-API-stability contract that every CAR's "Public API" section inherits).
+A CAR may cite ADRs and DDRs; it never contradicts them. Two DDRs are load-
+bearing for every CAR: **DDR-0019** (the API-stability contract its "Public API"
+section inherits) and **DDR-0020** (the data-flow contract - a component takes
+one immutable **Semantic Model** with ZERO rendering information + framework-
+owned transient state + explicit intents; skins depend on this, so the model
+carries no colours/fonts/spacing/durations/icons). Sections 2, 3, 6 and 7 below
+are the per-component application of DDR-0020.
 
 ## When a CAR is REQUIRED (the gate)
 
@@ -59,14 +64,19 @@ Level: L3 | L4    Inventory: #NN    Pulled by: <the screen that blocked on it>
 One sentence: the single thing this component is responsible for. Then the
 "it does NOT" list - responsibilities that look adjacent but belong elsewhere.
 
-## 2. Boundaries
-- Layer: where it sits; what it may import (view types? never session/l10n?).
-- Inputs: what data shape it takes and why (formatted strings vs raw + why).
-- Ownership: what the PARENT computes/formats vs what the component owns.
+## 2. Boundaries (DDR-0020)
+- Layer: where it sits; NEVER imports `session.dart` / engine view types.
+- The Semantic Model: the immutable, engine-free, pre-localized, STRICTLY
+  SEMANTIC input - list its fields and confirm NONE is rendering info
+  (no colour/font/spacing/duration/icon; ids + localized text + numbers only).
+- Slots & intents: the stage anchors/slots it exposes (not model), and the
+  intent callbacks it emits (not model).
+- Ownership: what the PARENT/mapper computes vs what the component owns.
 
 ## 3. Public API
-The constructor + every named param, with type and meaning. This is frozen
-API the moment it ships (DDR-0019). Note which params are required.
+The constructor + every named param, with type and meaning: the Semantic Model,
+the slots/anchors, the intents. Frozen API the moment it ships (DDR-0019). Note
+which params are required.
 
 ## 4. Invariants
 Must-always / must-never for this component. Each should be checkable (a test,
@@ -76,14 +86,17 @@ or a review rule).
 How it is expected to grow (additive defaulted params - list the anticipated
 ones and their trigger). What change would instead require a new CAR/DDR.
 
-## 6. Motion
-Which Motion tokens/tiers it uses (never a raw Duration). Whether it is a
-director beat, an implicit transition, or an animation TARGET (anchor) only.
-Reduced-motion behaviour.
+## 6. Motion (DDR-0020, layer)
+Which `Motion` tokens/tiers it uses (never a raw `Duration`, never a duration in
+the Semantic Model). Whether it is a director beat, a local implicit transition
+driven by a model change, or an animation TARGET (anchor) only. Reduced motion
+comes from ambient context (`MediaQuery`), not the model.
 
-## 7. Accessibility
-Focus/traversal (or explicitly non-interactive). Never colour-only signalling
-(the redundant channel). Text scaling / narrow-width behaviour. Semantics.
+## 7. Accessibility (DDR-0020, ambient)
+Focus/traversal (framework-owned) or explicitly non-interactive. Never
+colour-only signalling (the redundant channel). Text scaling / narrow-width /
+high-contrast behaviour - all read from `MediaQuery`/`Theme`, not pushed.
+Semantics label (fed by the model's localized strings).
 
 ## 8. Localization
 What it receives already-localized (INVARIANTS C1: no literals, no formatting

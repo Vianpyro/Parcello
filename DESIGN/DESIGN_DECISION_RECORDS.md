@@ -70,6 +70,7 @@ the cited bible section / doc; this is the index.
 | **DDR-017** | The board stays flat for now; isometric deferred to its own future chantier (owner-decided 2026-07) | [ddr/0017](ddr/0017-board-stays-flat-for-now.md) | when isometric is proposed |
 | **DDR-018** | Typography roles carry size+weight+family + a DEFAULT colour (overridable); some omit size to inherit it - the Phase 2 taxonomy | [ddr/0018](ddr/0018-typography-roles-carry-default-colour.md) | at high typography coverage, or if the default-colour ergonomics prove wrong |
 | **DDR-019** | The design system's PUBLIC API (`Pc`/`PcText`/`Motion`/components) is a stability contract: internals free, additions free, but renames/removals/semantic changes need a DDR or in-diff justification (owner-set 2026-07) | [ddr/0019](ddr/0019-design-system-public-api-is-a-stability-contract.md) | on package extraction (DDR-0016), when a real semver policy replaces it |
+| **DDR-020** | L3/L4 components take one immutable **Semantic Model** (engine-free, pre-localized, ZERO rendering info - skins are a goal) + framework-owned transient state (focus/hover/MediaQuery/ticker) + explicit intents; the mandatory `Presentation`-object proposal was rejected as fighting Flutter (owner-ratified 2026-07) | [ddr/0020](ddr/0020-component-data-flow.md) | if a skin system or a reactive framework change reopens the model boundary |
 
 ## Stability tiers (which decisions are load-bearing identity)
 
