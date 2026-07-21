@@ -51,7 +51,7 @@ class MenuTileState extends State<MenuTile> {
           color: Pc.surface,
           child: InkWell(
             onFocusChange: (f) => setState(() => _focused = f),
-            focusColor: Pc.gold.withValues(alpha: 0.12),
+            focusColor: Pc.goldWash,
             onTap: widget.onTap,
             child: Padding(
               padding: const EdgeInsets.all(Pc.s16),

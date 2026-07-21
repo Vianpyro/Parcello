@@ -14,6 +14,12 @@
 ///   - corner radius: any `circular(N)` outside `tokens.dart` - the art
 ///     direction is sharp corners (0-2 px, `visual-identity.md`), reachable
 ///     ONLY through `Pc.radius`; a raw `BorderRadius.circular(4/8)` is drift;
+///   - the selection wash: `withValues(alpha: 0.12)` outside `tokens.dart` -
+///     the faint gold selection/focus fill is `Pc.goldWash` (was triplicated
+///     raw); stronger one-off gold weights (0.16/0.3) stay bespoke;
+///   - the gold emphasis frame: `Border.all(color: Pc.goldDark, width: 1.5)`
+///     outside `tokens.dart` is `Pc.goldFrame` (was triplicated raw); the
+///     fill/shadow paired with it stay the caller's, only the frame is shared;
 ///   - ON-GRID spacing (2/4/6/8/12/16/24) in simple single-value contexts:
 ///     `EdgeInsets.all(N)`, a single named inset side, a `SizedBox` dim;
 ///   - the brand font: any inline `fontFamily: 'Fraunces'` outside
@@ -85,6 +91,15 @@ void main() {
     // sanctioned value) does not match; the definition in tokens.dart is
     // excluded below. Only `Radius`/`BorderRadius` use `circular(` in the tree.
     final radius = RegExp(r'circular\(\d');
+    // The faint gold selection/focus wash is a token (`Pc.goldWash`). This
+    // exact alpha was triplicated raw across menu_tile/private_table_card/
+    // center_panel; only the tokenised value is enforced - the bespoke
+    // one-off gold weights (0.16 active seat, 0.3 chosen chip) stay free.
+    final goldWash = RegExp(r'withValues\(alpha: 0\.12\)');
+    // The gold emphasis frame is a token (`Pc.goldFrame`). This exact border
+    // was triplicated raw across flashes/center_panel; the fill and shadow the
+    // caller pairs with it stay free (they legitimately vary per surface).
+    final goldFrame = RegExp(r'Border\.all\(color: Pc\.goldDark, width: 1\.5\)');
     // The brand font is reachable only through PcText.wordmark.
     final fraunces = RegExp(r"fontFamily: 'Fraunces'");
     // A size-ONLY TextStyle at a role size: `fontSize: N` is the sole argument
@@ -109,6 +124,8 @@ void main() {
             named.hasMatch(line) ||
             colour.hasMatch(line) ||
             radius.hasMatch(line) ||
+            goldWash.hasMatch(line) ||
+            goldFrame.hasMatch(line) ||
             fraunces.hasMatch(line) ||
             roleSize.hasMatch(line)) {
           violations.add('${entity.path}:${i + 1}  ${line.trim()}');
@@ -120,7 +137,8 @@ void main() {
     final message = 'C2 guard found ${violations.length} raw literal(s) that '
         'must go through the design system '
         '(on-grid spacing -> Pc.sN; colour -> a Pc colour; '
-        'corner radius -> Pc.radius; '
+        'corner radius -> Pc.radius; selection wash -> Pc.goldWash; '
+        'gold frame -> Pc.goldFrame; '
         "fontFamily: 'Fraunces' -> PcText.wordmark; size-only TextStyle at a "
         'role size -> the PcText role):\n  '
         '${violations.join('\n  ')}';

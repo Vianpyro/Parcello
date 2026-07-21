@@ -27,7 +27,7 @@ class CenterPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Pc.surface,
         borderRadius: Pc.radius,
-        border: Border.all(color: Pc.goldDark, width: 1.5),
+        border: Pc.goldFrame,
       ),
       child: DefaultTextStyle(
         style: PcText.body,
@@ -148,7 +148,7 @@ class CenterPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(Pc.s8),
       decoration: BoxDecoration(
-        color: Pc.gold.withValues(alpha: 0.12),
+        color: Pc.goldWash,
         borderRadius: Pc.radius,
         border: Border.all(color: Pc.gold, width: 1),
       ),

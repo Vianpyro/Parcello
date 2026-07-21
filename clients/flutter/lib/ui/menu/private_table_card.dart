@@ -65,7 +65,7 @@ class PrivateTableCardState extends State<PrivateTableCard> {
         style: TextButton.styleFrom(
           foregroundColor: selected ? Pc.gold : Pc.text,
           backgroundColor:
-              selected ? Pc.gold.withValues(alpha: 0.12) : null,
+              selected ? Pc.goldWash : null,
           shape: const RoundedRectangleBorder(borderRadius: Pc.radius),
           minimumSize: const Size(0, footerBtnMinH),
         ),

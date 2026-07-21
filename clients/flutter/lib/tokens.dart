@@ -58,6 +58,20 @@ abstract final class Pc {
   /// alpha). The gold cousin of [border]; scarce, for framing only.
   static const hairlineGold = Color(0x33A9812F);
 
+  /// The faint gold selection/focus wash: a low-emphasis gold FILL shared by
+  /// every "this one is picked" affordance (keyboard focus, a selected card, a
+  /// highlighted panel row). One value so these states never drift apart -
+  /// stronger accents (an active seat, a chosen chip) are deliberately their
+  /// own weights, not this wash.
+  static final goldWash = gold.withValues(alpha: 0.12);
+
+  /// The gold emphasis frame: the hairline `goldDark` border that rings a
+  /// ceremonial/highlighted container (an event flash, a banner, the central
+  /// panel). One weight so every framed surface reads as the same object -
+  /// the fill and shadow are the caller's (a flash sits on parchment, a panel
+  /// on surface), only the frame is shared.
+  static final goldFrame = Border.all(color: goldDark, width: 1.5);
+
   // -- Spacing scale ---------------------------------------------------------
   // The 4-px grid the UI already uses (values audited 2026-07: 12/8/6/4/2 are
   // the workhorses, 16/24 the section gaps). Reach for these instead of a raw
