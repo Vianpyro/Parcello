@@ -16,7 +16,15 @@
 ///   - the brand font: any inline `fontFamily: 'Fraunces'` outside
 ///     `typography.dart` (DDR-0018 / TYPOGRAPHY.md - Fraunces is the brand
 ///     voice, reachable ONLY through `PcText.wordmark`; Inter is the default
-///     UI face).
+///     UI face);
+///   - a size-ONLY `TextStyle` at a role size (`TextStyle(fontSize: N)` with
+///     N in 10/11/12/13/14/16/18 and no other property): it must be the
+///     matching `PcText` role (whisper/caption/label/body/rowTitle/section/
+///     tileTitle). Unblocked once the theme default ink became `Pc.text`
+///     (A3) - a bare-size style now inherits the DS colour, so adopting a
+///     coloured role is value-preserving. Multi-property styles (a weight,
+///     letterSpacing, an explicit colour) and OFF-role sizes (15/20/26/...)
+///     are bespoke by design and NOT flagged.
 ///
 /// OUT OF SCOPE (deliberately not flagged - see `lib/tokens.dart`'s spacing
 /// note and DESIGN/IMPLEMENTATION_ROADMAP.md):
@@ -29,18 +37,18 @@
 ///     but a network timeout / debounce / timer interval does not, and the
 ///     two cannot be told apart line-by-line - so durations are a
 ///     review-only C2 concern, not machine-enforced here;
-///   - raw `fontSize:` values (a role SIZE like 12 has a `PcText` role):
-///     deferred until the theme's default text colour is made explicit
-///     (`Pc.text`) so colour-inheriting bare-size styles can adopt a
-///     coloured role without a visual shift - until then a size-only style
-///     that inherits its colour cannot safely take a coloured role. See
-///     DESIGN/IMPLEMENTATION_ROADMAP.md Phase 2.
+///   - MULTI-property or off-role `fontSize:` styles: a bespoke display size
+///     (15/20/26/32), a computed size, or a size paired with a weight/colour/
+///     letterSpacing a role does not carry - these are intentional one-offs,
+///     decided in review, not machine-flagged. Only the size-ONLY-at-a-role-
+///     size case above is enforced.
 ///
-/// PROGRESSION: landed directly in ERROR mode because the spacing migration
-/// reached full coverage first (the dry run reported zero violations). Set
-/// [_enforce] to `false` to DOWNGRADE to warning mode during a future large
-/// migration - it will print offenders without failing CI - then flip back
-/// to `true` once coverage is restored.
+/// PROGRESSION: each rule lands in ERROR mode only after its migration reaches
+/// full coverage (a dry run reporting zero violations) - spacing/colour first,
+/// then the Fraunces rule, then the role-size rule after A3 migrated every
+/// size-only style. Set [_enforce] to `false` to DOWNGRADE to warning mode
+/// during a future large migration - it prints offenders without failing CI -
+/// then flip back to `true` once coverage is restored.
 library;
 
 import 'dart:io';
@@ -53,6 +61,11 @@ const _enforce = true;
 
 /// The 4-px spacing grid that has tokens in `Pc` (`s2`..`s24`).
 const _grid = '2|4|6|8|12|16|24';
+
+/// The font sizes that have a `PcText` role (whisper 10, caption 11, label 12,
+/// body 13, rowTitle 14, section 16, tileTitle 18). A size-ONLY style at one of
+/// these must be the role.
+const _roleSizes = '10|11|12|13|14|16|18';
 
 void main() {
   test('C2 guard: no raw colour or on-grid spacing literal at a use site', () {
@@ -67,6 +80,9 @@ void main() {
     final colour = RegExp(r'Color\(0x');
     // The brand font is reachable only through PcText.wordmark.
     final fraunces = RegExp(r"fontFamily: 'Fraunces'");
+    // A size-ONLY TextStyle at a role size: `fontSize: N` is the sole argument
+    // (the `)` right after it), so weights/colours/other props never match.
+    final roleSize = RegExp(r'TextStyle\(fontSize: (' + _roleSizes + r')\)');
 
     final violations = <String>[];
     for (final entity in Directory('lib').listSync(recursive: true)) {
@@ -85,7 +101,8 @@ void main() {
         if (all.hasMatch(line) ||
             named.hasMatch(line) ||
             colour.hasMatch(line) ||
-            fraunces.hasMatch(line)) {
+            fraunces.hasMatch(line) ||
+            roleSize.hasMatch(line)) {
           violations.add('${entity.path}:${i + 1}  ${line.trim()}');
         }
       }
@@ -93,8 +110,10 @@ void main() {
 
     if (violations.isEmpty) return;
     final message = 'C2 guard found ${violations.length} raw literal(s) that '
-        'must be a token in lib/tokens.dart '
-        '(on-grid spacing -> Pc.sN; colour -> a Pc colour):\n  '
+        'must go through the design system '
+        '(on-grid spacing -> Pc.sN; colour -> a Pc colour; '
+        "fontFamily: 'Fraunces' -> PcText.wordmark; size-only TextStyle at a "
+        'role size -> the PcText role):\n  '
         '${violations.join('\n  ')}';
     if (_enforce) {
       fail(message);

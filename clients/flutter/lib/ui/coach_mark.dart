@@ -10,6 +10,7 @@ import '../l10n/app_localizations.dart';
 import '../session.dart';
 import '../sfx.dart';
 import '../tokens.dart';
+import '../typography.dart';
 
 /// The hint the player should see right now, or null. Ordered by urgency:
 /// a decision window beats general orientation. Spectators get none - the
@@ -69,7 +70,7 @@ class CoachMark extends StatelessWidget {
               color: Pc.gold, size: 18),
           const SizedBox(width: Pc.s8),
           Flexible(
-            child: Text(text, style: const TextStyle(fontSize: 12)),
+            child: Text(text, style: PcText.label),
           ),
           const SizedBox(width: Pc.s4),
           hoverSfx(TextButton(

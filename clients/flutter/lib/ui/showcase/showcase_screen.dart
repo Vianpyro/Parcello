@@ -158,10 +158,11 @@ class _TextFieldsSectionState extends State<_TextFieldsSection> {
   final _capped = TextEditingController(text: 'alice');
   final _narrow = TextEditingController();
   final _zoom = TextEditingController(text: 'scales');
+  final _dense = TextEditingController(text: '25');
 
   @override
   void dispose() {
-    for (final c in [_empty, _filled, _capped, _narrow, _zoom]) {
+    for (final c in [_empty, _filled, _capped, _narrow, _zoom, _dense]) {
       c.dispose();
     }
     super.dispose();
@@ -186,6 +187,18 @@ class _TextFieldsSectionState extends State<_TextFieldsSection> {
           'text zoom 1.5x',
           _TextScaled(
               1.5, PcTextField(controller: _zoom, label: 'Display name'))),
+      // The settings pattern: dense, numeric, right-aligned, label OUTSIDE the
+      // field (here the demo caption stands in for the row's left column).
+      _Demo(
+          'dense numeric (settings)',
+          SizedBox(
+              width: 84,
+              child: PcTextField(
+                controller: _dense,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.end,
+                dense: true,
+              ))),
     ]);
   }
 }

@@ -48,34 +48,43 @@ class ParcelloApp extends StatelessWidget {
 
   /// `tag` empty = no override, so Flutter resolves the system locale.
   Widget _app(String tag) {
+    final theme = ThemeData(
+      brightness: Brightness.dark,
+      // Inter is the body/UI family (docs/visual-identity.md); Fraunces
+      // (wordmark) and SourceSerif4 (tile labels) are applied at their
+      // specific use sites. Bundled offline - assets/fonts/.
+      fontFamily: 'Inter',
+      scaffoldBackgroundColor: Pc.bg,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: Pc.gold,
+        brightness: Brightness.dark,
+      ).copyWith(surface: Pc.surface, error: Pc.oxblood),
+      // Sharp corners everywhere: no pills, no soft blobs. Art direction, not
+      // preference (`docs/visual-identity.md`).
+      cardTheme: const CardThemeData(
+          shape: RoundedRectangleBorder(borderRadius: Pc.radius)),
+      filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+              shape: const RoundedRectangleBorder(borderRadius: Pc.radius))),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+              shape: const RoundedRectangleBorder(borderRadius: Pc.radius))),
+      dialogTheme: const DialogThemeData(
+          shape: RoundedRectangleBorder(borderRadius: Pc.radius)),
+    );
     return MaterialApp(
       locale: tag.isEmpty ? null : Locale(tag),
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        // Inter is the body/UI family (docs/visual-identity.md); Fraunces
-        // (wordmark) and SourceSerif4 (tile labels) are applied at their
-        // specific use sites. Bundled offline - assets/fonts/.
-        fontFamily: 'Inter',
-        scaffoldBackgroundColor: Pc.bg,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Pc.gold,
-          brightness: Brightness.dark,
-        ).copyWith(surface: Pc.surface, error: Pc.oxblood),
-        // Sharp corners everywhere: no pills, no soft blobs. Art direction, not
-        // preference (`docs/visual-identity.md`).
-        cardTheme: const CardThemeData(
-            shape: RoundedRectangleBorder(borderRadius: Pc.radius)),
-        filledButtonTheme: FilledButtonThemeData(
-            style: FilledButton.styleFrom(
-                shape: const RoundedRectangleBorder(borderRadius: Pc.radius))),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-            style: OutlinedButton.styleFrom(
-                shape: const RoundedRectangleBorder(borderRadius: Pc.radius))),
-        dialogTheme: const DialogThemeData(
-            shape: RoundedRectangleBorder(borderRadius: Pc.radius)),
+      // Default text ink is Pc.text (warm cream), not Material's near-white:
+      // a bare or size-only TextStyle now inherits the DS colour, so the type
+      // roles that omit a colour and the fontSize-only sites migrated in A3
+      // are correct by default (DESIGN_FEEDBACK.md F3/A3, DDR-0018). This is
+      // the one place the app-wide default lives - use sites stop guessing.
+      theme: theme.copyWith(
+        textTheme:
+            theme.textTheme.apply(bodyColor: Pc.text, displayColor: Pc.text),
       ),
       home: ListenableBuilder(
         listenable: session,

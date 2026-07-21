@@ -68,8 +68,7 @@ class PrivateTableCardState extends State<PrivateTableCard> {
           shape: const RoundedRectangleBorder(borderRadius: Pc.radius),
           minimumSize: const Size(0, footerBtnMinH),
         ),
-        child: Text(label,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+        child: Text(label, style: PcText.rowTitle),
       )),
     );
   }

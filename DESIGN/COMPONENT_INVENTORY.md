@@ -60,7 +60,7 @@ Rationale + findings: DESIGN_FEEDBACK.md action items A1/A2.
 | # | Component | Purpose | Deps | Status |
 |---|---|---|---|---|
 | 7 | **PcPanel** | titled section = PcCard + title row + PcHairline | PcCard, PcHairline, PcText | TODO |
-| 8 | **PcListRow** | leading / title / subtitle / trailing row | PcText (+ PcBadge) | TODO |
+| 8 | **PcListRow** | leading / title / subtitle / trailing row | PcText (+ PcBadge) | TODO - sighted once (Settings label/value rows, DESIGN_FEEDBACK #2/D2); build on the 2nd consumer (lobby seat list) |
 | 9 | **PcDialog** | confirm dialog: title + body + primary/cancel | PcButton | DONE (frozen) - built early (promoted, see L1 note) |
 | 10 | **PcMarker** | persistent, dismissible marker card (AFK auto-play, connection, coach mark base) | PcCard, PcButton | TODO |
 
@@ -118,7 +118,7 @@ Update this in the SAME PR as the component lands.
 |---|---|---|---|
 | PcButton | DONE 2026-07 (`lib/design/components/pc_button.dart`) - **used in a real screen: Connect** | YES (DDR-0019) | Yes (PcButton) + `test/design_components_test.dart` |
 | PcCard | DONE 2026-07 (`lib/design/components/pc_card.dart`) - **used in a real screen: Connect** | YES (DDR-0019) | Yes (PcCard: variants + narrow + text-zoom edge cases) + tests |
-| PcTextField | DONE 2026-07 (`lib/design/components/pc_textfield.dart`) - **used in a real screen: Connect** (url/name/issuer) | YES (DDR-0019) | Yes (PcTextField: empty/filled/counter + narrow + text-zoom) + tests |
+| PcTextField | DONE 2026-07 (`lib/design/components/pc_textfield.dart`) - **used in real screens: Connect** (url/name/issuer) **+ Settings** (dense numeric); grew `keyboardType`/`textAlign`/`dense`/optional-label additively for Settings (DESIGN_FEEDBACK #2/D1) | YES (DDR-0019; additive growth only) | Yes (PcTextField: empty/filled/counter + narrow + text-zoom + dense-numeric) + tests |
 | PcDialog | DONE 2026-07 (`lib/design/components/pc_dialog.dart`) - **used in a real screen: Connect** (sign-in) | YES (DDR-0019) | Yes (PcDialog: prompt + single-action) + tests |
 | PcHairline | TODO (deferred) | - | - |
 | PcChip | TODO (deferred) | - | - |

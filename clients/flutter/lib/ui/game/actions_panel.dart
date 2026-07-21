@@ -138,7 +138,7 @@ class ActionsPanelState extends State<ActionsPanel> {
           isDiscoverer
               ? loc.actionSealedBidFloor(s.tileName(t.tile!), price)
               : loc.actionSealedBid(s.tileName(t.tile!)),
-          style: const TextStyle(fontSize: 12),
+          style: PcText.label,
         ),
         // The discoverer's edge (ADR-0018 amended): every winner pays in
         // full, then the bank visibly refunds the discoverer 10%.
@@ -216,7 +216,7 @@ class ActionsPanelState extends State<ActionsPanel> {
       children.addAll([
         Text(
           loc.actionBribePrompt(s.playerName(t.briber!), t.amount!),
-          style: const TextStyle(fontSize: 12),
+          style: PcText.label,
         ),
         btn(loc.actionAccept, {'type': 'vote_on_bribe', 'accept': true}),
         btn(loc.actionReject, {'type': 'vote_on_bribe', 'accept': false},
@@ -263,7 +263,7 @@ class ActionsPanelState extends State<ActionsPanel> {
             final routeComplete = _routeOrder.length == sorted.length;
             children.addAll([
               Text(loc.actionLegalRouteHint,
-                  style: const TextStyle(fontSize: 12)),
+                  style: PcText.label),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,

@@ -6,12 +6,14 @@
 /// (ART_DIRECTION), consistent with PcCard.
 ///
 /// PUBLIC API - STABILITY CONTRACT (DDR-0019): the constructor + named params
-/// are public API. This surface is deliberately MINIMAL - exactly what the
-/// first real screen (Connect) needs. The following params are KNOWN-NEEDED by
-/// screens not yet migrated and will be ADDED (optional, defaulted - additive,
-/// so no DDR): `keyboardType` (numeric bid/settings inputs), `autofocus` (the
-/// join-code field), a counter toggle (feedback suppresses it). Each lands when
-/// the screen that needs it migrates - not speculatively.
+/// are public API, grown ADDITIVELY as real screens demand (never
+/// speculatively). Connect (labelled form fields) shipped the first surface;
+/// the Settings panel then needed dense numeric columns with an EXTERNAL label,
+/// which added `keyboardType`, `textAlign`, `dense`, and loosened `label` to
+/// optional - all backward-compatible (existing callers unchanged), so within
+/// the DDR-0019 "add optional params freely" allowance. Still future-additive
+/// when a screen needs them: `autofocus` (the join-code field), a counter
+/// toggle (feedback suppresses it).
 library;
 
 import 'package:flutter/material.dart';
@@ -24,8 +26,9 @@ import '../../tokens.dart';
 class PcTextField extends StatelessWidget {
   final TextEditingController controller;
 
-  /// The floating label (a localized string at every real call site).
-  final String label;
+  /// The floating label. Omit for a field whose label sits OUTSIDE it (a
+  /// settings row's left column) - then the input carries none.
+  final String? label;
 
   /// Placeholder shown while empty; omit for none.
   final String? hint;
@@ -34,12 +37,26 @@ class PcTextField extends StatelessWidget {
   /// display name). Omit for an unbounded field.
   final int? maxLength;
 
+  /// The soft-keyboard / input type - e.g. `TextInputType.number` for a
+  /// numeric settings or bid field. Omit for free text.
+  final TextInputType? keyboardType;
+
+  /// Text alignment - `TextAlign.end` for a right-aligned numeric column.
+  final TextAlign textAlign;
+
+  /// Compact vertical density for a field packed into a dense list (the
+  /// settings rows); the roomy default suits a standalone form field.
+  final bool dense;
+
   const PcTextField({
     super.key,
     required this.controller,
-    required this.label,
+    this.label,
     this.hint,
     this.maxLength,
+    this.keyboardType,
+    this.textAlign = TextAlign.start,
+    this.dense = false,
   });
 
   @override
@@ -47,10 +64,13 @@ class PcTextField extends StatelessWidget {
     return TextField(
       controller: controller,
       maxLength: maxLength,
+      keyboardType: keyboardType,
+      textAlign: textAlign,
       cursorColor: Pc.gold,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
+        isDense: dense,
         // Bare-colour styles: size comes from Material's decoration logic (the
         // label floats smaller, the counter is fixed) - only the colour is
         // ours, so these stay tokenised TextStyles, not PcText roles.

@@ -3,12 +3,13 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../design/components/pc_button.dart';
+import '../../design/components/pc_textfield.dart';
 import '../../l10n/app_localizations.dart';
 import '../../protocol.dart';
 import '../../session.dart';
 import '../../tokens.dart';
 import '../../typography.dart';
-import '../common.dart';
 
 class SettingsPanel extends StatefulWidget {
   final GameSession s;
@@ -167,20 +168,21 @@ class SettingsPanelState extends State<SettingsPanel> {
             child: Row(children: [
               Expanded(
                   child: Text(_hostLabel(t, key),
-                      style: const TextStyle(fontSize: 12))),
+                      style: PcText.label)),
               SizedBox(
                 width: 84,
-                child: TextField(
-                  controller: _c[key],
+                child: PcTextField(
+                  controller: _c[key]!,
                   keyboardType: TextInputType.number,
-                  textAlign: TextAlign.right,
-                  decoration: const InputDecoration(isDense: true),
+                  textAlign: TextAlign.end,
+                  dense: true,
                 ),
               ),
             ]),
           ),
         const SizedBox(height: Pc.s4),
-        wideButton(t.settingApply, _apply, primary: false),
+        PcButton(t.settingApply,
+            onPressed: _apply, variant: PcButtonVariant.secondary),
       ];
 
   List<Widget> _readOnly(RoomSettings s, AppLocalizations t) {
@@ -250,7 +252,7 @@ class SettingsPanelState extends State<SettingsPanel> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(label, style: const TextStyle(fontSize: 12)),
+              Text(label, style: PcText.label),
               Text(value,
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w600)),

@@ -116,6 +116,26 @@ void main() {
           width: 90, child: PcTextField(controller: c, label: 'Cash'))));
       expect(find.byType(PcTextField), findsOneWidget);
     });
+
+    testWidgets('label-less dense numeric field carries no label and accepts '
+        'numbers (the settings pattern)', (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(SizedBox(
+          width: 84,
+          child: PcTextField(
+            controller: c,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.end,
+            dense: true,
+          ))));
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.decoration?.labelText, isNull, reason: 'no floating label');
+      expect(field.keyboardType, TextInputType.number);
+      expect(field.textAlign, TextAlign.end);
+      await tester.enterText(find.byType(PcTextField), '3600');
+      expect(c.text, '3600');
+    });
   });
 
   group('PcDialog', () {

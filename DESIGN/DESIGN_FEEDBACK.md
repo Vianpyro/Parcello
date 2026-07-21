@@ -75,7 +75,7 @@ screen migrations should look like it.**
 |---|---|---|
 | F1 | **missing component** - **RESOLVED** | The three inputs (server URL, display name, and the issuer field in the sign-in dialog) had to stay raw `TextField`. `PcTextField` (inventory #6) did not exist yet. This is the single biggest gap: a *form* screen is mostly inputs, and the DS can't dress them. **Resolved (A1):** `PcTextField` was built next and the three inputs migrated to it - the finding directly reordered the build plan and the component is now validated on Connect. |
 | F2 | **missing component** - **RESOLVED** | The sign-in flow is an `AlertDialog` with a `TextField` + two buttons. `PcDialog` (inventory #9) did not exist, so the dialog stayed fully legacy (Material title/buttons, not PcButton). **Resolved (A2):** `PcDialog` was built right after PcTextField and the sign-in dialog migrated to it (title + field + cancel/confirm, PcButton actions on a raised surface). Connect no longer has any legacy widget. |
-| F3 | **typography issue** + **API issue** | The subtitle and the `loginMessage` line are `TextStyle(color: Pc.textMuted)` with an **inherited** size. No `PcText` role fits: every role carries a size (DDR-0018), and there is no "muted text at the ambient size" role. Left bespoke. Root cause is shared: the theme sets **no default text colour**, so a bare-size role can't safely adopt a colour either. This is the recurring tail from the typography migration, now hit in a real screen. |
+| F3 | **typography issue** + **API issue** - **partly RESOLVED (A3)** | The subtitle and the `loginMessage` line are `TextStyle(color: Pc.textMuted)` with an **inherited** size. No `PcText` role fits: every role carries a size (DDR-0018), and there is no "muted text at the ambient size" role. Root cause: the theme set **no default text colour**. **A3 fixed the root cause** - the theme default ink is now explicit `Pc.text`, which unblocked migrating every size-only style to its role and enforcing the `fontSize` C2 guard. The narrow residual (a role for "muted at the *ambient* size") stays open, but it is now a rare case, not a systemic gap - these two lines remain bespoke `TextStyle(color: Pc.textMuted)` and that reads as intentional. |
 | F4 | **visual issue** (expected/positive) | `Card` -> `PcCard` dropped the Material elevation shadow: the connect card is now **flat**. This is the correct register (ART_DIRECTION forbids card shadows) and the reference screen now *demonstrates* flat - but it is a visible change, not a value-preserving swap (as PcCard's own doc warns). Recorded so it is a decision, not a surprise. |
 | F5 | **API issue** (minor) | `PcButton.disabledReason` renders the reason **below** the button; the legacy caption sat **above** it. Here that is fine - arguably better, since it now sits under the control it explains - but the component fixes the position; a screen that needed the reason above could not ask for it. Accepted as-is; noted in case a second screen disagrees (the "two consumers" bar for changing it). |
 | F6 | **observation, not a friction** | A static form exercises **no motion**. The reachability line flips in/out on a hard `setState` with no fade. A P4 ambient fade (`AnimatedOpacity` at `Motion` ambient) would be a nice touch, but the screen never had one and this migration is value-preserving, so none was added. Consequence: **motion tokens/primitives cannot be validated by this screen** - that validation must come from an animated screen (the board / auction). |
@@ -126,8 +126,9 @@ screen migrations should look like it.**
 - **A2 (medium) - build `PcDialog`** (inventory #9). **DONE.** Unblocked F2:
   the sign-in dialog migrated; frozen (DDR-0019) and validated on Connect. Its
   `destructive` variant (the resign confirm) is the documented next-additive.
-- **A3 (medium, owner) - decide the theme default text colour** (`= Pc.text`).
-  Unblocks F3 here and the size-only role migration app-wide.
+- **A3 (medium, owner) - set the theme default text colour** (`= Pc.text`).
+  **DONE.** Unblocked F3's root cause and the size-only role migration
+  app-wide (8 sites -> roles); the `fontSize` C2 guard is now enforced.
 - **A4 (low) - leave `PcButton.disabledReason` position fixed** unless a second
   screen needs it above (the two-consumers bar). No change now.
 - **A5 (doc) - re-migrate Connect once A1/A2 land.** **DONE.** With PcTextField
@@ -151,3 +152,64 @@ components); C2 guard green (the screen carries no raw colour/on-grid
 literal/Fraunces); `ui/common.dart` and `sfx.dart` imports removed. Visual:
 rendered flat card, variant buttons, and hairline-underline inputs confirmed
 via headless screenshot.
+
+---
+
+## Migration #2 - Settings panel (`lib/ui/side/settings_panel.dart`)
+
+The host's per-room settings editor (ADR-0015): an `ExpansionTile` with 17
+labelled numeric fields (host) or a read-only label/value list (guests), plus an
+Apply button. Chosen as the next screen because it is small, self-contained, and
+input-heavy - the ideal stress test for the freshly-built PcTextField.
+
+**This is the first migration under the new strategy** (components are pulled by
+a real screen's demand, not built ahead). It worked exactly as intended: the
+screen surfaced a concrete gap, and the existing component *grew to meet it*
+rather than a speculative new one being spun up.
+
+### What the system covered cleanly
+
+- **A3 already paid off**: the two label columns were plain `TextStyle(fontSize:
+  12)` inheriting their colour. A3 (theme ink = `Pc.text`) plus the size-only
+  migration had already turned them into `PcText.label` - so on this screen the
+  labels were *already* DS-native before the migration began.
+- **PcButton** took the Apply action (`secondary`), dropping the `ui/common.dart`
+  (`wideButton`) dependency - same clean removal as Connect.
+
+### Frictions found (classified)
+
+| # | Classification | Finding |
+|---|---|---|
+| D1 | **API issue -> RESOLVED (additive)** | The 17 host fields are dense, numeric, right-aligned, and their label sits OUTSIDE the field (in the row's left column). PcTextField - built for Connect's roomy, labelled form fields - could express none of that: it required a `label` and had no `keyboardType`/`textAlign`/`dense`. **This is the strategy's first real test**, and the answer was to grow PcTextField *additively* (`keyboardType`, `textAlign`, `dense`; `label` loosened to optional) - all backward-compatible (Connect's calls unchanged), so within DDR-0019's "add optional params freely". A second consumer justified the parameters that would have been speculative on day one. No new component. |
+| D2 | **missing component (PcListRow) - DEFERRED** | Both the host rows (`Expanded(label) + field`) and the read-only rows (`label ... value`) are the **PcListRow** pattern (inventory #8: leading/title/trailing). It does not exist yet. Not blocking - the rows work as plain `Row`s with `PcText` roles - so per the strategy it stays deferred until a SECOND screen shows the same label/value list (the seat list in the lobby is the likely trigger). Recorded so the pattern is on the radar, not built on one sighting. |
+| D3 | **typography issue (minor)** | The ExpansionTile title (`14/w600`) and the read-only values (`12/w600`) use a **medium weight** the role set does not carry - roles are `w400` (body/label) or `w700` (rowTitle/section). Left bespoke (a role would shift the weight). Noted: if `w600` recurs, it argues for a medium-weight role, but one screen is not enough. |
+
+### What this taught us about the Design System
+
+1. **The pull-based strategy holds.** The gap (numeric/dense input) appeared as a
+   concrete need on a real screen; PcTextField absorbed it with defaulted params
+   that are now *validated*, not guessed. Had we added `keyboardType` et al. when
+   PcTextField was first built (as the header even predicted), they'd have been
+   speculative; the second consumer turned prediction into evidence.
+2. **A3 compounds.** Because the theme ink and size-only migration already ran,
+   an input-heavy screen arrived half-migrated for free - the labels needed no
+   work. Foundation work keeps paying forward.
+3. **PcListRow is the next component the screens actually want** (D2), but the
+   discipline says wait for the second sighting. The lobby seat list is the
+   expected trigger; if it is, PcListRow gets promoted the way PcTextField was.
+
+### Action items
+
+- **B1 (low) - watch for PcListRow's second consumer** (D2). The lobby seat list
+  is the likely trigger; build it then, not now. Keep it deferred in the
+  inventory.
+- **B2 (defer) - a medium-weight (`w600`) type role** (D3) only if it recurs.
+- No new PcButton/PcTextField findings - both frozen surfaces held (PcTextField
+  grew only additively).
+
+### Verification
+
+`flutter analyze` clean; full suite green (**70 tests**, +1 for the label-less
+dense-numeric PcTextField case); C2 guard green; `ui/common.dart` import
+removed from the panel. PcTextField extension is additive - Connect's usage is
+untouched and still passes.

@@ -7,6 +7,7 @@ import '../../l10n/app_localizations.dart';
 import '../../session.dart';
 import '../../sfx.dart';
 import '../../tokens.dart';
+import '../../typography.dart';
 
 class TradeDialog extends StatefulWidget {
   final GameSession s;
@@ -52,7 +53,7 @@ class _TradeDialogState extends State<TradeDialog> {
               value: picked.contains(s.content!.board[i].id),
               title: Text(
                 s.tileName(i) + (v.tiles[i].mortgaged ? ' (M)' : ''),
-                style: const TextStyle(fontSize: 12),
+                style: PcText.label,
               ),
               onChanged: (on) => setState(() {
                 final id = s.content!.board[i].id;
