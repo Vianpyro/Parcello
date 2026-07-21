@@ -399,6 +399,47 @@ green.
 
 ---
 
+## Migration #6 - the turn action bar is the design system (build-the-game phase)
+
+New phase (owner): stop improving the DS, BUILD THE GAME - one real game screen
+per PR, each raising player-perceived quality; a new component only on a real
+blocker/2nd consumer. First screen: **`ActionsPanel`** - what the player touches
+every single turn (play a card, bid, end turn, jail).
+
+The screen discovered TWO real blockers, both resolved by **additive** growth of
+existing components (no new component):
+
+| # | Classification | Finding |
+|---|---|---|
+| F1 | **API (additive) -> RESOLVED** | The action bar is a `Wrap` of many buttons, needing a compact-but-touch-sized button; PcButton only had `wide` (full-width 52) or intrinsic. Added **`PcButton.dense`** (intrinsic width, 44 touch height, tighter padding). Blocker: the bar could not use PcButton cleanly without it. |
+| F2 | **API (additive) -> RESOLVED** | The bid/bribe fields cap digits + amount as you type (a real anti-cheat/UX guard, `MaxValueFormatter`); PcTextField had no way to pass formatters. Added **`PcTextField.inputFormatters`**. Blocker: the fields could not migrate without it. |
+
+Migrated: `btn()` helper, the bid submit, quick-raise (+10/25/50/100%), all-in,
+Choose-route, Reset, and the bid/bribe inputs - the whole bar is now PcButton
+(dense) + PcTextField (dense, gold-focus hairline) + the PcChip route builder
+(#5). The bespoke `touch` ButtonStyle and the raw `TextField`s are gone; the
+in-game controls now match the polish of the menus (consistency IS perceived
+quality), and the bid field gains the DS hairline + gold focus.
+
+### Notes
+
+- **Value preserved where it mattered**: the mid-edit reseed guard lives in
+  ActionsPanel (`_bidInitTile`), untouched - `bid_input_test` (half-typed bid
+  survives an animation frame) still passes through PcTextField.
+- **`sfx` import dropped** from the panel (PcButton wraps the hover earcon).
+- **No screenshot captured this PR**: the bar renders only in a live game; it is
+  covered by `bid_input_test`, `layout_test`, the dense-size unit test, and the
+  Showcase "action bar" demo (debug builds). An in-game capture is the one
+  follow-up if a visual sign-off is wanted.
+
+### Verification
+
+`flutter analyze` clean; full suite green (**83 tests**, +2: dense sizing,
+inputFormatters passthrough); C2 + DDR-0020 + spatial-blindness guards green;
+`bid_input_test` green.
+
+---
+
 ## Design System Coverage (living snapshot - updated each migration)
 
 Maturity ladder: **Experimental** (built + in Showcase, no real screen yet) ->
@@ -410,9 +451,9 @@ battle-tested).
 |---|---|---|---|
 | `Pc` tokens | **Core** | every widget | additive only |
 | `PcText` roles | **Core** | every widget | additive only |
-| `PcButton` | **Core** | Connect, Settings, Lobby | unchanged (frozen, held) |
+| `PcButton` | **Core** | Connect, Settings, Lobby, Game HUD | grew additively (`dense` for the action bar) |
 | `PcCard` | **Stable** | Connect, Lobby (x5 cards) | unchanged |
-| `PcTextField` | **Stable** | Connect, Settings | grew additively (numeric/dense/optional-label) |
+| `PcTextField` | **Stable** | Connect, Settings, Game HUD | grew additively (numeric/dense/optional-label/inputFormatters) |
 | `PcDialog` | **Stable** | Connect (sign-in), Lobby (resign) | grew additively (`destructive`) |
 | `SeatTile` | **Validated** | Game HUD / side panel | frozen (new) |
 | `Motion` | **Stable (engine)** | director/board/stage + now `SeatTile` (`stateFade`) - but NO migrated *screen* validates it as motion yet (F6) | grew additively (`stateFade`) |
@@ -449,8 +490,8 @@ This is where "Parcello looks like Parcello" is won.
 | Trade offer | `TradeOfferCard` (#14) | **legacy** - `_trades()` renders text + TextButtons |
 | Sealed-bid INPUT (anchored to the tile) | `AuctionWidget` (#16) | **NOT built** - the #1 UX gap (motion-language 8.2); input is a corner field, clock is a corner number |
 | Legal Route builder / mod picker chips | **`PcChip`** | **DONE** (tap-to-order, both screens) |
-| Action buttons (Bid / Play card / End turn) | bespoke `touch`-styled buttons | legacy - a PcButton sizing decision, not a missing component |
-| Bid / bribe numeric inputs | raw `TextField` | legacy - needs `PcTextField.inputFormatters` (additive) |
+| Action buttons (Bid / Play card / End turn) | **`PcButton`** (dense) | **DONE** (#6 - the whole action bar is the DS) |
+| Bid / bribe numeric inputs | **`PcTextField`** (dense + formatters) | **DONE** (#6 - hairline + gold focus, digits/max capped) |
 | VP legend / round metronome | (center panel, bespoke) | ad-hoc; reads acceptably, no component yet |
 | Market forecast / pools / spotlight lines | (center panel, `PcText.caption`) | text-only, DS-typed; fine as-is |
 | Clocks (turn / bank / bid / vote / game) | `Countdown` (pre-existing) | works; not a DS component |

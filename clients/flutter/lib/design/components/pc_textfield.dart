@@ -11,12 +11,14 @@
 /// the Settings panel then needed dense numeric columns with an EXTERNAL label,
 /// which added `keyboardType`, `textAlign`, `dense`, and loosened `label` to
 /// optional - all backward-compatible (existing callers unchanged), so within
-/// the DDR-0019 "add optional params freely" allowance. Still future-additive
-/// when a screen needs them: `autofocus` (the join-code field), a counter
-/// toggle (feedback suppresses it).
+/// the DDR-0019 "add optional params freely" allowance. The in-game action bar
+/// then added `inputFormatters` (the bid/bribe fields cap digits + amount as
+/// you type). Still future-additive when a screen needs them: `autofocus` (the
+/// join-code field), a counter toggle (feedback suppresses it).
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../tokens.dart';
 
@@ -48,6 +50,10 @@ class PcTextField extends StatelessWidget {
   /// settings rows); the roomy default suits a standalone form field.
   final bool dense;
 
+  /// Input formatters - e.g. digits-only + a max-value cap for a bid field, so
+  /// the field itself refuses an illegal edit as you type. Omit for free text.
+  final List<TextInputFormatter>? inputFormatters;
+
   const PcTextField({
     super.key,
     required this.controller,
@@ -57,6 +63,7 @@ class PcTextField extends StatelessWidget {
     this.keyboardType,
     this.textAlign = TextAlign.start,
     this.dense = false,
+    this.inputFormatters,
   });
 
   @override
@@ -66,6 +73,7 @@ class PcTextField extends StatelessWidget {
       maxLength: maxLength,
       keyboardType: keyboardType,
       textAlign: textAlign,
+      inputFormatters: inputFormatters,
       cursorColor: Pc.gold,
       decoration: InputDecoration(
         labelText: label,

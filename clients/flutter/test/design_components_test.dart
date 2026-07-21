@@ -48,6 +48,15 @@ void main() {
         expect(find.text('X'), findsOneWidget, reason: 'variant $v renders');
       }
     });
+
+    testWidgets('dense stays touch-sized but intrinsic width', (tester) async {
+      await tester.pumpWidget(_host(PcButton('Bid', onPressed: () {}, dense: true)));
+      final size = tester.getSize(find.byType(FilledButton));
+      expect(size.height, greaterThanOrEqualTo(44),
+          reason: 'a dense button keeps a touch-friendly height');
+      expect(size.width, lessThan(300),
+          reason: 'dense is intrinsic width, not full-width');
+    });
   });
 
   group('PcCard', () {
@@ -100,6 +109,20 @@ void main() {
       expect(c.text, 'abcde', reason: 'input is capped at maxLength');
       expect(find.textContaining('/5'), findsOneWidget,
           reason: 'the length counter shows');
+    });
+
+    testWidgets('forwards inputFormatters (digits-only, the bid field path)',
+        (tester) async {
+      final c = TextEditingController();
+      addTearDown(c.dispose);
+      await tester.pumpWidget(_host(PcTextField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        dense: true,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      )));
+      await tester.enterText(find.byType(PcTextField), '9a9b');
+      expect(c.text, '99', reason: 'non-digits are filtered as you type');
     });
 
     testWidgets('shows a hint while empty', (tester) async {

@@ -5,10 +5,12 @@
 /// `tokens`/`typography`/`motion` files move down later).
 ///
 /// PUBLIC API - STABILITY CONTRACT (DDR-0019): the constructor and its named
-/// params are public API. Add optional params freely (default them so old
-/// call sites are untouched); renaming/removing one, or changing a variant's
-/// meaning, needs a DDR. Internals (which Material button backs each variant,
-/// the exact ButtonStyle) may change freely.
+/// params are public API, grown ADDITIVELY as real screens demand. Connect/
+/// lobby shipped `wide`; the in-game action bar then added `dense` (compact,
+/// touch-sized, intrinsic width) - a defaulted param, so old call sites are
+/// untouched. Renaming/removing one, or changing a variant's meaning, needs a
+/// DDR. Internals (which Material button backs each variant, the exact
+/// ButtonStyle) may change freely.
 library;
 
 import 'package:flutter/material.dart';
@@ -53,6 +55,11 @@ class PcButton extends StatelessWidget {
   /// Full-width and tall (the touch-friendly default), vs. intrinsic width.
   final bool wide;
 
+  /// Compact: intrinsic width, a shorter but still touch-sized height, tighter
+  /// padding - for a bar of many buttons (the in-game action bar). Overrides
+  /// [wide].
+  final bool dense;
+
   /// Shown as a caption under the button while it is disabled - the
   /// "why can't I press this?" answer (e.g. guests-off servers).
   final String? disabledReason;
@@ -64,6 +71,7 @@ class PcButton extends StatelessWidget {
     this.variant = PcButtonVariant.primary,
     this.icon,
     this.wide = true,
+    this.dense = false,
     this.disabledReason,
   });
 
@@ -74,9 +82,17 @@ class PcButton extends StatelessWidget {
     final textStyle = WidgetStateProperty.all(
       const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
     );
+    // dense: a compact but still touch-sized (44) button, intrinsic width;
+    // wide: full-width and 52 tall; neither: intrinsic, theme height.
     final minSize = WidgetStateProperty.all<Size?>(
-      wide ? const Size.fromHeight(52) : null,
+      dense
+          ? const Size(0, 44)
+          : (wide ? const Size.fromHeight(52) : null),
     );
+    final padding = dense
+        ? WidgetStateProperty.all<EdgeInsetsGeometry?>(
+            const EdgeInsets.symmetric(horizontal: Pc.s16))
+        : null;
     final child = icon == null
         ? Text(label)
         : Row(
@@ -91,12 +107,14 @@ class PcButton extends StatelessWidget {
     final Widget button = switch (variant) {
       PcButtonVariant.primary => FilledButton(
           onPressed: onPressed,
-          style: ButtonStyle(minimumSize: minSize, textStyle: textStyle),
+          style: ButtonStyle(
+              minimumSize: minSize, textStyle: textStyle, padding: padding),
           child: child,
         ),
       PcButtonVariant.secondary => OutlinedButton(
           onPressed: onPressed,
-          style: ButtonStyle(minimumSize: minSize, textStyle: textStyle),
+          style: ButtonStyle(
+              minimumSize: minSize, textStyle: textStyle, padding: padding),
           child: child,
         ),
       PcButtonVariant.destructive => OutlinedButton(
@@ -104,6 +122,7 @@ class PcButton extends StatelessWidget {
           style: ButtonStyle(
             minimumSize: minSize,
             textStyle: textStyle,
+            padding: padding,
             foregroundColor: WidgetStateProperty.all(Pc.oxblood),
             side: WidgetStateProperty.all(
               const BorderSide(color: Pc.oxblood),
@@ -116,6 +135,7 @@ class PcButton extends StatelessWidget {
           style: ButtonStyle(
             minimumSize: minSize,
             textStyle: textStyle,
+            padding: padding,
             foregroundColor: WidgetStateProperty.all(Pc.textMuted),
           ),
           child: child,

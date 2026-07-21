@@ -9,11 +9,12 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../design/components/pc_button.dart';
 import '../../design/components/pc_chip.dart';
+import '../../design/components/pc_textfield.dart';
 import '../../l10n/app_localizations.dart';
 import '../../protocol.dart';
 import '../../session.dart';
-import '../../sfx.dart';
 import '../../tokens.dart';
 import '../../typography.dart';
 
@@ -85,18 +86,12 @@ class ActionsPanelState extends State<ActionsPanel> {
       _bribeSeeded = false;
     }
 
-    final touch = ButtonStyle(
-      minimumSize: WidgetStateProperty.all(const Size(0, 46)),
-      padding: WidgetStateProperty.all(
-          const EdgeInsets.symmetric(horizontal: 18)),
-      textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 15)),
-    );
     Widget btn(String label, Map<String, dynamic> cmd, {bool primary = true}) {
-      return hoverSfx(primary
-          ? FilledButton(
-              onPressed: () => s.sendCmd(cmd), style: touch, child: Text(label))
-          : OutlinedButton(
-              onPressed: () => s.sendCmd(cmd), style: touch, child: Text(label)));
+      return PcButton(label,
+          onPressed: () => s.sendCmd(cmd),
+          dense: true,
+          variant:
+              primary ? PcButtonVariant.primary : PcButtonVariant.secondary);
     }
 
     final children = <Widget>[];
@@ -159,28 +154,28 @@ class ActionsPanelState extends State<ActionsPanel> {
         else ...[
           SizedBox(
             width: 90,
-            child: TextField(
+            child: PcTextField(
               controller: _bid,
               keyboardType: TextInputType.number,
+              dense: true,
               // Digits only, and never more than the seat can afford - the
               // field itself refuses an over-cash bid as you type (2026-07).
               inputFormatters: [
                 FilteringTextInputFormatter.digitsOnly,
                 MaxValueFormatter(cash),
               ],
-              style: const TextStyle(color: Pc.text),
-              decoration: const InputDecoration(isDense: true),
             ),
           ),
-          hoverSfx(FilledButton(
+          PcButton(
+            loc.actionBid,
+            dense: true,
             // Clamp at submit too, belt-and-suspenders: the field is
             // already capped, but the wire amount must never exceed cash.
             onPressed: () => s.sendCmd({
               'type': 'submit_blind_bid',
               'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
             }),
-            child: Text(loc.actionBid),
-          )),
+          ),
         ],
         btn(loc.actionAbstain, {'type': 'submit_blind_bid', 'amount': 0},
             primary: !canBid),
@@ -190,17 +185,15 @@ class ActionsPanelState extends State<ActionsPanel> {
           // Mutating the controller already repaints the TextField bound
           // to it - no setState needed.
           for (final pct in [10, 25, 50, 100])
-            hoverSfx(OutlinedButton(
-              onPressed: () => bumpBid(pct),
-              style: touch,
-              child: Text(loc.actionRaisePct(pct)),
-            )),
+            PcButton(loc.actionRaisePct(pct),
+                dense: true,
+                variant: PcButtonVariant.secondary,
+                onPressed: () => bumpBid(pct)),
           // All-in: the highest bid the sealed-bid invariant will accept.
-          hoverSfx(OutlinedButton(
-            onPressed: () => _bid.text = '$cash',
-            style: touch,
-            child: Text(loc.actionMaxBid(cash)),
-          )),
+          PcButton(loc.actionMaxBid(cash),
+              dense: true,
+              variant: PcButtonVariant.secondary,
+              onPressed: () => _bid.text = '$cash'),
         ],
       ]);
     } else if (t.type == 'bribe_vote') {
@@ -273,7 +266,10 @@ class ActionsPanelState extends State<ActionsPanel> {
                 ],
               ),
               Row(mainAxisSize: MainAxisSize.min, children: [
-                hoverSfx(OutlinedButton(
+                PcButton(
+                  loc.actionChooseRoute,
+                  dense: true,
+                  variant: PcButtonVariant.secondary,
                   onPressed: routeComplete
                       ? () {
                           s.sendCmd({
@@ -283,24 +279,21 @@ class ActionsPanelState extends State<ActionsPanel> {
                           setState(() => _routeOrder.clear());
                         }
                       : null,
-                  style: touch,
-                  child: Text(loc.actionChooseRoute),
-                )),
+                ),
                 if (_routeOrder.isNotEmpty) ...[
                   const SizedBox(width: Pc.s6),
-                  hoverSfx(TextButton(
-                    onPressed: () => setState(() => _routeOrder.clear()),
-                    child: Text(loc.actionReset),
-                  )),
+                  PcButton(loc.actionReset,
+                      dense: true,
+                      variant: PcButtonVariant.quiet,
+                      onPressed: () => setState(() => _routeOrder.clear())),
                 ],
               ]),
               SizedBox(
                 width: 90,
-                child: TextField(
+                child: PcTextField(
                   controller: _bribe,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Pc.text),
-                  decoration: const InputDecoration(isDense: true),
+                  dense: true,
                 ),
               ),
               btn(

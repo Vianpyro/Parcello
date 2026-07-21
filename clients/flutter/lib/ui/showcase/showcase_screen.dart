@@ -454,6 +454,20 @@ class _ButtonsSection extends StatelessWidget {
           PcButton('Watch', onPressed: noop, icon: Icons.visibility_outlined)),
       _Demo('not wide',
           PcButton('Compact', onPressed: noop, wide: false)),
+      _Demo('dense (action bar)',
+          PcButton('Bid', onPressed: noop, dense: true)),
+      // The real in-game bar: a row of dense buttons, primary + secondary.
+      _Demo(
+        'action bar',
+        Wrap(spacing: Pc.s6, runSpacing: Pc.s6, children: [
+          PcButton('Play 4', onPressed: noop, dense: true),
+          PcButton('End turn', onPressed: noop, dense: true),
+          PcButton('Abstain',
+              onPressed: noop, dense: true, variant: PcButtonVariant.secondary),
+          PcButton('+25%',
+              onPressed: noop, dense: true, variant: PcButtonVariant.secondary),
+        ]),
+      ),
       const _Demo('disabled', PcButton('Start')),
       const _Demo(
           'disabled + reason',
