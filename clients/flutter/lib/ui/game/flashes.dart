@@ -54,7 +54,7 @@ class CardFlashState extends State<CardFlash> {
           decoration: BoxDecoration(
             color: Pc.parchment,
             borderRadius: Pc.radius,
-            border: Pc.goldFrame,
+            border: Border.all(color: Pc.goldDark, width: 1.5),
             boxShadow: Pc.hairShadow,
           ),
           child: Text(
@@ -131,7 +131,7 @@ class BannerFlashState extends State<BannerFlash> {
           decoration: BoxDecoration(
             color: paper ? Pc.parchment : Pc.surface,
             borderRadius: Pc.radius,
-            border: Pc.goldFrame,
+            border: Border.all(color: Pc.goldDark, width: 1.5),
             boxShadow: Pc.hairShadow,
           ),
           child: Text(

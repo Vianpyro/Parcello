@@ -27,7 +27,7 @@ class CenterPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Pc.surface,
         borderRadius: Pc.radius,
-        border: Pc.goldFrame,
+        border: Border.all(color: Pc.goldDark, width: 1.5),
       ),
       child: DefaultTextStyle(
         style: PcText.body,

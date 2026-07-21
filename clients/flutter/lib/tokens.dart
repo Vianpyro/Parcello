@@ -65,13 +65,6 @@ abstract final class Pc {
   /// own weights, not this wash.
   static final goldWash = gold.withValues(alpha: 0.12);
 
-  /// The gold emphasis frame: the hairline `goldDark` border that rings a
-  /// ceremonial/highlighted container (an event flash, a banner, the central
-  /// panel). One weight so every framed surface reads as the same object -
-  /// the fill and shadow are the caller's (a flash sits on parchment, a panel
-  /// on surface), only the frame is shared.
-  static final goldFrame = Border.all(color: goldDark, width: 1.5);
-
   // -- Spacing scale ---------------------------------------------------------
   // The 4-px grid the UI already uses (values audited 2026-07: 12/8/6/4/2 are
   // the workhorses, 16/24 the section gaps). Reach for these instead of a raw
