@@ -217,6 +217,22 @@ void main() {
           reason: 'cancel never resolves confirmed');
     });
 
+    testWidgets('destructive dialog renders a destructive primary',
+        (tester) async {
+      await openAndReturn(
+          tester,
+          (ctx) => PcDialog(
+                title: 'Resign?',
+                cancelLabel: 'Cancel',
+                primaryLabel: 'Resign',
+                destructive: true,
+                onPrimary: () => Navigator.pop(ctx, true),
+              ));
+      final primary =
+          tester.widget<PcButton>(find.widgetWithText(PcButton, 'Resign'));
+      expect(primary.variant, PcButtonVariant.destructive);
+    });
+
     testWidgets('single-action dialog has no cancel', (tester) async {
       await openAndReturn(
           tester,

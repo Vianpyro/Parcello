@@ -119,7 +119,7 @@ Update this in the SAME PR as the component lands.
 | PcButton | DONE 2026-07 (`lib/design/components/pc_button.dart`) - **used in a real screen: Connect** | YES (DDR-0019) | Yes (PcButton) + `test/design_components_test.dart` |
 | PcCard | DONE 2026-07 (`lib/design/components/pc_card.dart`) - **used in a real screen: Connect** | YES (DDR-0019) | Yes (PcCard: variants + narrow + text-zoom edge cases) + tests |
 | PcTextField | DONE 2026-07 (`lib/design/components/pc_textfield.dart`) - **used in real screens: Connect** (url/name/issuer) **+ Settings** (dense numeric); grew `keyboardType`/`textAlign`/`dense`/optional-label additively for Settings (DESIGN_FEEDBACK #2/D1) | YES (DDR-0019; additive growth only) | Yes (PcTextField: empty/filled/counter + narrow + text-zoom + dense-numeric) + tests |
-| PcDialog | DONE 2026-07 (`lib/design/components/pc_dialog.dart`) - **used in a real screen: Connect** (sign-in) | YES (DDR-0019) | Yes (PcDialog: prompt + single-action) + tests |
+| PcDialog | DONE 2026-07 (`lib/design/components/pc_dialog.dart`) - **used in real screens: Connect** (sign-in) **+ Lobby** (resign); grew `destructive` additively for the resign confirm (DESIGN_FEEDBACK #3/D1) | YES (DDR-0019; additive growth only) | Yes (PcDialog: prompt + single-action + destructive) + tests |
 | PcHairline | TODO (deferred) | - | - |
 | PcChip | TODO (deferred) | - | - |
 | PcBadge | TODO (deferred) | - | - |

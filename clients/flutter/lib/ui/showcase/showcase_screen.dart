@@ -242,6 +242,22 @@ class _DialogsSection extends StatelessWidget {
           );
         }),
       ),
+      _Demo(
+        'destructive (resign/leave)',
+        PcButton('Open resign', wide: false,
+            variant: PcButtonVariant.destructive, onPressed: () {
+          showDialog<bool>(
+            context: context,
+            builder: (ctx) => PcDialog(
+              title: 'Resign?',
+              cancelLabel: 'Cancel',
+              primaryLabel: 'Resign',
+              destructive: true,
+              onPrimary: () => Navigator.pop(ctx, true),
+            ),
+          );
+        }),
+      ),
     ]);
   }
 }

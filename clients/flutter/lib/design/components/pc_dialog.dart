@@ -7,11 +7,10 @@
 /// `showDialog`.
 ///
 /// PUBLIC API - STABILITY CONTRACT (DDR-0019): the constructor + named params
-/// are public API. Deliberately MINIMAL - what the first real screen (Connect's
-/// sign-in) needs. Known-needed but NOT yet added (additive, defaulted, so no
-/// DDR when they land with the screen that needs them): `destructive` (the
-/// resign confirm - primary becomes a destructive PcButton). Added when that
-/// screen migrates, not speculatively.
+/// are public API, grown ADDITIVELY as real screens demand. Connect's sign-in
+/// shipped the base; the side panel's resign confirm then added `destructive`
+/// (a defaulted bool, backward-compatible) - the second dialog was the concrete
+/// trigger, not speculation.
 library;
 
 import 'package:flutter/material.dart';
@@ -40,6 +39,10 @@ class PcDialog extends StatelessWidget {
   /// result (a null return, which confirm flows read as "not confirmed").
   final String? cancelLabel;
 
+  /// The primary action is destructive (resign, leave, delete) - it renders as
+  /// the destructive PcButton instead of the primary one.
+  final bool destructive;
+
   const PcDialog({
     super.key,
     required this.title,
@@ -47,6 +50,7 @@ class PcDialog extends StatelessWidget {
     required this.onPrimary,
     this.content,
     this.cancelLabel,
+    this.destructive = false,
   });
 
   @override
@@ -63,7 +67,14 @@ class PcDialog extends StatelessWidget {
             variant: PcButtonVariant.quiet,
             wide: false,
           ),
-        PcButton(primaryLabel, onPressed: onPrimary, wide: false),
+        PcButton(
+          primaryLabel,
+          onPressed: onPrimary,
+          wide: false,
+          variant: destructive
+              ? PcButtonVariant.destructive
+              : PcButtonVariant.primary,
+        ),
       ],
     );
   }

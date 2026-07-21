@@ -4,6 +4,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../design/components/pc_button.dart';
+import '../../design/components/pc_card.dart';
+import '../../design/components/pc_dialog.dart';
 import '../../l10n/app_localizations.dart';
 import '../../protocol.dart';
 import '../../session.dart';
@@ -38,59 +41,53 @@ class SidePanel extends StatelessWidget {
       // Watching, not playing (ADR-0035): say so where the player card
       // normally promises agency.
       if (s.spectating)
-        Card(
-          color: Pc.surface2,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Row(children: [
-              const Icon(Icons.visibility_outlined, color: Pc.gold, size: 18),
-              const SizedBox(width: Pc.s8),
-              Expanded(
-                child: Text(t.spectatingBadge,
-                    style: PcText.label.copyWith(color: Pc.textMuted)),
-              ),
-              hoverSfx(TextButton(
-                  onPressed: s.leaveRoom, child: Text(t.continueLabel))),
-            ]),
-          ),
+        PcCard(
+          raised: true,
+          padding: const EdgeInsets.all(10),
+          child: Row(children: [
+            const Icon(Icons.visibility_outlined, color: Pc.gold, size: 18),
+            const SizedBox(width: Pc.s8),
+            Expanded(
+              child: Text(t.spectatingBadge,
+                  style: PcText.label.copyWith(color: Pc.textMuted)),
+            ),
+            hoverSfx(TextButton(
+                onPressed: s.leaveRoom, child: Text(t.continueLabel))),
+          ]),
         ),
       // Game over: replay together, or go back to the start screen.
       if (v != null && v.finished)
-        Card(
-          color: Pc.surface2,
-          child: Padding(
-            padding: const EdgeInsets.all(Pc.s12),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(t.sideWinnerWins(s.playerName(v.winner!)),
-                      style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Pc.gold)),
-                  const SizedBox(height: Pc.s8),
-                  Row(children: [
-                    // Spectators cannot replay a game they never sat in
-                    // (ADR-0035); they only get the way out.
-                    if (!s.spectating) ...[
-                      Expanded(child: wideButton(t.playAgain, s.sendPlayAgain)),
-                      const SizedBox(width: Pc.s8),
-                    ],
+        PcCard(
+          raised: true,
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.sideWinnerWins(s.playerName(v.winner!)),
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Pc.gold)),
+                const SizedBox(height: Pc.s8),
+                Row(children: [
+                  // Spectators cannot replay a game they never sat in
+                  // (ADR-0035); they only get the way out.
+                  if (!s.spectating) ...[
                     Expanded(
-                        child: wideButton(t.continueLabel, s.leaveRoom,
-                            primary: false)),
-                  ]),
-                  if (!s.spectating)
-                    Text(t.playAgainHint,
-                        style: PcText.caption),
+                        child: PcButton(t.playAgain,
+                            onPressed: s.sendPlayAgain)),
+                    const SizedBox(width: Pc.s8),
+                  ],
+                  Expanded(
+                      child: PcButton(t.continueLabel,
+                          onPressed: s.leaveRoom,
+                          variant: PcButtonVariant.secondary)),
                 ]),
-          ),
+                if (!s.spectating)
+                  Text(t.playAgainHint, style: PcText.caption),
+              ]),
         ),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(Pc.s12),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      PcCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(
                 child: Text(t.sideRoom(s.code ?? ''),
@@ -118,8 +115,9 @@ class SidePanel extends StatelessWidget {
                 listenable: s.stage, builder: (context, _) => _players(t)),
             if (s.view == null) ...[
               const SizedBox(height: Pc.s8),
-              wideButton(t.startGame,
-                  s.seat == 0 && s.seats.length >= 2 ? s.sendStart : null),
+              PcButton(t.startGame,
+                  onPressed:
+                      s.seat == 0 && s.seats.length >= 2 ? s.sendStart : null),
               // Host-only bot controls. Bots fill empty seats but yield to
               // humans, so they never block a join (ADR-0014).
               if (s.seat == 0)
@@ -127,72 +125,66 @@ class SidePanel extends StatelessWidget {
                   padding: const EdgeInsets.only(top: Pc.s6),
                   child: Row(children: [
                     Expanded(
-                        child: wideButton(t.addBot,
-                            s.seats.length < 6 ? s.addBot : null,
-                            primary: false)),
+                        child: PcButton(t.addBot,
+                            onPressed: s.seats.length < 6 ? s.addBot : null,
+                            variant: PcButtonVariant.secondary)),
                     const SizedBox(width: Pc.s6),
                     Expanded(
-                        child: wideButton(t.removeBot,
-                            s.seats.any((x) => x.isBot) ? s.removeBot : null,
-                            primary: false)),
+                        child: PcButton(t.removeBot,
+                            onPressed: s.seats.any((x) => x.isBot)
+                                ? s.removeBot
+                                : null,
+                            variant: PcButtonVariant.secondary)),
                   ]),
                 ),
               if (s.code != null)
                 Padding(
                   padding: const EdgeInsets.only(top: Pc.s6),
-                  child: wideButton(t.copyCodeToShare, () => copyCode(context, s.code!),
-                      primary: false),
+                  child: PcButton(t.copyCodeToShare,
+                      onPressed: () => copyCode(context, s.code!),
+                      variant: PcButtonVariant.secondary),
                 ),
               if (s.settings != null) SettingsPanel(s: s),
               // Cancel: leave the room (dissolves it for the host) and return
               // to the main menu. Keyboard/controller reachable like any button.
               const SizedBox(height: Pc.s6),
-              wideButton(t.backToMenu, s.leaveRoom, primary: false),
+              PcButton(t.backToMenu,
+                  onPressed: s.leaveRoom, variant: PcButtonVariant.secondary),
             ],
           ]),
         ),
-      ),
-      Card(
-          child: Padding(
-              padding: const EdgeInsets.all(Pc.s12), child: _trades(context))),
+      PcCard(child: _trades(context)),
       // Post-game survey: an ordinary side card, never a modal - it must
       // not block anything (no frustration by design).
       // The survey asks players about a game they played; a spectator's
       // submission would only bounce off the server (ADR-0035).
       if (s.view?.finished == true && !s.feedbackDone && !s.spectating)
         FeedbackCard(s: s),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(Pc.s12),
-          child: hoverSfx(OutlinedButton(
-            style: OutlinedButton.styleFrom(
-                foregroundColor: Pc.oxblood),
-            onPressed: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: Text(t.resignConfirmTitle),
-                  actions: [
-                    hoverSfx(TextButton(
-                        onPressed: () {
-                          sfx.buttonNo();
-                          Navigator.pop(ctx, false);
-                        },
-                        child: Text(t.cancel))),
-                    hoverSfx(TextButton(
-                        onPressed: () {
-                          sfx.buttonYes();
-                          Navigator.pop(ctx, true);
-                        },
-                        child: Text(t.resign))),
-                  ],
-                ),
-              );
-              if (ok == true) s.sendCmd({'type': 'resign'});
-            },
-            child: Text(t.resign),
-          )),
-        ),
+      // The resign TRIGGER stays a bespoke restrained outlined-oxblood button:
+      // PcButton has no "outlined destructive" variant (destructive is filled
+      // red, too loud for an always-visible control) - a documented gap
+      // (DESIGN_FEEDBACK #3). The CONFIRM step, however, is a PcDialog.
+      PcCard(
+        child: hoverSfx(OutlinedButton(
+          style: OutlinedButton.styleFrom(foregroundColor: Pc.oxblood),
+          onPressed: () async {
+            final ok = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => PcDialog(
+                title: t.resignConfirmTitle,
+                cancelLabel: t.cancel,
+                primaryLabel: t.resign,
+                destructive: true,
+                onPrimary: () {
+                  sfx.buttonYes();
+                  Navigator.pop(ctx, true);
+                },
+              ),
+            );
+            if (ok == true) s.sendCmd({'type': 'resign'});
+          },
+          child: Text(t.resign),
+        )),
       ),
     ]);
   }

@@ -213,3 +213,103 @@ rather than a speculative new one being spun up.
 dense-numeric PcTextField case); C2 guard green; `ui/common.dart` import
 removed from the panel. PcTextField extension is additive - Connect's usage is
 untouched and still passes.
+
+---
+
+## Migration #3 - Lobby / side panel (`lib/ui/side/side_panel.dart`)
+
+The right-hand column: in the LOBBY state (`s.view == null`) it is the room
+code, seat list, and the start/bot/copy/back controls; the same file also
+renders the in-game seat rows, trades, and the end-game/spectating/resign
+cards. The lobby was the target; the state cards came with it (same file,
+value-preserving).
+
+### What the system covered cleanly
+
+- **5 `Card` -> `PcCard`** (spectating & finished as `raised`, room/trades/
+  resign as base) and **7 `wideButton` -> `PcButton`** (start, add/remove bot,
+  copy-code, back, play-again, continue). Primary/secondary mapped straight
+  from the old `primary:` flag.
+- **`PcDialog` REUSED** for the resign confirm - its second real consumer, and
+  the concrete trigger for the `destructive` param (below). One dialog
+  component now serves sign-in (Connect) and resign (side panel).
+
+### The one component change (pull-based, on the 2nd sighting)
+
+| # | Classification | Finding |
+|---|---|---|
+| D1 | **API issue -> RESOLVED (additive)** | The resign confirm is the SECOND dialog (after Connect's sign-in) and it is destructive. That was the documented trigger to add `PcDialog.destructive` (a defaulted bool -> the primary renders as the destructive PcButton). Added, showcased, tested, and the resign dialog migrated. A second consumer turned a predicted param into a built one - the strategy working exactly as on PcTextField/Settings. |
+
+### Frictions recorded (NOT solved - pull-based restraint)
+
+| # | Classification | Finding |
+|---|---|---|
+| D2 | **missing variant (API) - DEFERRED** | The resign TRIGGER button is a restrained outlined-oxblood `OutlinedButton` (an always-visible control - it must not shout). PcButton's `destructive` variant is FILLED red - too loud for a persistent button. There is no "outlined/quiet destructive" variant, so the trigger stays bespoke. One sighting; not built. If a second restrained-destructive control appears, that is the trigger for the variant. |
+| D3 | **PcListRow / PcBadge NOT triggered - correctly deferred** | The owner flagged these as likely second-sightings. They were NOT: the seat "tags" (you/bot/jail/offline) are **inline text appended to the name**, not pill badges - turning them into `PcBadge`s is a REDESIGN, not a value-preserving migration. The seat rows are the richer **SeatTile** shape (marker + pawn/VP anchor + cash + VP + bid-reveal), and the trades are the **TradeOfferCard** shape - both L3 domain composites, not generic list rows. So `PcListRow`/`PcBadge` stay deferred; building them here would have been the speculative move the strategy forbids. **This is the discipline succeeding, not a gap.** |
+| D4 | **minor behaviour note** | `PcDialog`'s Cancel just pops; the old resign dialog played a `buttonNo` earcon on cancel, now dropped (the confirm's `buttonYes` is kept via `onPrimary`). Accepted - the audio set is still placeholder (roadmap Phase 8). If cancel earcons matter later, `PcDialog` gains an optional `onCancel` (additive). |
+
+### What stayed legacy (by design, deferred to domain components)
+
+The side panel is **not** fully DS-native (unlike Connect): the **seat rows**
+(-> future `SeatTile`, #13), the **trades list** (-> `TradeOfferCard`, #14),
+the resign **trigger** (D2), and the copy `IconButton` remain. The lobby
+*controls* are DS; the *game composites* wait for their L3 components. This is
+the honest state: control chrome migrates early, domain widgets later.
+
+### What this taught us
+
+1. **The pull-based strategy resisted a speculative build.** The obvious move
+   was to "build PcBadge/PcListRow for the lobby". Looking closely, neither was
+   a value-preserving second sighting - so neither was built. The rule earns
+   its keep precisely when it says *don't*.
+2. **PcDialog is now proven across two very different confirms** (a prompt with
+   a field; a bare destructive yes/no). Its minimal surface held; only an
+   additive `destructive` was needed.
+
+### Action items
+
+- **C1 (defer) - outlined/quiet destructive PcButton variant** (D2): build on a
+  second restrained-destructive sighting, not now.
+- **C2 (watch) - `SeatTile` (#13) and `TradeOfferCard` (#14)** are the side
+  panel's remaining legacy; they are L3 domain composites and the natural next
+  build once the primitives are all proven (the game screen migration will
+  demand them).
+
+### Verification
+
+`flutter analyze` clean; full suite green (**71 tests**, +1 destructive-dialog
+case); C2 guard green. The migrated side panel is exercised by real tests:
+`spectate_and_hints_test` renders the migrated spectating `PcCard`, and
+`layout_test` pumps the full panel (6 seats, 6 trades) at all three shipped
+sizes without overflow.
+
+---
+
+## Design System Coverage (living snapshot - updated each migration)
+
+Maturity ladder: **Experimental** (built + in Showcase, no real screen yet) ->
+**Validated** (used in 1 real screen) -> **Stable** (>=2 screens, API held
+under additive-only growth) -> **Core** (used in every migrated screen; surface
+battle-tested).
+
+| Component | Maturity | Real-screen consumers | API since freeze |
+|---|---|---|---|
+| `Pc` tokens | **Core** | every widget | additive only |
+| `PcText` roles | **Core** | every widget | additive only |
+| `PcButton` | **Core** | Connect, Settings, Lobby | unchanged (frozen, held) |
+| `PcCard` | **Stable** | Connect, Lobby (x5 cards) | unchanged |
+| `PcTextField` | **Stable** | Connect, Settings | grew additively (numeric/dense/optional-label) |
+| `PcDialog` | **Stable** | Connect (sign-in), Lobby (resign) | grew additively (`destructive`) |
+| `Motion` | **Stable (engine)** | director/board/stage - but NO migrated *screen* exercises it yet (F6) | additive only |
+| `PcHairline` / `PcChip` / `PcBadge` | *deferred* | none - no real screen demands them value-preservingly | not built |
+| `PcListRow` | *deferred* | sighted once (Settings rows); awaits 2nd consumer | not built |
+| `SeatTile` / `TradeOfferCard` / `MoneyChit` / `PropertyCard` / `SettingsField` / `AuctionWidget` | *not started* | L3/L4 domain composites | not built |
+
+**Screens migrated:** Connect (100% DS-native), Settings (100% of its
+controls), Lobby controls (side panel chrome; domain composites pending).
+
+**Legacy building-block widgets remaining** (use sites outside the design
+system, approx.): raw `Card` x6, raw `TextField` x7, `AlertDialog` x1,
+`wideButton` x2, other raw `*Button` x~28 - all in NOT-yet-migrated surfaces
+(menu, game HUD, board, trades, feedback, rules). These are the backlog the
+next screen migrations retire.
