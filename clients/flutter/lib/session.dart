@@ -497,8 +497,12 @@ class GameSession extends ChangeNotifier {
         sfx.error();
         // On the thing that said no, not in a modal and not only in the log.
         final code = (msg['error'] as Map<String, dynamic>)['code'] as String;
-        stage.refuse(_lastCmdTile, code);
-        if (l10n case final loc?) _log(loc.logRejected(code));
+        // Turn the raw engine code into a player-facing reason where we can;
+        // the stage carries it for the shaking subject, the feed prints it.
+        final loc = l10n;
+        final reason = loc != null ? rejectReason(loc, code) : code;
+        stage.refuse(_lastCmdTile, reason);
+        if (loc != null) _log(loc.logRejected(reason));
       case 'error':
         sfx.error();
         if (!joined) loginMessage = msg['message'] as String;

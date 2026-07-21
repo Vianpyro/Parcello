@@ -175,6 +175,17 @@ void main() {
     );
   });
 
+  test('rejectReason localizes engine error codes and falls back on unknown',
+      () {
+    final loc = AppLocalizationsEn();
+    // A raw snake_case CommandError code becomes a player-facing reason.
+    expect(rejectReason(loc, 'bid_below_floor'),
+        'your bid must be at least the market price (0 to pass)');
+    expect(rejectReason(loc, 'not_your_turn'), 'it is not your turn');
+    // An unmapped or newer code degrades to the raw code - never dropped.
+    expect(rejectReason(loc, 'some_future_code'), 'some_future_code');
+  });
+
   testWidgets('connect screen renders and requires a name', (tester) async {
     await tester.pumpWidget(ParcelloApp(session: GameSession()));
     expect(find.text('Connect'), findsOneWidget);

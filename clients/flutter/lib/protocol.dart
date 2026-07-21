@@ -373,6 +373,88 @@ String _identityEventName(String id) => id;
 /// Ported verbatim from the reference web client's `describe`. `m` looks up
 /// a market event's display name (ADR-0021); optional so existing callers
 /// (and tests) that don't have content loaded yet still get the raw id.
+/// A rejected command's error `code` (snake_case, from the engine's
+/// `CommandError`) as a localized, player-facing reason - so the feed says
+/// "your bid must be at least the market price" instead of "bid_below_floor".
+/// Falls back to the raw code for any unmapped/newer code, so a rejection is
+/// never dropped, only shown less prettily.
+String rejectReason(AppLocalizations loc, String code) {
+  switch (code) {
+    case 'game_finished':
+      return loc.rejectGameFinished;
+    case 'unknown_player':
+      return loc.rejectUnknownPlayer;
+    case 'bankrupt':
+      return loc.rejectBankrupt;
+    case 'not_your_turn':
+      return loc.rejectNotYourTurn;
+    case 'wrong_phase':
+      return loc.rejectWrongPhase;
+    case 'unknown_tile':
+      return loc.rejectUnknownTile;
+    case 'not_a_property':
+      return loc.rejectNotAProperty;
+    case 'not_owner':
+      return loc.rejectNotOwner;
+    case 'group_incomplete':
+      return loc.rejectGroupIncomplete;
+    case 'build_limit':
+      return loc.rejectBuildLimit;
+    case 'not_buildable':
+      return loc.rejectNotBuildable;
+    case 'uneven_build':
+      return loc.rejectUnevenBuild;
+    case 'no_houses':
+      return loc.rejectNoHouses;
+    case 'mortgaged_in_group':
+      return loc.rejectMortgagedInGroup;
+    case 'already_mortgaged':
+      return loc.rejectAlreadyMortgaged;
+    case 'not_mortgaged':
+      return loc.rejectNotMortgaged;
+    case 'houses_in_group':
+      return loc.rejectHousesInGroup;
+    case 'trade_not_found':
+      return loc.rejectTradeNotFound;
+    case 'not_trade_party':
+      return loc.rejectNotTradeParty;
+    case 'trade_invalid':
+      return loc.rejectTradeInvalid;
+    case 'trade_limit':
+      return loc.rejectTradeLimit;
+    case 'insufficient_funds':
+      return loc.rejectInsufficientFunds;
+    case 'already_bid':
+      return loc.rejectAlreadyBid;
+    case 'bid_below_floor':
+      return loc.rejectBidBelowFloor;
+    case 'not_in_jail':
+      return loc.rejectNotInJail;
+    case 'no_jail_card':
+      return loc.rejectNoJailCard;
+    case 'expropriation_disabled':
+      return loc.rejectExpropriationDisabled;
+    case 'not_expropriable':
+      return loc.rejectNotExpropriable;
+    case 'not_on_tile':
+      return loc.rejectNotOnTile;
+    case 'pool_exhausted':
+      return loc.rejectPoolExhausted;
+    case 'rent_boost_disabled':
+      return loc.rejectRentBoostDisabled;
+    case 'boost_limit':
+      return loc.rejectBoostLimit;
+    case 'card_not_playable':
+      return loc.rejectCardNotPlayable;
+    case 'invalid_route':
+      return loc.rejectInvalidRoute;
+    case 'already_voted':
+      return loc.rejectAlreadyVoted;
+    default:
+      return code;
+  }
+}
+
 String describeEvent(
   Map<String, dynamic> e,
   AppLocalizations loc,
