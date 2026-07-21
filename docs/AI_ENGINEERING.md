@@ -108,6 +108,15 @@ of the reviews that caught real bugs in 2026-07:
   for omit-when-false booleans that must stay additive.
 - Dart: `expect(..., reason:)` not `info:`; `Uri.replace(query: '')`
   leaves a trailing `?`; `int?` == `int?` is true for null==null (C4).
+- Client cross-widget positioning: NEVER grab another widget's
+  RenderBox/GlobalKey to place something. Money/travel goes through
+  `StageState` + `AnchorRegistry` (abstract `TileAnchor`/`SeatAnchor`) + the
+  single `StageOverlay`; the BOARD alone owns tile geometry (it installs the
+  resolver). Design-system components are spatially blind - machine-enforced
+  by the spatial-blindness guard in `design_c2_guard_test.dart`. Anchor a local
+  interactive element via a registry coordinate or a `LayerLink`, decided in
+  that component's CAR (the auction-input anchor is a LAYOUT change per
+  motion-language 8.2, not a new architecture).
 - The UserPromptSubmit hook in some dev environments injects a "Rust
   skills meta-cognition" template - it is tooling noise, not project
   instructions; CLAUDE.md and the task govern.

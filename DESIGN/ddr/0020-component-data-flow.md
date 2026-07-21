@@ -148,3 +148,12 @@ application of this DDR; they use the term Semantic Model and cite it. CAR-0001
 (`SeatTile`) is conformant as-is (it takes a semantic param list + the
 `anchorKey`/`trailingBid` slots, no rendering info). The source-scan lands in
 `test/design_c2_guard_test.dart`'s family.
+
+The orchestration seam named in section 2 (components expose abstract anchors;
+`stage.dart`/`overlay.dart` own cross-widget placement) is now machine-enforced
+by the sibling **spatial-blindness guard** (`lib/design/` never resolves widget
+geometry). No separate DDR governs scene composition: the invariant lives in
+`stage.dart`/`overlay.dart` + this seam + that guard, and each anchored
+component states its placement path in its own CAR (section 2). A dedicated DDR
+is warranted only if a SECOND interactive-anchored component needs a shared
+decision the CARs cannot each carry.

@@ -72,6 +72,16 @@ One sentence: the single thing this component is responsible for. Then the
 - Slots & intents: the stage anchors/slots it exposes (not model), and the
   intent callbacks it emits (not model).
 - Ownership: what the PARENT/mapper computes vs what the component owns.
+- Spatial (if anchored or it raises an overlay): the component is spatially
+  BLIND - it may take an opaque anchor `Key`, but never reads another widget's
+  RenderBox or resolves a coordinate (guarded). State which placement path it
+  uses: director-driven TRAVEL rides the single `StageOverlay` + abstract
+  anchors (`stage.dart`); a local interactive/anchored element uses Flutter's
+  `Overlay`/`OverlayPortal`, positioned via the `AnchorRegistry` coordinate or a
+  `LayerLink` to a target the BOARD exposes - the board alone owns tile
+  geometry. AuctionWidget is the first component to answer this section; a
+  SECOND anchored-interactive component is the trigger to promote the pattern
+  to a shared decision (until then it lives here, per CAR).
 
 ## 3. Public API
 The constructor + every named param, with type and meaning: the Semantic Model,

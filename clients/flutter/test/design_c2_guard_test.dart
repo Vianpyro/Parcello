@@ -158,4 +158,44 @@ void main() {
       print('DDR-0020 guard WARNING (not enforced):\n$message');
     }
   });
+
+  // Spatial blindness (the scene's composition boundary, DDR-0020 layer 2 /
+  // stage.dart + overlay.dart): a component receives at most an OPAQUE anchor
+  // `Key` - it never resolves a coordinate, reads another widget's RenderBox,
+  // or imports the AnchorRegistry (`stage.dart`). Cross-widget positioning is
+  // the stage/overlay's job, addressed by abstract anchors. Guarding this keeps
+  // components previewable/skinnable and prevents component<->component spatial
+  // coupling - which is why it is a source-scan, not just a CAR question.
+  test('spatial-blindness guard: lib/design never resolves widget geometry',
+      () {
+    final reach = RegExp(
+      r'findRenderObject\(|localToGlobal|globalToLocal|AnchorRegistry|'
+      '''import\\s+['"](?:[^'"]*/)?stage\\.dart['"]''',
+    );
+    final violations = <String>[];
+    final root = Directory('lib${Platform.pathSeparator}design');
+    if (root.existsSync()) {
+      for (final entity in root.listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        final lines = entity.readAsLinesSync();
+        for (var i = 0; i < lines.length; i++) {
+          if (reach.hasMatch(lines[i])) {
+            violations.add('${entity.path}:${i + 1}  ${lines[i].trim()}');
+          }
+        }
+      }
+    }
+    if (violations.isEmpty) return;
+    final message =
+        'Spatial-blindness violated: a design-system component resolves widget '
+        'geometry (it may take an opaque anchor Key, but must not read positions '
+        '- the stage/overlay owns cross-widget placement):'
+        '\n  ${violations.join('\n  ')}';
+    if (_enforce) {
+      fail(message);
+    } else {
+      // ignore: avoid_print
+      print('spatial-blindness guard WARNING (not enforced):\n$message');
+    }
+  });
 }
