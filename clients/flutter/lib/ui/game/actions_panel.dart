@@ -128,6 +128,13 @@ class ActionsPanelState extends State<ActionsPanel> {
         final bump = (price * pct / 100).round();
         _bid.text = '${(current + bump).clamp(0, cash)}';
       }
+      // One submit path shared by the Bid button and Enter/Done in the field,
+      // so both clamp the wire amount to cash identically (the field is already
+      // capped; this is belt-and-suspenders and the single source of truth).
+      void submitBid() => s.sendCmd({
+            'type': 'submit_blind_bid',
+            'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
+          });
 
       children.addAll([
         Text(
@@ -164,17 +171,16 @@ class ActionsPanelState extends State<ActionsPanel> {
                 FilteringTextInputFormatter.digitsOnly,
                 MaxValueFormatter(cash),
               ],
+              // Enter (or the Deck OSK's Done key) sends the bid without
+              // leaving the field for the button - the window is only 12s.
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => submitBid(),
             ),
           ),
           PcButton(
             loc.actionBid,
             dense: true,
-            // Clamp at submit too, belt-and-suspenders: the field is
-            // already capped, but the wire amount must never exceed cash.
-            onPressed: () => s.sendCmd({
-              'type': 'submit_blind_bid',
-              'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
-            }),
+            onPressed: submitBid,
           ),
         ],
         btn(loc.actionAbstain, {'type': 'submit_blind_bid', 'amount': 0},

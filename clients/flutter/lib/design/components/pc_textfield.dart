@@ -13,7 +13,9 @@
 /// optional - all backward-compatible (existing callers unchanged), so within
 /// the DDR-0019 "add optional params freely" allowance. The in-game action bar
 /// then added `inputFormatters` (the bid/bribe fields cap digits + amount as
-/// you type). Still future-additive when a screen needs them: `autofocus` (the
+/// you type), and `onSubmitted`/`textInputAction` (the sealed-bid field submits
+/// on Enter under the 12s clock - and the Steam Deck's on-screen keyboard shows
+/// a Done key). Still future-additive when a screen needs them: `autofocus` (the
 /// join-code field), a counter toggle (feedback suppresses it).
 library;
 
@@ -54,6 +56,16 @@ class PcTextField extends StatelessWidget {
   /// the field itself refuses an illegal edit as you type. Omit for free text.
   final List<TextInputFormatter>? inputFormatters;
 
+  /// Called when the user submits the field (hardware Enter or the soft
+  /// keyboard's action key) - e.g. sending the sealed bid without leaving the
+  /// field for the button. Omit for a field with no submit action.
+  final ValueChanged<String>? onSubmitted;
+
+  /// The soft-keyboard action key shown for this field (e.g.
+  /// `TextInputAction.done` on the bid field, so the Steam Deck OSK offers a
+  /// submit key rather than a newline). Omit for the platform default.
+  final TextInputAction? textInputAction;
+
   const PcTextField({
     super.key,
     required this.controller,
@@ -64,6 +76,8 @@ class PcTextField extends StatelessWidget {
     this.textAlign = TextAlign.start,
     this.dense = false,
     this.inputFormatters,
+    this.onSubmitted,
+    this.textInputAction,
   });
 
   @override
@@ -74,6 +88,8 @@ class PcTextField extends StatelessWidget {
       keyboardType: keyboardType,
       textAlign: textAlign,
       inputFormatters: inputFormatters,
+      onSubmitted: onSubmitted,
+      textInputAction: textInputAction,
       cursorColor: Pc.gold,
       decoration: InputDecoration(
         labelText: label,

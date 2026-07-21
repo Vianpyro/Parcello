@@ -137,4 +137,30 @@ void main() {
     await tester.pump();
     expect(find.text('137'), findsOneWidget);
   });
+
+  testWidgets('the sealed-bid field submits on Enter / the Deck Done key',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final s = _biddingRoom();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: ListenableBuilder(
+        listenable: s,
+        builder: (_, _) => GameScreen(s: s),
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // The window is only 12s: the field must submit without the player having
+    // to leave it for the Bid button, and the on-screen keyboard must offer a
+    // submit key rather than a newline.
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.onSubmitted, isNotNull,
+        reason: 'Enter / the OSK Done key must send the bid');
+    expect(field.textInputAction, TextInputAction.done);
+  });
 }
