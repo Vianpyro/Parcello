@@ -76,8 +76,13 @@ landed early. Do NOT rebuild these.
   (DDR-006, owner-confirmed 2026-07) but not migrated. (Phase 5.)
 - **Accessibility**: no screen-reader Semantics; no high-contrast
   profile; the CVD palette audit is unrun. (Phase 9.)
-- **Board is flat**, not isometric - and DELIBERATELY stays flat for now
-  (DDR-017, owner-confirmed 2026-07). (Out of this roadmap's core path.)
+- **Board is flat**, not isometric - but the game-screen refonte
+  (2026-07) reverses that: DDR-0022 adopts the isometric board (after a
+  flat-board layout reflow, DDR-0021), and DDR-0023 brings chat/shop/
+  levels-XP into scope as inert placeholders. Sequenced flat-reflow first
+  (playable), isometric renderer second. The refonte plan lives outside
+  this file; this line is the pointer that the flat board is no longer the
+  end state.
 - **Audio**: placeholder clips; deferred until the events exist (owner
   decision 2026-07) - see Phase 8's note.
 

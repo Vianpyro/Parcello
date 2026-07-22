@@ -80,6 +80,14 @@ floor and controller navigation are positioning decisions, not ports.
   feeling comes from paper, ink, and brass ACCENTS, not from rendering
   a tabletop.
 
+> **Reversal note (DDR-0023, owner 2026-07):** chat, a shop/currency, and
+> levels/XP were categorical non-goals (formerly DDR-013); the owner
+> reversed that toward the mockup's richer framing, and they now exist as
+> inert visual placeholders (real later, each via its own ADR). This does
+> NOT touch the first bullet: "no dark patterns / no pay-for-power" stays
+> permanent, so any real shop must be cosmetic-only and any real progression
+> non-coercive - the reversal opened the SURFACES, not the dark patterns.
+
 ## Long-term artistic vision (a decade out)
 
 The end state this bible points at: the isometric "city of progress"

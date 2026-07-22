@@ -76,17 +76,25 @@ Connect -> Menu -> { Private lobby -> Game -> Finished }
 - **Primary action is CONTEXTUAL and singular**: play a card / submit a
   bid / vote / choose a jail exit / end turn - exactly one is the live
   decision, and the board's staging (lift/recede/anchor) points at it.
-- **Information hierarchy** (fixed positions - spatial constancy is the
-  cognitive aid): board center = protagonist; your hand = hero, bottom;
-  per-seat cash+VP = always visible; the contested tile carries its own
-  clock; the side panel = receipts, trades, log, settings; banners =
-  board-center, one at a time.
+- **Information hierarchy** - five fixed regions (DDR-0021; spatial
+  constancy is the cognitive aid, no region moves on a state change):
+  TOP player bar (every seat: name, cash, VP + game clock); LEFT nav rail
+  (Menu / Objectives / History / Chat); CENTRE board = protagonist, with
+  the "your turn" prompt and the single contextual action panel; BOTTOM-LEFT
+  the hand (hero); RIGHT the property panel (landed/selected tile: name,
+  rent ladder, owner, houses/hotels) + the history feed. Banners stay
+  board-centre, one at a time. Some regions carry inert placeholders
+  (avatars, level/XP, chat, objectives - DDR-0023; rank stays per-server,
+  DDR-0012).
 - **Navigation**: tiles focusable ONLY when actionable (A/D-pad opens
   the action sheet); Escape skips the animation in flight (never leaves
   the screen mid-game); leave/resign are explicit, in the panel.
-- **Responsive**: fixed composition board + 340 px panel + 12 px
-  gutters; the FLOOR is 1024x600 (layout-test invariant); below it the
-  board center cannot hold the HUD - that is the floor, not a bug.
+- **Responsive**: fixed composition - the five regions (DDR-0021) frame a
+  centred board; 12 px gutters. The FLOOR is 1024x600 (layout-test
+  invariant) and is RE-OPENED by the reflow: moving the HUD out of the
+  board centre into dedicated regions should relieve it, but the denser
+  regions (and later the isometric board, DDR-0022) must be re-measured
+  before the floor is re-asserted.
 - **Loading/reconnect**: on join mid-game, snap to truth + ONE 900 ms
   re-orientation (your pawn pulses, acting seat lights) - never a
   catch-up replay (motion-language 9). Disconnected: board greys 20%

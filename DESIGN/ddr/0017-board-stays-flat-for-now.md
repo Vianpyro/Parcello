@@ -1,6 +1,11 @@
 # DDR-0017: the board stays flat for now; isometric is deferred
 
-Status: DECIDED (owner, 2026-07)
+Status: **REVERSED by [DDR-0022](0022-isometric-board.md)** (owner, 2026-07) -
+the isometric chantier this DDR deferred has been started. Kept for the
+reasoning (why flat was the right interim, and the projection-independence
+guarantee that makes the reversal a re-anchoring, not a rewrite).
+
+Original status: DECIDED (owner, 2026-07)
 
 ## Context
 
