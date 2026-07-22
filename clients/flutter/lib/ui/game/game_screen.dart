@@ -17,6 +17,7 @@ import '../../tokens.dart';
 import '../side/side_panel.dart';
 import 'center_panel.dart';
 import 'flashes.dart';
+import 'player_bar.dart';
 
 class GameScreen extends StatelessWidget {
   final GameSession s;
@@ -45,8 +46,18 @@ class GameScreen extends StatelessWidget {
           child: Stack(children: [
             Padding(
               padding: const EdgeInsets.all(Pc.s12),
-              child:
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child: Column(children: [
+                // The seats live across the top now (DDR-0021), not in the
+                // side panel. It carries the chit anchors and the bid reveal,
+                // so - like the old seat list - it repaints on a stage frame.
+                ListenableBuilder(
+                    listenable: s.stage,
+                    builder: (context, _) => PlayerBar(s: s)),
+                const SizedBox(height: Pc.s4),
+                Expanded(
+                  child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                 Expanded(
                   child: Stack(alignment: Alignment.center, children: [
                     // The board subscribes to the stage itself; `centre` is
@@ -95,6 +106,8 @@ class GameScreen extends StatelessWidget {
                 SizedBox(
                   width: 340,
                   child: SingleChildScrollView(child: SidePanel(s: s)),
+                ),
+                      ]),
                 ),
               ]),
             ),

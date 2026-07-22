@@ -7,9 +7,7 @@ import 'package:flutter/material.dart';
 import '../../design/components/pc_button.dart';
 import '../../design/components/pc_card.dart';
 import '../../design/components/pc_dialog.dart';
-import '../../design/components/seat_tile.dart';
 import '../../l10n/app_localizations.dart';
-import '../../protocol.dart';
 import '../../session.dart';
 import '../../sfx.dart';
 import '../../tokens.dart';
@@ -17,7 +15,6 @@ import '../../typography.dart';
 import '../coach_mark.dart';
 import '../common.dart';
 import '../game/property_panel.dart';
-import 'bid_chip.dart';
 import 'feedback_card.dart';
 import 'settings_panel.dart';
 import 'trade_dialog.dart';
@@ -121,12 +118,6 @@ class SidePanel extends StatelessWidget {
                 )),
             ]),
             const SizedBox(height: Pc.s6),
-            // The seat list is the only part of the side panel the stage drives
-            // (chit anchors, the sealed-bid reveal), so it is the only part that
-            // repaints on an animation frame. The trade panel and the settings
-            // fields below never do.
-            ListenableBuilder(
-                listenable: s.stage, builder: (context, _) => _players(t)),
             if (s.view == null) ...[
               const SizedBox(height: Pc.s8),
               PcButton(t.startGame,
@@ -201,93 +192,6 @@ class SidePanel extends StatelessWidget {
         )),
       ),
     ]);
-  }
-
-  /// VP leaderboard rank per seat (1 = leading), null for bankrupt seats
-  /// or when the VP race is off. Ties break to the lowest seat, matching
-  /// every tiebreak in the engine.
-  List<int?> _vpRanks(ClientView v) {
-    final ranks = List<int?>.filled(v.players.length, null);
-    if ((s.content?.winVictoryPoints ?? 0) <= 0) return ranks;
-    final alive = [
-      for (var i = 0; i < v.players.length; i++)
-        if (!v.players[i].bankrupt) i,
-    ]..sort((a, b) {
-        final byVp = v.players[b].victoryPoints - v.players[a].victoryPoints;
-        return byVp != 0 ? byVp : a - b;
-      });
-    for (var r = 0; r < alive.length; r++) {
-      ranks[alive[r]] = r + 1;
-    }
-    return ranks;
-  }
-
-  Widget _players(AppLocalizations t) {
-    final v = s.view;
-    final rows = <Widget>[];
-    final count = v?.players.length ?? s.seats.length;
-    final ranks = v != null ? _vpRanks(v) : List<int?>.filled(count, null);
-    // Round metronome (ADR-0020): the round is the minimum hands-cycled
-    // across survivors, so anyone above that minimum has already done their
-    // hand this round - tag them so it is obvious who the table waits on.
-    final int? round = (v == null || v.finished)
-        ? null
-        : v.players
-            .asMap()
-            .entries
-            .where((e) => !e.value.bankrupt)
-            .map((e) => e.value.handsCycled)
-            .fold<int?>(null, (m, h) => m == null || h < m ? h : m);
-    // A sealed bid, face-up (ADR-0018): every seat's bid flips at once and is
-    // held long enough to compare - the single most information-dense moment in
-    // Parcello, which the old client never rendered (the auction just resolved).
-    final reveal = s.stage.bidReveal;
-    final showVp = (s.content?.winVictoryPoints ?? 0) > 0;
-    for (var i = 0; i < count; i++) {
-      final p = v?.players.elementAtOrNull(i);
-      final seatInfo = s.seats.elementAtOrNull(i);
-      final name = p?.name ?? seatInfo?.name ?? t.seatFallback(i);
-      // Whose turn is it: bold text alone read as too subtle in playtests
-      // (2026-07) - a highlighted row + a leading marker reads at a glance.
-      final isActive = v != null && !v.finished && v.current == i;
-      final cycled =
-          round != null && p != null && !p.bankrupt && p.handsCycled > round;
-      final tags = [
-        if (cycled) t.playerTagHandCycled,
-        if (i == s.seat) t.playerTagYou,
-        if (p?.inJail == true) t.playerTagJail,
-        if (p?.jailRoute != null) t.playerTagRoute(p!.jailRoute!.join(',')),
-        if ((p?.jailCards ?? 0) > 0) t.playerTagJailCard(p!.jailCards),
-        if (seatInfo?.isBot == true)
-          t.playerTagBot
-        else if (seatInfo?.connected == false)
-          t.playerTagOffline,
-      ].join(' ');
-      rows.add(SeatTile(
-        seat: i,
-        name: name,
-        tags: tags,
-        active: isActive,
-        bankrupt: p?.bankrupt == true,
-        rank: ranks[i],
-        anchorKey: s.stage.anchors.seatKey(i),
-        cash: p != null ? '\$${p.cash}' : null,
-        // Net worth decides a timed game (ADR-0010), so surface it only then.
-        netWorthLabel: p != null && s.gameEndsAt != null
-            ? t.sideNetWorth(s.netWorth(i))
-            : null,
-        // Victory-point race (ADR-0020): "the race IS the game".
-        vpLabel: p != null && showVp
-            ? t.sideVictoryPoints(p.victoryPoints, s.content!.winVictoryPoints)
-            : null,
-        trailingBid: reveal != null && i < reveal.bids.length
-            ? BidChip(bid: reveal.bids[i], won: reveal.winner == i)
-            : null,
-      ));
-    }
-    // The VP scoring breakdown lives in the center panel now
-    // (`_CenterPanel._vpLegend`), where it reads at the table's focus.
-    return Column(children: rows);
   }
 
   Widget _trades(BuildContext context) {

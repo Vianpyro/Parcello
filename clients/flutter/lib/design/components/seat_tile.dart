@@ -61,6 +61,13 @@ class SeatTile extends StatelessWidget {
   /// figures at auction settlement. Omit when no bid is revealed.
   final Widget? trailingBid;
 
+  /// COMPACT vertical layout for the top player bar (DDR-0021): the same
+  /// semantic model, stacked (pawn / name / cash / VP) instead of a wide row.
+  /// Additive per DDR-0019 - existing row callers are unchanged (default
+  /// false). The `anchorKey`/`trailingBid` contract is identical (the chit
+  /// still flies to the pawn circle; the bid still flips face-up).
+  final bool compact;
+
   const SeatTile({
     super.key,
     required this.seat,
@@ -74,10 +81,87 @@ class SeatTile extends StatelessWidget {
     this.rank,
     this.anchorKey,
     this.trailingBid,
+    this.compact = false,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      compact ? _compact(context) : _row(context);
+
+  Widget _pawn() => Container(
+        key: anchorKey,
+        width: compact ? 20 : 18,
+        height: compact ? 20 : 18,
+        alignment: Alignment.center,
+        decoration:
+            BoxDecoration(color: pawnColor(seat), shape: BoxShape.circle),
+        child: rank == null
+            ? null
+            : rank == 1
+                ? const Icon(Icons.workspace_premium, size: 12, color: Pc.text)
+                : Text('$rank',
+                    style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Pc.text)),
+      );
+
+  /// The top-bar cell: two tight lines - pawn + name, then the figures - so the
+  /// bar stays short enough to keep the board square fitting at the 1024x600
+  /// floor (DDR-0021 re-opened it; this keeps it where it was).
+  Widget _compact(BuildContext context) {
+    return AnimatedContainer(
+      duration: Motion.stateFade,
+      padding: const EdgeInsets.symmetric(horizontal: Pc.s6, vertical: Pc.s4),
+      decoration: BoxDecoration(
+        // Same bespoke seat-active tint as the row (0.16, not the 0.12 wash).
+        color: active ? Pc.gold.withValues(alpha: 0.16) : null,
+        borderRadius: Pc.radius,
+        border: Border.all(color: active ? Pc.gold : Pc.border),
+      ),
+      child: Opacity(
+        opacity: bankrupt ? 0.4 : 1,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // Full-width rows so the name ellipsizes instead of overflowing the
+          // narrow cell. netWorth is intentionally NOT shown in the compact bar
+          // (it is not in the mockup's top cell, and it costs a line/width);
+          // the row layout still carries it for timed-game surfaces.
+          Row(children: [
+            _pawn(),
+            const SizedBox(width: Pc.s4),
+            Expanded(
+              child: Text(tags.isEmpty ? name : '$name $tags',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: PcText.label.copyWith(
+                      fontWeight: active ? FontWeight.bold : null,
+                      decoration:
+                          bankrupt ? TextDecoration.lineThrough : null)),
+            ),
+          ]),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            if (cash != null)
+              Flexible(
+                  child: Text(cash!,
+                      style: PcText.amount,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis)),
+            if (vpLabel != null) ...[
+              const SizedBox(width: Pc.s6),
+              Text(vpLabel!,
+                  style: PcText.amount.copyWith(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Pc.goldDark)),
+            ],
+          ]),
+          ?trailingBid,
+        ]),
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context) {
     return AnimatedContainer(
       duration: Motion.stateFade,
       margin: const EdgeInsets.symmetric(vertical: Pc.s2),
@@ -102,24 +186,7 @@ class SeatTile extends StatelessWidget {
                 : null,
           ),
           // Pawn circle doubles as the live VP leaderboard AND the chit anchor.
-          Container(
-            key: anchorKey,
-            width: 18,
-            height: 18,
-            alignment: Alignment.center,
-            decoration:
-                BoxDecoration(color: pawnColor(seat), shape: BoxShape.circle),
-            child: rank == null
-                ? null
-                : rank == 1
-                    ? const Icon(Icons.workspace_premium,
-                        size: 12, color: Pc.text)
-                    : Text('$rank',
-                        style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Pc.text)),
-          ),
+          _pawn(),
           const SizedBox(width: Pc.s8),
           Expanded(
             child: Text(tags.isEmpty ? name : '$name $tags',
