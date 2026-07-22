@@ -32,6 +32,12 @@ class TileDef {
   final int? price;
   final int houseCost;
   final String rentModel; // meaningful only when kind == property
+  /// The tile's rent schedule already on the wire (engine `PropertyDef.rents`):
+  /// `houses` model -> rents[0] unimproved .. rents[5] hotel; `group_scaled`
+  /// -> rents[n-1] for n group tiles owned. Empty for non-property tiles. This
+  /// is the tile's DEFINED ladder (the collected amount at landing is further
+  /// moved by group/boost/market/spotlight, shown live in the event feed).
+  final List<int> rents;
   final int? amount;
   final int? minPct;
   final int? maxPct;
@@ -44,6 +50,10 @@ class TileDef {
         price = j['kind']['price'] as int?,
         houseCost = j['kind']['house_cost'] as int? ?? 0,
         rentModel = j['kind']['rent_model'] as String? ?? 'houses',
+        rents = (j['kind']['rents'] as List<dynamic>?)
+                ?.map((e) => e as int)
+                .toList() ??
+            const [],
         amount = j['kind']['amount'] as int?,
         minPct = j['kind']['min_pct'] as int?,
         maxPct = j['kind']['max_pct'] as int?;

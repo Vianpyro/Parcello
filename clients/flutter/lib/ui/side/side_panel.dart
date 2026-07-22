@@ -16,6 +16,7 @@ import '../../tokens.dart';
 import '../../typography.dart';
 import '../coach_mark.dart';
 import '../common.dart';
+import '../game/property_panel.dart';
 import 'bid_chip.dart';
 import 'feedback_card.dart';
 import 'settings_panel.dart';
@@ -29,6 +30,13 @@ class SidePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = s.view;
     final t = AppLocalizations.of(context);
+    // The property card shows the tile under the cursor/focus, else the one the
+    // player is standing on (DDR-0021 right region; first slice, still hosted in
+    // the side panel until the full reflow moves it to its own region).
+    final focusTile = (v != null && !v.finished)
+        ? (s.hoverTile ??
+            (s.seat != null ? v.players.elementAtOrNull(s.seat!)?.position : null))
+        : null;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       // First-game coach mark (one at a time, never modal). In the side
       // panel, not floating over the board: here it participates in layout
@@ -87,6 +95,11 @@ class SidePanel extends StatelessWidget {
                   Text(t.playAgainHint, style: PcText.caption),
               ]),
         ),
+      if (focusTile != null && s.content != null) ...[
+        const SizedBox(height: Pc.s6),
+        PropertyPanel(s: s, tile: focusTile),
+        const SizedBox(height: Pc.s6),
+      ],
       PcCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
