@@ -14,6 +14,7 @@
 /// frame is shown, and an over-budget plan is compressed, never played long.
 library;
 
+import 'l10n/app_localizations.dart';
 import 'motion.dart';
 import 'stage.dart';
 
@@ -32,6 +33,12 @@ class CompileCtx {
   final String Function(int tile) tileName;
   final String Function(int seat) playerName;
 
+  /// Localized strings for the beats that carry on-screen text (the win /
+  /// bankruptcy arrests, the market / spotlight / bribe banners). Passed in as
+  /// data - like `playerName`/`tileName` - so `compile` stays pure and the
+  /// dramatic moments read in the player's language, not baked English.
+  final AppLocalizations loc;
+
   /// The accessibility knob (ADR-0030). It is part of the compile input, not a
   /// global the executor reads later: an instant plan must *cost* nothing, and
   /// cost is decided here.
@@ -44,6 +51,7 @@ class CompileCtx {
     required this.positions,
     required this.tileName,
     required this.playerName,
+    required this.loc,
     this.profile = MotionProfile.full,
   });
 }
@@ -684,19 +692,22 @@ List<Beat> _beatsFor(
     case 'bribe_resolved':
       if (e['succeeded'] != true) return const [];
       final briber = e['briber'] as int;
-      return [BannerBeat('Bribe accepted', BannerKind.market), ThreatBeat(seatOf[briber] ?? ctx.jailTile)];
+      return [
+        BannerBeat(ctx.loc.bannerBribeAccepted, BannerKind.market),
+        ThreatBeat(seatOf[briber] ?? ctx.jailTile)
+      ];
 
     // -- world --------------------------------------------------------------
 
     case 'spotlight_started':
       final pct = e['rent_pct'] as int;
       final turns = e['duration_turns'] as int;
-      final span =
-          turns <= 0 ? 'until the next Exposition landing' : 'for $turns turns';
+      final span = turns <= 0
+          ? ctx.loc.spotlightSpanPermanent
+          : ctx.loc.spotlightSpanTurns(turns);
       return [
         BannerBeat(
-            '${ctx.tileName(e['tile'] as int)} is in the spotlight\n'
-            '+$pct% rent $span',
+            ctx.loc.bannerSpotlight(ctx.tileName(e['tile'] as int), pct, span),
             BannerKind.spotlight),
       ];
 
@@ -704,7 +715,9 @@ List<Beat> _beatsFor(
       final pct = e['magnitude_pct'] as int;
       final sign = pct > 0 ? '+' : '';
       return [
-        BannerBeat('Market: ${e['event_id']} ($sign$pct%)', BannerKind.market),
+        BannerBeat(
+            ctx.loc.bannerMarket('${e['event_id']}', '$sign$pct%'),
+            BannerKind.market),
       ];
 
     // -- P1: the table stops --------------------------------------------------
@@ -714,15 +727,14 @@ List<Beat> _beatsFor(
       final creditor = e['creditor'] as int?;
       return [
         ArrestBeat(Arrest(
-          title: '${ctx.playerName(p)} is bankrupt',
+          title: ctx.loc.arrestBankrupt(ctx.playerName(p)),
           // Nobody inherits (ADR-0031): the estate goes back to the bank and
           // the board reopens. The creditor took the cash, and only the cash -
           // that is the whole message, and the table needs it immediately,
           // because every one of those tiles is about to be up for auction.
           detail: creditor == null
-              ? 'The estate returns to the bank.'
-              : 'The estate returns to the bank. '
-                  '${ctx.playerName(creditor)} takes the cash.',
+              ? ctx.loc.arrestEstateBank
+              : ctx.loc.arrestEstateCreditor(ctx.playerName(creditor)),
           seat: p,
         )),
       ];
@@ -730,7 +742,7 @@ List<Beat> _beatsFor(
     case 'game_ended':
       final w = e['winner'] as int;
       return [
-        ArrestBeat(Arrest(title: '${ctx.playerName(w)} wins', seat: w),
+        ArrestBeat(Arrest(title: ctx.loc.arrestWins(ctx.playerName(w)), seat: w),
             win: true),
       ];
 
@@ -739,8 +751,8 @@ List<Beat> _beatsFor(
       return [
         ArrestBeat(
             Arrest(
-                title: '${ctx.playerName(w)} wins',
-                detail: '${e['points']} victory points',
+                title: ctx.loc.arrestWins(ctx.playerName(w)),
+                detail: ctx.loc.arrestWinPoints(e['points'] as int),
                 seat: w),
             win: true),
       ];
@@ -750,8 +762,8 @@ List<Beat> _beatsFor(
       return [
         ArrestBeat(
             Arrest(
-                title: '${ctx.playerName(w)} wins',
-                detail: 'Domination: ${e['groups']} colour groups',
+                title: ctx.loc.arrestWins(ctx.playerName(w)),
+                detail: ctx.loc.arrestWinGroups(e['groups'] as int),
                 seat: w),
             win: true),
       ];
@@ -761,8 +773,8 @@ List<Beat> _beatsFor(
       return [
         ArrestBeat(
             Arrest(
-                title: '${ctx.playerName(w)} wins',
-                detail: 'The conglomerate pool ran dry',
+                title: ctx.loc.arrestWins(ctx.playerName(w)),
+                detail: ctx.loc.arrestWinPool,
                 seat: w),
             win: true),
       ];
@@ -772,8 +784,8 @@ List<Beat> _beatsFor(
       return [
         ArrestBeat(
             Arrest(
-                title: "Time's up",
-                detail: '${ctx.playerName(w)} wins on net worth',
+                title: ctx.loc.arrestTimeUp,
+                detail: ctx.loc.arrestWinNetWorth(ctx.playerName(w)),
                 seat: w),
             win: true),
       ];

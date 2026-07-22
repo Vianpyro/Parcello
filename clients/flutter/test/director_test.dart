@@ -7,6 +7,9 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parcello_client/director.dart';
+import 'package:parcello_client/l10n/app_localizations.dart';
+import 'package:parcello_client/l10n/app_localizations_en.dart';
+import 'package:parcello_client/l10n/app_localizations_fr.dart';
 import 'package:parcello_client/motion.dart';
 import 'package:parcello_client/stage.dart';
 
@@ -15,6 +18,7 @@ CompileCtx ctx({
   MotionProfile profile = MotionProfile.full,
   int boardLen = 32, // mods/base
   int? mySeat = 0,
+  AppLocalizations? loc,
 }) =>
     CompileCtx(
       boardLen: boardLen,
@@ -23,6 +27,7 @@ CompileCtx ctx({
       positions: positions,
       tileName: (t) => 'tile $t',
       playerName: (s) => 'player $s',
+      loc: loc ?? AppLocalizationsEn(),
       profile: profile,
     );
 
@@ -359,6 +364,21 @@ void main() {
       ], ctx());
       expect(plan.beats, isEmpty);
       expect(plan.cost, Duration.zero);
+    });
+  });
+
+  group('beat text is localized (not baked English)', () {
+    test('the win arrest reads in the player language', () {
+      final plan = compile(
+        [
+          {'type': 'won_by_points', 'player': 0, 'points': 20},
+        ],
+        ctx(loc: AppLocalizationsFr()),
+      );
+      final arrest = plan.beats.whereType<ArrestBeat>().single.arrest;
+      // playerName here returns 'player 0'; the sentence around it is French.
+      expect(arrest.title, "player 0 l'emporte");
+      expect(arrest.detail, '20 points de victoire');
     });
   });
 }

@@ -11,6 +11,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'director.dart';
 import 'l10n/app_localizations.dart';
+import 'l10n/app_localizations_en.dart';
 import 'motion.dart';
 import 'protocol.dart';
 import 'session_storage.dart';
@@ -537,6 +538,10 @@ class GameSession extends ChangeNotifier {
         positions: Map.of(stage.pawnAt),
         tileName: tileName,
         playerName: playerName,
+        // The beats that carry text (win / bankruptcy / market / spotlight)
+        // localize through this; `l10n` is set every frame, EN is only the
+        // pre-first-frame fallback (the same language the beats used to bake).
+        loc: l10n ?? AppLocalizationsEn(),
         profile: stage.profile,
       );
 
