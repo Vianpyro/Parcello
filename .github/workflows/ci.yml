@@ -182,11 +182,66 @@ jobs:
       - run: cargo machete
       - run: cargo deny check
 
+  # Closes the CI blind spot from docs/protocol-duplication-audit.md (S1):
+  # branch protection only requires this workflow's `CI OK` job (README), so
+  # a protocol change that never touches clients/flutter/** would otherwise
+  # merge without any Dart tool ever seeing it - flutter.yml's own paths
+  # list was widened alongside this, so it runs and reports on such a PR,
+  # but it isn't itself a required check, so that alone doesn't block a
+  # merge. This job detects the same condition and, only then, calls
+  # flutter.yml as a reusable workflow (`workflow_call`) instead of
+  # re-implementing its SDK setup/pub get/test steps: one definition of
+  # "how to run the Flutter checks", reused rather than duplicated. Its
+  # result feeds `ci-ok` below, which IS required - a failing Flutter run
+  # now genuinely blocks the merge of a protocol change.
+  protocol-changed:
+    name: detect protocol change
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: diff against the merge base
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          # Fails open (treated as changed) if the diff itself can't be
+          # computed - e.g. a missing `before` SHA on a repo's first push -
+          # so a detection failure can never silently skip validation.
+          changed=$(git diff --name-only "$base" "$head" -- \
+            crates/protocol crates/engine/src/command.rs \
+            crates/engine/src/event.rs crates/engine/src/error.rs \
+            protocol-fixtures || echo CHANGED)
+          if [ -n "$changed" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  protocol-flutter:
+    name: protocol change -> flutter validation
+    needs: protocol-changed
+    # `always()` plus a negative check (rather than `== 'true'`) so that if
+    # `protocol-changed` itself fails - instead of just concluding "no
+    # change" - its output is unset, not `'false'`, and this still runs
+    # (fails open) instead of cascading into a silent `skipped` that
+    # ci-ok would count as success.
+    if: always() && needs.protocol-changed.outputs.changed != 'false'
+    uses: ./.github/workflows/flutter.yml
+
   # The one required check: green iff every job above is green. Skipped
   # jobs (docs-only pushes on main) count as success.
   ci-ok:
     name: CI OK
-    needs: [lint, test, msrv, docs, deps]
+    needs: [lint, test, msrv, docs, deps, protocol-flutter]
     if: always()
     runs-on: ubuntu-latest
     steps:

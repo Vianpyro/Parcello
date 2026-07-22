@@ -1,0 +1,254 @@
+{
+  "blind_auction_opened": {
+    "discoverer": 0,
+    "floor": 60,
+    "tile": 3,
+    "type": "blind_auction_opened"
+  },
+  "blind_auction_resolved": {
+    "amount": 60,
+    "bids": [
+      0,
+      60
+    ],
+    "discoverer": 0,
+    "tile": 3,
+    "type": "blind_auction_resolved",
+    "winner": 1
+  },
+  "blind_bid_submitted": {
+    "player": 0,
+    "type": "blind_bid_submitted"
+  },
+  "bribe_offered": {
+    "amount": 90,
+    "player": 0,
+    "type": "bribe_offered"
+  },
+  "bribe_resolved": {
+    "accepts": 2,
+    "amount": 90,
+    "briber": 0,
+    "succeeded": true,
+    "total": 3,
+    "type": "bribe_resolved"
+  },
+  "bribe_vote_cast": {
+    "player": 1,
+    "type": "bribe_vote_cast"
+  },
+  "card_drawn": {
+    "card": "advance_go",
+    "deck": "chance",
+    "player": 0,
+    "text": "Advance to Go.",
+    "type": "card_drawn"
+  },
+  "cash_adjusted": {
+    "delta": 50,
+    "player": 0,
+    "reason": "advance_go",
+    "type": "cash_adjusted"
+  },
+  "discoverer_refunded": {
+    "amount": 6,
+    "player": 0,
+    "tile": 3,
+    "type": "discoverer_refunded"
+  },
+  "expropriated": {
+    "cost": 120,
+    "from": 1,
+    "liquidated": 0,
+    "liquidation_refund": 0,
+    "player": 0,
+    "tile": 3,
+    "type": "expropriated"
+  },
+  "game_ended": {
+    "type": "game_ended",
+    "winner": 0
+  },
+  "house_built": {
+    "cost": 50,
+    "houses": 1,
+    "player": 0,
+    "tile": 3,
+    "type": "house_built"
+  },
+  "house_sold": {
+    "houses": 1,
+    "player": 0,
+    "refund": 25,
+    "tile": 3,
+    "type": "house_sold"
+  },
+  "jail_card_received": {
+    "player": 0,
+    "type": "jail_card_received"
+  },
+  "jail_card_used": {
+    "player": 0,
+    "type": "jail_card_used"
+  },
+  "left_jail": {
+    "player": 0,
+    "type": "left_jail"
+  },
+  "legal_route_chosen": {
+    "order": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "player": 0,
+    "type": "legal_route_chosen"
+  },
+  "market_event_activated": {
+    "duration_turns": 4,
+    "effect": "rent_multiplier",
+    "event_id": "rent_spike",
+    "magnitude_pct": 50,
+    "type": "market_event_activated"
+  },
+  "market_event_expired": {
+    "event_id": "rent_spike",
+    "type": "market_event_expired"
+  },
+  "moved": {
+    "from": 0,
+    "passed_go": false,
+    "player": 0,
+    "to": 4,
+    "type": "moved"
+  },
+  "movement_card_played": {
+    "player": 0,
+    "type": "movement_card_played",
+    "value": 4
+  },
+  "player_bankrupt": {
+    "creditor": 1,
+    "player": 0,
+    "type": "player_bankrupt"
+  },
+  "player_resigned": {
+    "player": 0,
+    "type": "player_resigned"
+  },
+  "property_mortgaged": {
+    "player": 0,
+    "tile": 3,
+    "type": "property_mortgaged",
+    "value": 30
+  },
+  "property_transferred": {
+    "from": 0,
+    "tile": 3,
+    "to": 1,
+    "type": "property_transferred"
+  },
+  "property_unmortgaged": {
+    "cost": 33,
+    "player": 0,
+    "tile": 3,
+    "type": "property_unmortgaged"
+  },
+  "rent_boost_consumed": {
+    "tile": 3,
+    "type": "rent_boost_consumed"
+  },
+  "rent_boosted": {
+    "boosts": 1,
+    "cost": 30,
+    "player": 0,
+    "tile": 3,
+    "type": "rent_boosted"
+  },
+  "rent_paid": {
+    "amount": 10,
+    "from": 1,
+    "tile": 3,
+    "to": 0,
+    "type": "rent_paid"
+  },
+  "round_bonus_awarded": {
+    "player": 0,
+    "points": 2,
+    "type": "round_bonus_awarded"
+  },
+  "salary_paid": {
+    "amount": 200,
+    "player": 0,
+    "type": "salary_paid"
+  },
+  "spotlight_ended": {
+    "tile": 5,
+    "type": "spotlight_ended"
+  },
+  "spotlight_started": {
+    "duration_turns": 0,
+    "rent_pct": 100,
+    "tile": 5,
+    "type": "spotlight_started"
+  },
+  "tax_paid": {
+    "amount": 100,
+    "player": 0,
+    "tile": 8,
+    "type": "tax_paid"
+  },
+  "time_up": {
+    "type": "time_up",
+    "winner": 0
+  },
+  "trade_accepted": {
+    "from": 0,
+    "to": 1,
+    "trade": 4,
+    "type": "trade_accepted"
+  },
+  "trade_cancelled": {
+    "from": 0,
+    "to": 1,
+    "trade": 4,
+    "type": "trade_cancelled"
+  },
+  "trade_declined": {
+    "from": 0,
+    "to": 1,
+    "trade": 4,
+    "type": "trade_declined"
+  },
+  "trade_proposed": {
+    "from": 0,
+    "to": 1,
+    "trade": 4,
+    "type": "trade_proposed"
+  },
+  "turn_started": {
+    "player": 0,
+    "type": "turn_started"
+  },
+  "went_to_jail": {
+    "from": 12,
+    "player": 0,
+    "type": "went_to_jail"
+  },
+  "won_by_groups": {
+    "groups": 3,
+    "type": "won_by_groups",
+    "winner": 0
+  },
+  "won_by_points": {
+    "player": 0,
+    "points": 20,
+    "type": "won_by_points"
+  },
+  "won_by_pool_exhaustion": {
+    "type": "won_by_pool_exhaustion",
+    "winner": 0
+  }
+}

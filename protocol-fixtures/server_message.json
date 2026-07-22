@@ -1,0 +1,78 @@
+{
+  "error": {
+    "message": "boom",
+    "type": "error"
+  },
+  "lobby": {
+    "players": [],
+    "settings": {
+      "rules": {
+        "bankruptcy_threshold": 0,
+        "conglomerate_pool_factor": 0,
+        "expropriation": 0,
+        "go_salary": 200,
+        "max_houses_per_property": 5,
+        "rent_boost": 0,
+        "spotlight_duration_turns": 0,
+        "spotlight_rent_pct": 0,
+        "starting_balance": 1500,
+        "subsidiary_pool_factor": 0,
+        "velocity_max": 5,
+        "velocity_min": 1,
+        "win_full_groups": 0,
+        "win_victory_points": 0
+      },
+      "turn_seconds": 25
+    },
+    "type": "lobby"
+  },
+  "match_found": {
+    "code": "ABCDE",
+    "type": "match_found"
+  },
+  "mods": {
+    "ids": [
+      "base",
+      "highroller"
+    ],
+    "type": "mods"
+  },
+  "pong": {
+    "type": "pong"
+  },
+  "queued": {
+    "size": 3,
+    "type": "queued"
+  },
+  "rating": {
+    "display": 1040,
+    "games": 4,
+    "mu": 25.0,
+    "player_id": "id:u1",
+    "sigma": 8.0,
+    "type": "rating",
+    "wins": 1
+  },
+  "ratings_updated": {
+    "changes": [
+      {
+        "display": 1200,
+        "display_delta": 200,
+        "mu": 27.5,
+        "player_id": "id:u1",
+        "sigma": 7.5
+      }
+    ],
+    "type": "ratings_updated"
+  },
+  "rejected": {
+    "error": {
+      "code": "bid_below_floor"
+    },
+    "type": "rejected"
+  },
+  "room_created": {
+    "code": "ABCDE",
+    "type": "room_created"
+  }
+}

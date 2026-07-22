@@ -1,0 +1,108 @@
+{
+  "already_bid": {
+    "code": "already_bid"
+  },
+  "already_mortgaged": {
+    "code": "already_mortgaged"
+  },
+  "already_voted": {
+    "code": "already_voted"
+  },
+  "bankrupt": {
+    "code": "bankrupt"
+  },
+  "bid_below_floor": {
+    "code": "bid_below_floor"
+  },
+  "boost_limit": {
+    "code": "boost_limit"
+  },
+  "build_limit": {
+    "code": "build_limit"
+  },
+  "card_not_playable": {
+    "code": "card_not_playable"
+  },
+  "expropriation_disabled": {
+    "code": "expropriation_disabled"
+  },
+  "game_finished": {
+    "code": "game_finished"
+  },
+  "group_incomplete": {
+    "code": "group_incomplete"
+  },
+  "houses_in_group": {
+    "code": "houses_in_group"
+  },
+  "insufficient_funds": {
+    "code": "insufficient_funds"
+  },
+  "invalid_route": {
+    "code": "invalid_route"
+  },
+  "mortgaged_in_group": {
+    "code": "mortgaged_in_group"
+  },
+  "no_houses": {
+    "code": "no_houses"
+  },
+  "no_jail_card": {
+    "code": "no_jail_card"
+  },
+  "not_a_property": {
+    "code": "not_a_property"
+  },
+  "not_buildable": {
+    "code": "not_buildable"
+  },
+  "not_expropriable": {
+    "code": "not_expropriable"
+  },
+  "not_in_jail": {
+    "code": "not_in_jail"
+  },
+  "not_mortgaged": {
+    "code": "not_mortgaged"
+  },
+  "not_on_tile": {
+    "code": "not_on_tile"
+  },
+  "not_owner": {
+    "code": "not_owner"
+  },
+  "not_trade_party": {
+    "code": "not_trade_party"
+  },
+  "not_your_turn": {
+    "code": "not_your_turn"
+  },
+  "pool_exhausted": {
+    "code": "pool_exhausted"
+  },
+  "rent_boost_disabled": {
+    "code": "rent_boost_disabled"
+  },
+  "trade_invalid": {
+    "code": "trade_invalid"
+  },
+  "trade_limit": {
+    "code": "trade_limit"
+  },
+  "trade_not_found": {
+    "code": "trade_not_found"
+  },
+  "uneven_build": {
+    "code": "uneven_build"
+  },
+  "unknown_player": {
+    "code": "unknown_player"
+  },
+  "unknown_tile": {
+    "code": "unknown_tile",
+    "tile": "ave_a"
+  },
+  "wrong_phase": {
+    "code": "wrong_phase"
+  }
+}

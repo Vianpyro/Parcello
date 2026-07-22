@@ -1,0 +1,83 @@
+{
+  "accept_trade": {
+    "trade": 4,
+    "type": "accept_trade"
+  },
+  "boost_rent": {
+    "tile": "ave_a",
+    "type": "boost_rent"
+  },
+  "build": {
+    "tile": "ave_a",
+    "type": "build"
+  },
+  "cancel_trade": {
+    "trade": 4,
+    "type": "cancel_trade"
+  },
+  "choose_legal_route": {
+    "order": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "type": "choose_legal_route"
+  },
+  "decline_trade": {
+    "trade": 4,
+    "type": "decline_trade"
+  },
+  "end_turn": {
+    "type": "end_turn"
+  },
+  "expropriate": {
+    "tile": "ave_a",
+    "type": "expropriate"
+  },
+  "mortgage": {
+    "tile": "ave_a",
+    "type": "mortgage"
+  },
+  "offer_bribe": {
+    "amount": 90,
+    "type": "offer_bribe"
+  },
+  "play_movement_card": {
+    "type": "play_movement_card",
+    "value": 3
+  },
+  "propose_trade": {
+    "give_cash": 50,
+    "give_tiles": [
+      "ave_a"
+    ],
+    "receive_cash": 0,
+    "receive_tiles": [],
+    "to": "guest:bob",
+    "type": "propose_trade"
+  },
+  "resign": {
+    "type": "resign"
+  },
+  "sell_house": {
+    "tile": "ave_a",
+    "type": "sell_house"
+  },
+  "submit_blind_bid": {
+    "amount": 60,
+    "type": "submit_blind_bid"
+  },
+  "unmortgage": {
+    "tile": "ave_a",
+    "type": "unmortgage"
+  },
+  "use_jail_card": {
+    "type": "use_jail_card"
+  },
+  "vote_on_bribe": {
+    "accept": true,
+    "type": "vote_on_bribe"
+  }
+}

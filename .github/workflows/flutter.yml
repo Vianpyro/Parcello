@@ -8,14 +8,37 @@ name: Flutter
 on:
   push:
     branches: [main]
-    # Keep the two lists identical (no YAML anchors in GHA).
+    # Keep the two lists identical (no YAML anchors in GHA). The
+    # protocol-adjacent paths close the CI blind spot from
+    # docs/protocol-duplication-audit.md (S1): a Rust-only change to the
+    # wire types must still run the Dart golden-fixture test
+    # (test/protocol_fixtures_test.dart), since nothing else in CI
+    # exercises Dart against them. Kept narrow on purpose - only the files
+    # that define wire-tagged enums, not the whole engine/protocol crates.
     paths:
       - "clients/flutter/**"
       - ".github/workflows/flutter.yml"
+      - "crates/protocol/**"
+      - "crates/engine/src/command.rs"
+      - "crates/engine/src/event.rs"
+      - "crates/engine/src/error.rs"
+      - "protocol-fixtures/**"
   pull_request:
     paths:
       - "clients/flutter/**"
       - ".github/workflows/flutter.yml"
+      - "crates/protocol/**"
+      - "crates/engine/src/command.rs"
+      - "crates/engine/src/event.rs"
+      - "crates/engine/src/error.rs"
+      - "protocol-fixtures/**"
+  # Callable from ci.yml (job `protocol-flutter`): a protocol-only PR still
+  # needs this workflow's result inside the *required* `CI OK` check, since
+  # this workflow on its own isn't a required status (README: "Branch
+  # protection only needs the aggregate CI OK check"). Reusing this
+  # workflow's own job means there is exactly one place that knows how to
+  # run the Flutter checks, called on its own paths trigger above.
+  workflow_call:
 
 concurrency:
   group: flutter-${{ github.ref }}
