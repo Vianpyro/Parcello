@@ -15,7 +15,7 @@ Authoritative documents, in order of precedence:
 1. `docs/architecture.typ` - the design document (game vision, layer rules,
    required patterns). Any deviation from it REQUIRES a new ADR in
    `docs/adr/` (short: context / decision / consequences).
-2. `docs/adr/0001..0035` - accepted deviations. Read them before touching
+2. `docs/adr/0001..0036` - accepted deviations. Read them before touching
    the engine, auth, mods, or history. Do not silently contradict them.
    0017-0024 are the v2 ruleset (implemented); 0026 the spotlight; 0028
    the animation-ack watermark (server timers wait for client rendering);
@@ -39,7 +39,12 @@ Authoritative documents, in order of precedence:
    human game else the showcase, spectators are not seats (never gate
    timers, commands refused at the transport, cap 32/room, but they DO
    keep a room from idling out), and `--showcase` runs a supervisor that
-   keeps one all-bot self-replaying room alive only while no humans play.
+   keeps one all-bot self-replaying room alive only while no humans play;
+   0036 (Accepted, temporary) the gameplay WebSocket opens at connect and is
+   held across the menu, kept warm by the server's ~25s native Ping/Pong
+   heartbeat (`ws.rs` writer task, transport-only, no protocol change); the
+   lazy room-scoped socket is the documented fallback, to revisit when ranked
+   is wired client-side or idle-lobby connections become real pressure.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
