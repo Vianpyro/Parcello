@@ -29,7 +29,9 @@ One job, in order:
    `Content-Encoding`, giving Lighthouse production-like transfer sizes.
 5. **Gate 2 — Lighthouse CI** — `lhci autorun` serves the build
    (`http-server --brotli --gzip`) and asserts the five score/timing budgets in
-   `lighthouserc.json`. Fails the run on any breach.
+   `lighthouserc.json`. **Currently `warn`-level** during the calibration
+   period (see below): breaches are printed and reported but do not fail the
+   run. Scheduled to become a hard failure, same as Gate 1, once calibrated.
 6. **Artifacts** — the whole `perf-report/` directory is uploaded (always, even
    on failure) as `web-perf-report`.
 
@@ -109,36 +111,69 @@ with a `label`, `globs`, and `maxBrotliKB`. Run it locally (below) to see the
 new number before committing.
 
 ### Lighthouse budgets — `clients/flutter/lighthouserc.json`
-The five hard assertions requested:
+The five requested budgets, currently at **`warn`** level (see "Lighthouse
+calibration period" below — this is deliberate and temporary, not a relaxed
+target):
 
-| Assertion | Budget |
-|---|---|
-| `categories:performance` | ≥ 0.90 |
-| `categories:accessibility` | ≥ 0.95 |
-| `categories:best-practices` | ≥ 0.95 |
-| `first-contentful-paint` | ≤ 3000 ms |
-| `largest-contentful-paint` | ≤ 4000 ms |
+| Assertion | Budget | Level |
+|---|---|---|
+| `categories:performance` | ≥ 0.90 | `warn` |
+| `categories:accessibility` | ≥ 0.95 | `warn` |
+| `categories:best-practices` | ≥ 0.95 | `warn` |
+| `first-contentful-paint` | ≤ 3000 ms | `warn` |
+| `largest-contentful-paint` | ≤ 4000 ms | `warn` |
 
-- To change a threshold, edit the number in the `assertions` block.
-- To downgrade a hard failure to a warning while you investigate, change
-  `"error"` to `"warn"` for that line.
+- To change a threshold's *value*, edit the number in the `assertions` block —
+  independent of its level (`warn`/`error`).
 - `minScore` is 0–1 (0.90 = a Lighthouse score of 90). `maxNumericValue` is in
   **milliseconds**.
+- `["warn", {...}]` vs `["error", {...}]` is Lighthouse CI's own assertion
+  level: `lhci autorun` exits non-zero (fails the job) only on an `error`-level
+  breach; a `warn`-level breach is printed in the assertion table but the
+  process still exits 0. That is the entire mechanism behind the calibration
+  period — no workflow logic depends on it.
 
-**Two deliberate choices you should know about:**
+**One deliberate choice you should know about:** Lighthouse runs with
+`"preset": "desktop"`. Parcello targets desktop + Steam Deck (Chromium,
+ADR-0025), not phones, so desktop is the correct context — and CanvasKit
+Flutter Web realistically **cannot** hit Performance 90 under mobile
+throttling. If you truly need a mobile budget, add a second `collect`/`assert`
+context rather than switching this one.
 
-1. **Desktop preset.** Lighthouse runs with `"preset": "desktop"`. Parcello
-   targets desktop + Steam Deck (Chromium, ADR-0025), not phones, so desktop is
-   the correct context — and CanvasKit Flutter Web realistically **cannot** hit
-   Performance 90 under mobile throttling. If you truly need a mobile budget,
-   add a second `collect`/`assert` context rather than switching this one.
-2. **FCP/LCP are starting points.** The 3000/4000 ms thresholds were set without
-   a local Lighthouse run (no Chrome in the authoring environment). **Calibrate
-   on the first CI run:** open the Lighthouse report, read the real median FCP
-   and LCP, and tighten each threshold to just above the green value. If the
-   first run *fails* Performance ≥ 0.90, decide whether it is a real problem
-   (e.g. compression not actually applied) or an over-strict budget for a
-   CanvasKit app, and either fix the cause or relax the assertion.
+### Lighthouse calibration period (current state)
+
+**All five Lighthouse assertions are `warn`, not `error`.** The deterministic
+Brotli size gate (`tool/size_budget.sh`) is, for now, the **only** check in
+`web-perf.yml` that can fail the workflow. This is intentional, not a
+weakening of the pipeline:
+
+- **Lighthouse has real run-to-run variance** — CPU/network jitter on the
+  runner, GC pauses, font-loading races — that a single fixed threshold cannot
+  absorb without either flaking on good builds or being loose enough to be
+  meaningless. The FCP/LCP numbers here (3000 ms / 4000 ms) were set without a
+  local Lighthouse run (no Chrome in the authoring environment) and have not
+  yet been checked against real CI variance.
+- The `numberOfRuns: 3` + `median-run` aggregation in `lighthouserc.json`
+  already damps *within-run* noise; what calibration adds is *across-run*
+  evidence — is the median itself stable build to build, or does it swing
+  enough to false-positive an `error` gate on an unrelated PR?
+- Promoting straight to `error` on day one risks the classic failure mode of a
+  perf gate: it flakes once, someone merges with `--no-verify`-equivalent
+  urgency, and the gate's credibility (and enforcement) never recovers.
+
+**Promotion criteria:** once **several dozen consecutive CI runs on `main`**
+have gone green on all five Lighthouse assertions at their current numeric
+values — i.e. the thresholds hold up under real variance, not just one lucky
+run — flip each assertion's level from `"warn"` to `"error"` in
+`lighthouserc.json`. Use that same run history to tighten FCP/LCP toward the
+observed median plus a small margin, the same ratchet spirit as the size
+budgets above.
+
+> **TODO(web-perf-calibration):** promote all five assertions in
+> `clients/flutter/lighthouserc.json` from `"warn"` to `"error"` once dozens of
+> consecutive green `main` runs support the current (or a tightened) set of
+> numeric thresholds. Tracked inline in that file's header comment too —
+> don't remove the comment until this promotion happens.
 
 ## Running it locally
 
@@ -164,12 +199,18 @@ whenever you touch dependencies, fonts, or `l10n`.
 
 ## When a budget fails
 
-- **A size budget failed.** Look at `size-analysis.txt` to see which file grew.
-  Common causes: a new dependency pulled into the first-load graph, a font added
-  or un-subset, `flutter_localizations` gaining locales. If the growth is
+- **A size budget failed.** This still **fails the workflow** (Gate 1 is
+  unconditional). Look at `size-analysis.txt` to see which file grew. Common
+  causes: a new dependency pulled into the first-load graph, a font added or
+  un-subset, `flutter_localizations` gaining locales. If the growth is
   legitimate and unavoidable, raise the budget in the same PR with a note; if
   not, revert the cause.
-- **Lighthouse failed.** Open the HTML report. Accessibility/Best-Practices
-  failures are usually concrete and fixable (contrast, labels, console errors).
-  Performance/FCP/LCP failures are usually the bundle growing or compression not
-  being applied — cross-check with the size report.
+- **A Lighthouse assertion breached its budget.** During the calibration period
+  (above) this is a **warning, not a failure** — the workflow still goes green.
+  It shows up as `warn` in the `lhci autorun` log output and in the uploaded
+  `lighthouse/` report; don't ignore it just because it isn't red. Open the
+  HTML report: Accessibility/Best-Practices breaches are usually concrete and
+  fixable (contrast, labels, console errors); Performance/FCP/LCP breaches are
+  usually the bundle growing or compression not being applied — cross-check
+  with the size report. Once assertions are promoted to `error` (see above), a
+  breach fails the workflow the same way a size budget does today.
