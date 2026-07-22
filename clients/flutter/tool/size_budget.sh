@@ -6,15 +6,22 @@
 # server WOULD transfer with Content-Encoding: br, so it is independent of
 # whether the running server actually compresses -- a reproducible gate.
 #
+# Also writes a machine-readable JSON summary (one object per budget: label,
+# brotliKB, maxBrotliKB, result) -- consumed by tool/record_perf_history.py to
+# feed the perf trends dashboard. See docs/web-performance.md, "Performance
+# history".
+#
 # Deps: brotli, jq (both on ubuntu-latest CI after `apt-get install -y brotli`).
-# Usage: tool/size_budget.sh [BUILD_DIR] [BUDGETS_JSON]
+# Usage: tool/size_budget.sh [BUILD_DIR] [BUDGETS_JSON] [JSON_OUT]
 #   BUILD_DIR    default: build/web
 #   BUDGETS_JSON default: perf-budgets.json
+#   JSON_OUT     default: perf-report/size-budget.json
 set -euo pipefail
 shopt -s globstar nullglob
 
 WEB="${1:-build/web}"
 BUDGETS="${2:-perf-budgets.json}"
+JSON_OUT="${3:-perf-report/size-budget.json}"
 
 command -v brotli >/dev/null || { echo "error: 'brotli' not found (apt-get install -y brotli)"; exit 2; }
 command -v jq     >/dev/null || { echo "error: 'jq' not found"; exit 2; }
@@ -25,6 +32,7 @@ br_bytes() { brotli -q 11 -c -- "$1" | wc -c; }
 
 n=$(jq '.budgets | length' "$BUDGETS")
 fails=0
+entries=()
 
 printf '%-48s %10s %10s   %s\n' "BUDGET" "BROTLI" "LIMIT" "RESULT"
 printf '%s\n' "--------------------------------------------------------------------------------"
@@ -59,7 +67,12 @@ for i in $(seq 0 $((n - 1))); do
   fi
   kb=$(awk -v t="$total" 'BEGIN{ printf "%.1f", t/1024 }')
   printf '%-48s %9s %9s   %s\n' "${label:0:48}" "${kb} KB" "${max} KB" "$result"
+  entries+=("$(jq -n --arg label "$label" --argjson kb "$kb" --argjson max "$max" \
+    --arg result "$result" '{label:$label, brotliKB:$kb, maxBrotliKB:$max, result:$result}')")
 done
+
+mkdir -p "$(dirname "$JSON_OUT")"
+printf '%s\n' "${entries[@]}" | jq -s '.' > "$JSON_OUT"
 
 printf '%s\n' "--------------------------------------------------------------------------------"
 if [ "$fails" -gt 0 ]; then

@@ -197,6 +197,49 @@ lhci autorun          # reads lighthouserc.json
 The size gate is the cheapest regression check and needs no browser — run it
 whenever you touch dependencies, fonts, or `l10n`.
 
+## Performance history
+
+Every push to `main` that goes green also records a row of headline metrics
+(Lighthouse Performance score, FCP, LCP, and the JS / Fonts / CanvasKit /
+First-load-total Brotli sizes) so their evolution over time is visible, not
+just the pass/fail snapshot in the current run's artifact.
+
+**No database, no external service** - just this repo. The `record-history`
+job in `web-perf.yml` (runs after `perf`, `main`-push only) appends one entry
+to a JSON array and regenerates a static dashboard, both committed to a
+dedicated **orphan branch, `perf-history`**, never merged into `main`:
+
+- `perf-history.json` - the full history, one object per build:
+  `date`, `sha`, `run_url`, `performance_score`, `fcp_ms`, `lcp_ms`,
+  `js_brotli_kb`, `fonts_brotli_kb`, `canvaskit_brotli_kb`, `total_brotli_kb`.
+- `index.html` - a self-contained dashboard (embeds the JSON, draws it with
+  plain `<canvas>`, no chart library, no CDN) plotting each metric over time.
+
+Why an orphan branch rather than a folder on `main` or an external
+dashboard: the data commits are unrelated to the code history (one metrics
+commit per build would otherwise pollute `git log`/`git blame` on `main`),
+they need no code review, and a branch is something `git clone`/`git log
+perf-history` can inspect with tools every contributor already has - no new
+account, service, or credential.
+
+**Reading it:**
+- `git fetch origin perf-history && git show perf-history:perf-history.json`
+  for the raw numbers.
+- Check out the branch and open `index.html` locally in a browser
+  (`git worktree add ../perf-history origin/perf-history`) - `fetch()`-free by
+  design so a plain `file://` open works.
+- Or enable **GitHub Pages** once, pointed at the `perf-history` branch's
+  root, for a persistent URL - still entirely GitHub, no third-party host.
+
+The generator is `clients/flutter/tool/record_perf_history.py`. It reads two
+things the `perf` job already produces: `size-budget.json` (a small addition
+to `tool/size_budget.sh`'s output, alongside the existing text table) and
+`lighthouse/manifest.json` (lhci's filesystem upload picks the
+"representative" - median - run itself, matching the `median-run`
+aggregation the assertions already use). Re-running it is idempotent per
+commit: a re-run for the same `sha` replaces that entry instead of
+duplicating it.
+
 ## When a budget fails
 
 - **A size budget failed.** This still **fails the workflow** (Gate 1 is

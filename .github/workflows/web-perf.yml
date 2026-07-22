@@ -100,3 +100,62 @@ jobs:
           name: web-perf-report
           path: clients/flutter/perf-report
           retention-days: 30
+
+  # Appends this build's metrics to the long-term trends history, kept on its
+  # own orphan `perf-history` branch (never merged into main) so the data
+  # never touches the code history or bloats it. main-push only (not PRs, not
+  # workflow_dispatch on a branch) so the trend line is one point per shipped
+  # build. See docs/web-performance.md, "Performance history".
+  record-history:
+    name: record perf history
+    needs: perf
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-perf-report
+          path: perf-report
+
+      # Materialize the perf-history branch as a worktree next to the main
+      # checkout. Creates the orphan branch on the very first run.
+      - name: Prepare perf-history worktree
+        run: |
+          git fetch origin perf-history || true
+          if git show-ref --verify --quiet refs/remotes/origin/perf-history; then
+            git worktree add ../perf-history-branch origin/perf-history
+          else
+            git worktree add --detach ../perf-history-branch
+            git -C ../perf-history-branch switch --orphan perf-history
+            git -C ../perf-history-branch rm -rf . >/dev/null 2>&1 || true
+          fi
+
+      - name: Record metrics + regenerate dashboard
+        run: |
+          python3 clients/flutter/tool/record_perf_history.py \
+            --size-budget perf-report/size-budget.json \
+            --lighthouse-dir perf-report/lighthouse \
+            --history-json ../perf-history-branch/perf-history.json \
+            --dashboard-html ../perf-history-branch/index.html \
+            --sha "${{ github.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Commit and push
+        run: |
+          cd ../perf-history-branch
+          git add perf-history.json index.html
+          if git diff --cached --quiet; then
+            echo "No perf history changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(perf): record perf metrics for ${GITHUB_SHA:0:7}"
+          git push origin HEAD:perf-history
