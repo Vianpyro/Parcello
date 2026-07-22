@@ -86,7 +86,7 @@ screen migrations should look like it.**
   The reason moves under the control. Adopted for the reference; future
   screens follow suit rather than hand-rolling a caption.
 - **Bare-colour / ambient-size text stays bespoke** (F3) rather than being
-  forced into a mis-sized role. Not solved here - it waits on the
+  forced into an ill-fitting role. Not solved here - it waits on the
   theme-default-colour decision (below), which is the clean fix.
 - **The card goes flat** (F4). No opt-out was added ("raised card with a
   shadow" is not a register we want; PcCard has none deliberately).
