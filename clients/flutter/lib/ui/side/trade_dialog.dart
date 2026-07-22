@@ -34,6 +34,14 @@ class _TradeDialogState extends State<TradeDialog> {
         if (i != s.seat && !v.players[i].bankrupt) i,
     ];
     _to ??= candidates.firstOrNull;
+    // A recipient who goes bankrupt or leaves while this composer is open drops
+    // out of `candidates`; without this the DropdownButton's value would match
+    // no item and Flutter would assert. Fall back to a still-valid opponent
+    // (or none), and drop their now-invalid tile picks.
+    if (_to != null && !candidates.contains(_to)) {
+      _to = candidates.firstOrNull;
+      _receiveTiles.clear();
+    }
 
     Widget tileList(int? seat, Set<String> picked) {
       final tiles = [

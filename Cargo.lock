@@ -858,7 +858,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "parcello-cli"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -874,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-engine"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-mods"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "parcello-engine",
  "serde",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-protocol"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "parcello-engine",
  "parcello-mods",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "parcello-server"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "axum",
