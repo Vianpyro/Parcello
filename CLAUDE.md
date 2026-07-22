@@ -149,7 +149,14 @@ the single `CI OK` job (the only check branch protection needs). Docs-only
 paths skip CI; PR pushes cancel outdated runs; a weekly cron re-runs on
 main as a bit-rot/advisory canary. `flutter.yml` gates the client
 (analyze + test + web build) only when `clients/flutter/**` changes;
-`codeql.yml` handles security static analysis. No cargo features and no
+`web-perf.yml` is the client's perf gate on the same paths (pinned Flutter
+3.44.6): a deterministic Brotli size budget (`clients/flutter/tool/size_budget.sh`
++ `perf-budgets.json`) plus Lighthouse CI on the served build
+(`lighthouserc.json`, desktop preset), reports uploaded as artifacts, both
+fail the run on a breached budget - `docs/web-performance.md` explains reading
+and tuning them (note: `flutter build web --analyze-size` is AOT-only, so the
+size analysis is `--source-maps` + `tool/analyze_size.py`); `codeql.yml`
+handles security static analysis. No cargo features and no
 benches exist in the workspace - revisit the matrix/bench story if either
 appears.
 

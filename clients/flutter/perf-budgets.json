@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "Brotli-transfer budgets for the Flutter Web build, enforced by tool/size_budget.sh.",
+    "Each budget's Brotli-compressed size (quality 11) must stay <= maxBrotliKB.",
+    "This is the size a correctly-configured server WOULD transfer (Content-Encoding: br),",
+    "so it is server-independent and deterministic. Globs are relative to build/web.",
+    "Ratchet policy (mirrors the coverage gate in CLAUDE.md): keep a small headroom above",
+    "the measured value; when an optimization lands, lower the budget so it cannot silently",
+    "regress. Baseline measured 2026-07-22 with Flutter 3.44.6 is in each 'measured' note.",
+    "See docs/web-performance.md for how to read and adjust these."
+  ],
+  "budgets": [
+    {
+      "label": "Application JS (main.dart.js)",
+      "globs": ["main.dart.js"],
+      "maxBrotliKB": 800,
+      "measured": "705 KB",
+      "note": "The 'JS transferred (Brotli)' budget. ~94% is Flutter itself; app code is ~113 KB."
+    },
+    {
+      "label": "Scripts fetched on first load",
+      "globs": [
+        "main.dart.js",
+        "flutter.js",
+        "flutter_bootstrap.js",
+        "canvaskit/chromium/canvaskit.js"
+      ],
+      "maxBrotliKB": 780,
+      "measured": "735 KB",
+      "note": "Only the JS Chromium actually fetches; the other 5 renderer loaders are never loaded."
+    },
+    {
+      "label": "Custom fonts (Inter + Fraunces + SourceSerif4)",
+      "globs": ["assets/assets/fonts/*.ttf"],
+      "maxBrotliKB": 1000,
+      "measured": "978 KB",
+      "note": "Shipped in full (not subset). Lower to ~450 once font subsetting lands."
+    },
+    {
+      "label": "Renderer (CanvasKit, chromium wasm)",
+      "globs": ["canvaskit/chromium/canvaskit.wasm"],
+      "maxBrotliKB": 1650,
+      "measured": "1597 KB",
+      "note": "The single variant Chromium/Steam Deck fetches. ~1150 KB if you switch to Skwasm (--wasm)."
+    },
+    {
+      "label": "First-load total (what a new visitor downloads)",
+      "globs": [
+        "index.html",
+        "flutter.js",
+        "flutter_bootstrap.js",
+        "main.dart.js",
+        "canvaskit/chromium/canvaskit.js",
+        "canvaskit/chromium/canvaskit.wasm",
+        "assets/assets/fonts/*.ttf",
+        "assets/fonts/MaterialIcons-Regular.otf",
+        "assets/AssetManifest.bin",
+        "assets/AssetManifest.bin.json",
+        "assets/FontManifest.json",
+        "version.json",
+        "manifest.json"
+      ],
+      "maxBrotliKB": 3400,
+      "measured": "3200 KB",
+      "note": "Excludes NOTICES (license page only) and the 5 unfetched renderer variants."
+    }
+  ]
+}

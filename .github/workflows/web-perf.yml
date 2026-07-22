@@ -1,0 +1,102 @@
+name: Web Performance
+
+# Perf budget gate for the Flutter Web client (clients/flutter, ADR-0025).
+# Kept as its own workflow so the Node/Chrome/Lighthouse toolchain never slows
+# the Rust CI or the lean flutter.yml quality gate. Two independent gates:
+#   1. A deterministic Brotli size budget (tool/size_budget.sh + perf-budgets.json).
+#   2. Lighthouse CI on the served build (lighthouserc.json), desktop preset.
+# Both publish reports as artifacts and fail the run if a budget is exceeded.
+# See docs/web-performance.md for how to read the reports and adjust budgets.
+
+on:
+  push:
+    branches: [main]
+    # Keep the two lists identical (no YAML anchors in GHA).
+    paths:
+      - "clients/flutter/**"
+      - ".github/workflows/web-perf.yml"
+  pull_request:
+    paths:
+      - "clients/flutter/**"
+      - ".github/workflows/web-perf.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: web-perf-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    name: build + budgets + lighthouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: clients/flutter
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pin the Flutter version to the Dockerfile's (3.44.6) so budgets are
+      # stable: a different SDK produces different bundle sizes and timings.
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install perf tooling (brotli, Lighthouse CI, static server)
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends brotli
+          npm install -g @lhci/cli@0.14.x http-server@14
+
+      # Resolve deps AND run gen-l10n (flutter: generate: true) before building.
+      - run: flutter pub get
+
+      # Build with source maps so tool/analyze_size.py can attribute main.dart.js
+      # to Dart libraries. --dart-define mirrors flutter.yml.
+      - name: Build web (release, source maps)
+        run: flutter build web --release --source-maps --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
+
+      # Web equivalent of `flutter build web --analyze-size` (which is AOT-only):
+      # per-asset raw/gzip/Brotli, category rollup, first-load, library attribution.
+      - name: Analyze bundle size
+        run: python3 tool/analyze_size.py build/web perf-report
+
+      # GATE 1 - deterministic Brotli transfer budgets. Fails if any exceeded.
+      - name: Enforce size budgets (Brotli)
+        run: |
+          mkdir -p perf-report
+          bash tool/size_budget.sh build/web perf-budgets.json | tee perf-report/size-budget.txt
+
+      # Precompress so the served build carries Content-Encoding: br/gzip, giving
+      # Lighthouse production-like transfer sizes and timings. Quality 9 (not 11)
+      # keeps this fast -- the exact q11 figures are the deterministic gate's job
+      # above; here it only needs to feed Lighthouse realistic sizes. .symbols
+      # maps are skipped (never fetched by a browser).
+      - name: Precompress build (.br / .gz)
+        run: |
+          find build/web -type f \( \
+              -name '*.js' -o -name '*.wasm' -o -name '*.json' -o -name '*.html' \
+              -o -name '*.css' -o -name '*.ttf' -o -name '*.otf' -o -name '*.bin' \
+              -o -name '*.txt' \) -print0 \
+            | while IFS= read -r -d '' f; do brotli -q 9 -k -f "$f"; gzip -9 -k -f "$f"; done
+
+      # GATE 2 - Lighthouse CI on the served build (desktop preset). Fails if any
+      # of Performance/Accessibility/Best-Practices/FCP/LCP breaches its budget.
+      - name: Lighthouse CI
+        run: lhci autorun
+
+      - name: Upload perf reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-perf-report
+          path: clients/flutter/perf-report
+          retention-days: 30
