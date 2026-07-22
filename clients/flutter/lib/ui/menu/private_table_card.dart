@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../design/components/pc_button.dart';
 import '../../design/components/pc_chip.dart';
 import '../../l10n/app_localizations.dart';
 import '../../motion.dart';
@@ -132,7 +133,7 @@ class PrivateTableCardState extends State<PrivateTableCard> {
         ),
       ),
       const SizedBox(width: Pc.s8),
-      hoverSfx(FilledButton(onPressed: _join, child: Text(t.join))),
+      PcButton(t.join, onPressed: _join, wide: false),
     ]);
   }
 
@@ -141,13 +142,11 @@ class PrivateTableCardState extends State<PrivateTableCard> {
     final t = AppLocalizations.of(context);
     return SizedBox(
       width: menuTileW * 2 + menuGap,
-      child: Card(
-        // Zero margin so the card's box is exactly the body below - a default
-        // Card margin would push it past a tile and break the row.
-        margin: EdgeInsets.zero,
-        clipBehavior: Clip.antiAlias,
-        color: Pc.surface,
-        child: Column(
+      child: ClipRRect(
+        borderRadius: Pc.radius,
+        child: Material(
+          color: Pc.surface,
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -207,6 +206,7 @@ class PrivateTableCardState extends State<PrivateTableCard> {
                 },
               ),
             ]),
+        ),
       ),
     );
   }

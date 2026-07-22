@@ -3,9 +3,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../design/components/pc_button.dart';
 import '../../l10n/app_localizations.dart';
 import '../../session.dart';
-import '../../sfx.dart';
 import '../../tokens.dart';
 import '../../typography.dart';
 
@@ -112,10 +112,14 @@ class _TradeDialogState extends State<TradeDialog> {
         ]),
       ]),
       actions: [
-        hoverSfx(TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(t.close))),
-        hoverSfx(FilledButton(
+        PcButton(
+          t.close,
+          onPressed: () => Navigator.pop(context),
+          variant: PcButtonVariant.quiet,
+          wide: false,
+        ),
+        PcButton(
+          t.tradePropose,
           onPressed: _to == null
               ? null
               : () {
@@ -129,8 +133,8 @@ class _TradeDialogState extends State<TradeDialog> {
                   });
                   Navigator.pop(context);
                 },
-          child: Text(t.tradePropose),
-        )),
+          wide: false,
+        ),
       ],
     );
   }

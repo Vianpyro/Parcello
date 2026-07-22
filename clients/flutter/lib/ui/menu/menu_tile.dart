@@ -45,11 +45,11 @@ class MenuTileState extends State<MenuTile> {
             width: _focused ? 2 : 1,
           ),
         ),
-        child: Card(
-          margin: EdgeInsets.zero,
-          clipBehavior: Clip.antiAlias,
-          color: Pc.surface,
-          child: InkWell(
+        child: ClipRRect(
+          borderRadius: Pc.radius,
+          child: Material(
+            color: Pc.surface,
+            child: InkWell(
             onFocusChange: (f) => setState(() => _focused = f),
             focusColor: Pc.goldWash,
             onTap: widget.onTap,
@@ -83,6 +83,7 @@ class MenuTileState extends State<MenuTile> {
           ),
         ),
       ),
+    ),
     ));
   }
 }

@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../design/components/pc_button.dart';
 import '../../design/components/pc_dialog.dart';
 import '../../l10n/app_localizations.dart';
 import '../../session.dart';
@@ -87,18 +88,19 @@ class NavRail extends StatelessWidget {
         const SizedBox(height: Pc.s8),
         Row(children: [
           Expanded(
-            child: hoverSfx(OutlinedButton(
+            child: PcButton(
+              t.leave,
               onPressed: () {
                 Navigator.pop(context);
                 s.leaveRoom();
               },
-              child: Text(t.leave),
-            )),
+              variant: PcButtonVariant.secondary,
+            ),
           ),
           const SizedBox(width: Pc.s8),
           Expanded(
-            child: hoverSfx(OutlinedButton(
-              style: OutlinedButton.styleFrom(foregroundColor: Pc.oxblood),
+            child: PcButton(
+              t.resign,
               onPressed: () async {
                 final ok = await showDialog<bool>(
                   context: context,
@@ -118,8 +120,8 @@ class NavRail extends StatelessWidget {
                   s.sendCmd({'type': 'resign'});
                 }
               },
-              child: Text(t.resign),
-            )),
+              variant: PcButtonVariant.destructive,
+            ),
           ),
         ]),
       ]),

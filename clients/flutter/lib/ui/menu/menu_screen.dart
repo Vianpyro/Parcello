@@ -4,6 +4,7 @@ library;
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../../design/components/pc_button.dart';
 import '../../l10n/app_localizations.dart';
 import '../../lan_discovery.dart';
 import '../../server_manager.dart';
@@ -83,10 +84,12 @@ class _MenuScreenState extends State<MenuScreen> {
         backgroundColor: Pc.surface2,
         actions: [
           LanguageButton(s: s),
-          TextButton.icon(
+          PcButton(
+            t.disconnect,
+            icon: Icons.logout,
             onPressed: s.disconnectFromServer,
-            icon: const Icon(Icons.logout, size: 18),
-            label: Text(t.disconnect),
+            variant: PcButtonVariant.quiet,
+            wide: false,
           ),
         ],
       ),
@@ -115,10 +118,11 @@ class _MenuScreenState extends State<MenuScreen> {
                     style: const TextStyle(color: Pc.oxblood)),
                 // Re-arm the first-game coach marks (they self-dismiss
                 // forever otherwise).
-                TextButton(
+                PcButton(
+                  t.menuReplayTips,
                   onPressed: s.resetHints,
-                  child: Text(t.menuReplayTips,
-                      style: PcText.label.copyWith(color: Pc.textMuted)),
+                  variant: PcButtonVariant.quiet,
+                  wide: false,
                 ),
                 const SizedBox(height: Pc.s8),
                 const _VersionFooter(),

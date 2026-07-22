@@ -6,9 +6,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../design/components/pc_button.dart';
 import '../l10n/app_localizations.dart';
 import '../session.dart';
-import '../sfx.dart';
 import '../tokens.dart';
 import '../typography.dart';
 
@@ -57,11 +57,11 @@ class CoachMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context);
-    return Card(
-      color: Pc.surface2,
-      shape: RoundedRectangleBorder(
-        side: const BorderSide(color: Pc.gold, width: 1),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Pc.surface2,
         borderRadius: Pc.radius,
+        border: Border.all(color: Pc.gold),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Pc.s12, Pc.s8, Pc.s8, Pc.s8),
@@ -73,10 +73,12 @@ class CoachMark extends StatelessWidget {
             child: Text(text, style: PcText.label),
           ),
           const SizedBox(width: Pc.s4),
-          hoverSfx(TextButton(
+          PcButton(
+            t.hintDismiss,
             onPressed: onDismiss,
-            child: Text(t.hintDismiss),
-          )),
+            variant: PcButtonVariant.quiet,
+            wide: false,
+          ),
         ]),
       ),
     );
