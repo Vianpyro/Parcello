@@ -71,6 +71,22 @@ class ActionsPanelState extends State<ActionsPanel> {
     if (v == null || v.finished) return const SizedBox.shrink();
     final t = v.turn;
 
+    // Outline a movement card's destination tile when its button is hovered
+    // OR focused - so a keyboard / Steam Deck player (no mouse hover) still
+    // sees where a card lands before committing, as they traverse the cards.
+    // The wrapper is non-focusable itself (skipTraversal) so it never adds a
+    // stop; the button inside stays the focus target.
+    Widget previewDest(int dest, Widget child) => Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onFocusChange: (has) => s.setHoverTile(has ? dest : null),
+          child: MouseRegion(
+            onEnter: (_) => s.setHoverTile(dest),
+            onExit: (_) => s.setHoverTile(null),
+            child: child,
+          ),
+        );
+
     // Clear the jail-decision UI state the moment we're not actually in
     // that decision (route chosen, bribe sent and the turn moved on, or
     // simply not our situation) - preserved for as long as we ARE still
@@ -229,11 +245,9 @@ class ActionsPanelState extends State<ActionsPanel> {
           final route = me.jailRoute;
           if (route != null) {
             // Locked Legal Route (ADR-0024): only the front card is legal.
-            children.add(MouseRegion(
-              onEnter: (_) => s.setHoverTile(
-                  (me.position + route.first) % s.content!.board.length),
-              onExit: (_) => s.setHoverTile(null),
-              child: btn(loc.actionPlayRoute(route.first),
+            children.add(previewDest(
+              (me.position + route.first) % s.content!.board.length,
+              btn(loc.actionPlayRoute(route.first),
                   {'type': 'play_movement_card', 'value': route.first}),
             ));
           } else if (me.inJail) {
@@ -326,12 +340,9 @@ class ActionsPanelState extends State<ActionsPanel> {
             // board (2026-07 playtest feedback).
             final n = s.content!.board.length;
             for (final value in me.hand) {
-              children.add(MouseRegion(
-                onEnter: (_) =>
-                    s.setHoverTile((me.position + value) % n),
-                onExit: (_) => s.setHoverTile(null),
-                child:
-                    btn('$value', {'type': 'play_movement_card', 'value': value}),
+              children.add(previewDest(
+                (me.position + value) % n,
+                btn('$value', {'type': 'play_movement_card', 'value': value}),
               ));
             }
           }
