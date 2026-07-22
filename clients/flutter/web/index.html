@@ -31,8 +31,50 @@
 
   <title>parcello_client</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    Loading splash (removed on the "flutter-first-frame" event below). Once
+    Flutter attaches, the whole UI paints to a single <canvas> (CanvasKit,
+    ADR-0025) which the browser's native Largest Contentful Paint API cannot
+    see -- a canvas paint is not an LCP candidate, only <img>/text/
+    background-image elements are. Without a real DOM element visible before
+    that hand-off, Lighthouse (and RUM/CrUX for real users) has nothing to
+    report and Performance never gets a score, even though the app loaded
+    fine (see docs/web-performance.md, "Why the loading splash exists").
+    This splash is a real loading indicator, not a Lighthouse-only shim: it
+    gives every visitor genuine feedback while the ~3 MB Brotli bundle
+    downloads, and it happens to also be the page's only LCP candidate.
+  -->
+  <style>
+    #pc-splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: #14171C;
+      color: #ECE6D8;
+      font-family: system-ui, sans-serif;
+    }
+    #pc-splash img { width: 96px; height: 96px; }
+    #pc-splash p { margin: 0; font-size: 1rem; letter-spacing: 0.04em; color: #D8B45A; }
+  </style>
 </head>
 <body>
+  <div id="pc-splash">
+    <img src="icons/Icon-192.png" width="96" height="96" alt="Parcello">
+    <p>Loading Parcello&hellip;</p>
+  </div>
+
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var splash = document.getElementById('pc-splash');
+      if (splash) splash.remove();
+    });
+  </script>
+
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

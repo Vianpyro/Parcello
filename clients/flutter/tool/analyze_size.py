@@ -121,6 +121,9 @@ FIRST = [
     "index.html", "flutter.js", "flutter_bootstrap.js", "main.dart.js",
     "canvaskit/chromium/canvaskit.js", "canvaskit/chromium/canvaskit.wasm",
     "assets/fonts/MaterialIcons-Regular.otf",
+    # The loading-splash logo (index.html) -- real first-load fetch, see
+    # docs/web-performance.md, "Why the loading splash exists".
+    "icons/Icon-192.png",
 ]
 FIRST += [r["file"] for r in rows
           if r["file"].startswith("assets/assets/fonts/") and r["file"].endswith(".ttf")]

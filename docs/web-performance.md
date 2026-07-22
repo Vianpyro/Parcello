@@ -52,6 +52,67 @@ same information you would want from `--analyze-size`:
 - a **per-Dart-library attribution** of `main.dart.js`, parsed from its source
   map (the same technique as `source-map-explorer` / `dart2js_info`).
 
+## Why the loading splash exists (Performance category was `null`)
+
+The first real CI run (2026-07-22) produced `Performance: null` for all 3
+Lighthouse runs, consistently, while Accessibility (92) and Best Practices
+(78) scored normally. That is **not** a workflow/Chrome/server misconfiguration
+- the raw reports (`localhost-*-report.json`) show `runtimeError: null`, no
+`runWarnings`, `first-contentful-paint` scored fine (371 ms), and
+`configSettings` (desktop preset, `throttlingMethod: simulate`, `channel:
+cli`) matched what `lighthouserc.json` asks for. The actual failure was one
+specific audit:
+
+```
+largest-contentful-paint -> error:
+"The page did not display content that qualifies as a Largest Contentful
+Paint (LCP). Ensure the page has a valid LCP element and then try again.
+(NO_LCP)"
+```
+
+which cascades: `total-blocking-time`, `interactive`, and every audit that
+depends on the LCP element or the trace's "root causes" analysis (
+`render-blocking-resources`, `layout-shifts`, `non-composited-animations`,
+...) error out too (`Cannot read properties of undefined (reading
+'frame_sequence')` - Lighthouse's own LCP-attribution code has nothing to
+attribute). A Lighthouse category score is a weighted average of its member
+audits; when a required audit errors instead of scoring, the whole category
+becomes unrepresentable, hence `null` - not 0, not skipped.
+
+**Root cause, confirmed by inspecting `web/index.html`:** the old body was
+```html
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+```
+- no visible element at all. Flutter Web's CanvasKit renderer (ADR-0025)
+paints the *entire* app - board, HUD, everything - onto one `<canvas>`
+element once it attaches. The browser's native Largest Contentful Paint API
+only considers `<img>`, video poster frames, background-image elements, and
+block-level text nodes as LCP candidates; a canvas's draw calls are
+invisible to it by spec. With no DOM content before the canvas hand-off,
+there was never a candidate for the browser to report - Lighthouse isn't
+missing anything, there is genuinely nothing for the API to see. This is a
+known, documented limitation of canvas/WebGL-rendered web apps in general,
+Flutter Web + CanvasKit specifically included.
+
+**The fix is application-level, not pipeline-level** (`web/index.html`): a
+real loading splash - the app logo (`icons/Icon-192.png`) and "Loading
+Parcello..." text, styled with the actual palette
+(`docs/visual-identity.md`'s `pc-bg`/`pc-gold`/`pc-text`) - shown from first
+paint and removed via Flutter's own `flutter-first-frame` window event once
+the engine attaches. This is a genuine loading indicator (every visitor sees
+real feedback while the ~3 MB Brotli bundle downloads, not a Lighthouse-only
+shim), and it happens to also be the page's only LCP candidate, so the
+browser - and Lighthouse - now has something real to time. No category was
+disabled or thresholds relaxed to make this pass; the Performance category
+now measures a real, present element.
+
+Because the splash image is now a genuine first-load fetch, it was added to
+`tool/analyze_size.py`'s `FIRST` list and to the `First-load total` glob in
+`perf-budgets.json` - both were previously under-counting bundle weight
+Chrome didn't actually request; now it does.
+
 ## Reading the reports
 
 Download the `web-perf-report` artifact from the workflow run.

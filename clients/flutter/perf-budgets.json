@@ -54,6 +54,7 @@
         "canvaskit/chromium/canvaskit.wasm",
         "assets/assets/fonts/*.ttf",
         "assets/fonts/MaterialIcons-Regular.otf",
+        "icons/Icon-192.png",
         "assets/AssetManifest.bin",
         "assets/AssetManifest.bin.json",
         "assets/FontManifest.json",
