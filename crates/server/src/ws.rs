@@ -4,6 +4,11 @@
 //! authenticates once, then relays commands to the room task. All game logic
 //! lives behind the room boundary.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
@@ -33,6 +38,26 @@ const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
 /// never trips it; this only stops abuse.
 const MSG_BURST: f64 = 32.0;
 const MSG_REFILL_PER_SEC: f64 = 16.0;
+
+/// Idle-connection heartbeat window. After this much silence in BOTH
+/// directions, the writer task emits a native WebSocket Ping frame. Reverse
+/// proxies drop idle upgraded connections (Nginx Proxy Manager's default read
+/// timeout is 60s); a frame comfortably under that keeps the tunnel warm.
+/// Browsers and the Dart VM answer a Ping with a Pong at the protocol layer,
+/// so the heartbeat is invisible to the game protocol - nothing on either side
+/// parses or forwards it. Chosen at 25s: inside the requested 20-30s band and
+/// with wide margin under a typical 60-90s proxy idle cut-off.
+const HEARTBEAT_IDLE: Duration = Duration::from_secs(25);
+
+/// Whether an idle tick should emit a heartbeat Ping: true once no frame has
+/// crossed the socket in either direction for `HEARTBEAT_IDLE`. Pure and
+/// clock-free (mirrors `RateLimiter`), so the "ping only into genuine silence"
+/// rule is unit-tested without sockets or real time. `saturating_sub` keeps it
+/// correct even if the reads interleave so a stamp appears to sit in the
+/// future relative to the sampled `now`.
+const fn heartbeat_due(now_ms: u64, last_activity_ms: u64) -> bool {
+    now_ms.saturating_sub(last_activity_ms) >= HEARTBEAT_IDLE.as_millis() as u64
+}
 
 /// Token-bucket message-rate limiter for one connection. Pure and clock-free
 /// (the caller passes `now`), so its budget/refill behavior is unit-tested
@@ -95,7 +120,15 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
 
     let (sink, mut stream) = socket.split();
     let (tx, rx) = mpsc::unbounded_channel::<ServerMessage>();
-    let writer = spawn_writer(sink, rx);
+    // Shared idle clock for the heartbeat: both this inbound loop and the
+    // writer task stamp `last_activity` (ms since `epoch`) on every frame they
+    // touch, so any traffic in either direction defers the next Ping. A
+    // lock-free atomic keeps the writer's hot outbound path contention-free;
+    // the sink itself still has exactly one owner (the writer), so the
+    // existing single-writer concurrency guarantee is unchanged.
+    let epoch = Instant::now();
+    let last_activity = Arc::new(AtomicU64::new(0));
+    let writer = spawn_writer(sink, rx, epoch, Arc::clone(&last_activity));
 
     let mut session: Option<Session> = None;
     // Ranked-queue membership for this connection (ADR-0034): the entry is
@@ -104,6 +137,10 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     let mut limiter = RateLimiter::new(std::time::Instant::now());
 
     while let Some(frame) = stream.next().await {
+        // Any inbound frame (text, or an auto-answered Ping/Pong) is network
+        // activity that keeps the tunnel warm, so it defers the heartbeat.
+        last_activity.store(epoch.elapsed().as_millis() as u64, Ordering::Relaxed);
+
         // A client that outruns the refill is flooding and gets disconnected.
         if !limiter.allow(std::time::Instant::now()) {
             warn!("message rate limit exceeded; closing connection");
@@ -219,22 +256,56 @@ async fn handle_socket(socket: WebSocket, app: AppState) {
     debug!("connection closed");
 }
 
-/// Writer task: serialize outbound messages until the channel closes.
+/// Writer task: the single owner of the sink. Serializes outbound messages
+/// until the channel closes, and - so an idle connection survives a reverse
+/// proxy's read timeout - emits a native WebSocket Ping frame after
+/// `HEARTBEAT_IDLE` of silence. Keeping the Ping here (rather than in the
+/// inbound loop) preserves the one-writer-per-sink invariant: nothing else
+/// ever touches the sink, so no lock is needed.
 fn spawn_writer(
     mut sink: futures_util::stream::SplitSink<WebSocket, Message>,
     mut rx: mpsc::UnboundedReceiver<ServerMessage>,
+    epoch: Instant,
+    last_activity: Arc<AtomicU64>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let json = match serde_json::to_string(&msg) {
-                Ok(json) => json,
-                Err(e) => {
-                    warn!(error = %e, "failed to serialize server message");
-                    continue;
+        let mut heartbeat = tokio::time::interval(HEARTBEAT_IDLE);
+        // Bunched-up ticks (e.g. after the task was starved) must not fire a
+        // burst of Pings; skip missed ticks rather than replay them.
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat.tick().await; // The interval's immediate first tick is a no-op.
+        loop {
+            tokio::select! {
+                msg = rx.recv() => {
+                    let Some(msg) = msg else { break }; // Channel closed: shut down.
+                    let json = match serde_json::to_string(&msg) {
+                        Ok(json) => json,
+                        Err(e) => {
+                            warn!(error = %e, "failed to serialize server message");
+                            continue;
+                        }
+                    };
+                    if sink.send(Message::Text(json.into())).await.is_err() {
+                        break;
+                    }
+                    // A real outbound frame already warms the tunnel: defer the
+                    // heartbeat and realign the grid to this send.
+                    last_activity.store(epoch.elapsed().as_millis() as u64, Ordering::Relaxed);
+                    heartbeat.reset();
                 }
-            };
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                break;
+                _ = heartbeat.tick() => {
+                    // Ping only into genuine silence: recent traffic in either
+                    // direction (the inbound loop stamps `last_activity` too)
+                    // already reset the proxy's idle timer, so a Ping would be
+                    // redundant. An empty payload is enough to be seen.
+                    let now_ms = epoch.elapsed().as_millis() as u64;
+                    if heartbeat_due(now_ms, last_activity.load(Ordering::Relaxed)) {
+                        if sink.send(Message::Ping(Bytes::new())).await.is_err() {
+                            break;
+                        }
+                        last_activity.store(now_ms, Ordering::Relaxed);
+                    }
+                }
             }
         }
         let _ = sink.close().await;
@@ -695,8 +766,28 @@ fn cancel_queue(app: &AppState, queued: &mut Option<String>, tx: &ClientTx) {
 
 #[cfg(test)]
 mod tests {
-    use super::{MSG_BURST, MSG_REFILL_PER_SEC, RateLimiter, valid_mod_id};
+    use super::{
+        HEARTBEAT_IDLE, MSG_BURST, MSG_REFILL_PER_SEC, RateLimiter, heartbeat_due, valid_mod_id,
+    };
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn heartbeat_pings_only_after_the_idle_window() {
+        let idle = HEARTBEAT_IDLE.as_millis() as u64;
+        // The window sits inside the requested 20-30s heartbeat band.
+        assert!((20_000..=30_000).contains(&idle), "idle window out of band");
+        // Fresh connection / no elapsed time: no Ping.
+        assert!(!heartbeat_due(0, 0));
+        // Just short of the window: still no Ping.
+        assert!(!heartbeat_due(idle - 1, 0));
+        // Exactly at the window: Ping is due.
+        assert!(heartbeat_due(idle, 0));
+        // Activity at 74s defers the Ping; the same tick a moment later fires.
+        assert!(!heartbeat_due(74_000 + idle - 1, 74_000));
+        assert!(heartbeat_due(74_000 + idle, 74_000));
+        // A stamp that reads ahead of `now` must never underflow into a Ping.
+        assert!(!heartbeat_due(10, 50));
+    }
 
     #[test]
     fn rate_limiter_allows_a_burst_then_blocks_then_refills() {
