@@ -374,6 +374,10 @@
   "propPrice": "Price",
   "propMarketNow": "now {price}",
   "@propMarketNow": { "placeholders": { "price": { "type": "String" } } },
+  "leave": "Leave",
+  "navMenu": "Menu",
+  "navObjectives": "Objectives",
+  "navHistory": "History",
   "logError": "Error: {message}",
   "@logError": { "placeholders": { "message": { "type": "String" } } },
 

@@ -48,4 +48,4 @@ jobs:
       - run: flutter test
       # The web target is what the server ships (--web-dir); make sure it
       # still compiles even when nobody built it locally.
-      - run: flutter build web --release
+      - run: flutter build web --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}

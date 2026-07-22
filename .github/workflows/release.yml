@@ -65,7 +65,7 @@ jobs:
         with:
           channel: stable
           cache: true
-      - run: flutter build web --release
+      - run: flutter build web --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
         working-directory: clients/flutter
       - uses: actions/upload-artifact@v7
         with:
@@ -167,15 +167,15 @@ jobs:
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: build (windows)
         if: runner.os == 'Windows'
-        run: flutter build windows --release
+        run: flutter build windows --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
         working-directory: clients/flutter
       - name: build (linux)
         if: runner.os == 'Linux'
-        run: flutter build linux --release
+        run: flutter build linux --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
         working-directory: clients/flutter
       - name: build (macos)
         if: runner.os == 'macOS'
-        run: flutter build macos --release
+        run: flutter build macos --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
         working-directory: clients/flutter
       - name: package (windows)
         if: runner.os == 'Windows'

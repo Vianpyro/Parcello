@@ -17,6 +17,7 @@ import '../../tokens.dart';
 import '../side/side_panel.dart';
 import 'center_panel.dart';
 import 'flashes.dart';
+import 'nav_rail.dart';
 import 'player_bar.dart';
 
 class GameScreen extends StatelessWidget {
@@ -58,6 +59,9 @@ class GameScreen extends StatelessWidget {
                   child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                // Left utility rail (DDR-0021): Menu / Objectives / History.
+                NavRail(s: s),
+                const SizedBox(width: Pc.s8),
                 Expanded(
                   child: Stack(alignment: Alignment.center, children: [
                     // The board subscribes to the stage itself; `centre` is

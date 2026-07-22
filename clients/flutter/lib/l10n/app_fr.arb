@@ -260,6 +260,10 @@
   "propDevHouses": "Maisons {n}/{max}",
   "propPrice": "Prix",
   "propMarketNow": "actuel {price}",
+  "leave": "Quitter",
+  "navMenu": "Menu",
+  "navObjectives": "Objectifs",
+  "navHistory": "Historique",
   "logError": "Erreur : {message}",
 
   "evtTurnStarted": "--- Tour de {player} ---",
