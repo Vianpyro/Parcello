@@ -45,8 +45,11 @@ fn read_fixtures(name: &str) -> Map<String, Value> {
 }
 
 fn write_fixtures(name: &str, entries: &[(&str, Value)]) {
-    let map: Map<String, Value> =
-        entries.iter().cloned().map(|(k, v)| (k.to_string(), v)).collect();
+    let map: Map<String, Value> = entries
+        .iter()
+        .cloned()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
     let json = serde_json::to_string_pretty(&Value::Object(map)).unwrap();
     fs::write(fixture_path(name), format!("{json}\n")).unwrap();
 }
@@ -93,9 +96,18 @@ fn client_message_fixtures() -> Vec<ClientMessage> {
         ..Default::default()
     };
     vec![
-        ClientMessage::Create { auth: guest("vianney"), mods: Some(vec!["base".into()]) },
-        ClientMessage::Join { code: "ABCDE".into(), auth: guest("vianney") },
-        ClientMessage::Spectate { code: Some("ABCDE".into()), auth: guest("vianney") },
+        ClientMessage::Create {
+            auth: guest("vianney"),
+            mods: Some(vec!["base".into()]),
+        },
+        ClientMessage::Join {
+            code: "ABCDE".into(),
+            auth: guest("vianney"),
+        },
+        ClientMessage::Spectate {
+            code: Some("ABCDE".into()),
+            auth: guest("vianney"),
+        },
         ClientMessage::AddBot,
         ClientMessage::RemoveBot,
         ClientMessage::Configure {
@@ -109,16 +121,29 @@ fn client_message_fixtures() -> Vec<ClientMessage> {
         ClientMessage::Start,
         ClientMessage::PlayAgain,
         ClientMessage::Leave,
-        ClientMessage::Cmd { cmd: CommandKind::Build { tile: "ave_a".into() } },
-        ClientMessage::Feedback { rating: 4, comment: Some("gg".into()) },
+        ClientMessage::Cmd {
+            cmd: CommandKind::Build {
+                tile: "ave_a".into(),
+            },
+        },
+        ClientMessage::Feedback {
+            rating: 4,
+            comment: Some("gg".into()),
+        },
         ClientMessage::AnimationDone { through_seq: 7 },
         ClientMessage::ListMods,
         ClientMessage::QueueRanked {
-            auth: AuthPayload { token: Some("jwt".into()), ..Default::default() },
+            auth: AuthPayload {
+                token: Some("jwt".into()),
+                ..Default::default()
+            },
         },
         ClientMessage::CancelQueue,
         ClientMessage::GetRating {
-            auth: AuthPayload { token: Some("jwt".into()), ..Default::default() },
+            auth: AuthPayload {
+                token: Some("jwt".into()),
+                ..Default::default()
+            },
         },
         ClientMessage::Ping,
     ]
@@ -147,7 +172,9 @@ fn server_message_name(m: &ServerMessage) -> Option<&'static str> {
 
 fn server_message_fixtures() -> Vec<ServerMessage> {
     vec![
-        ServerMessage::RoomCreated { code: "ABCDE".into() },
+        ServerMessage::RoomCreated {
+            code: "ABCDE".into(),
+        },
         ServerMessage::Lobby {
             players: vec![],
             settings: RoomSettings {
@@ -157,11 +184,19 @@ fn server_message_fixtures() -> Vec<ServerMessage> {
                 rules: RuleParams::default(),
             },
         },
-        ServerMessage::Rejected { error: CommandError::BidBelowFloor },
-        ServerMessage::Error { message: "boom".into() },
-        ServerMessage::Mods { ids: vec!["base".into(), "highroller".into()] },
+        ServerMessage::Rejected {
+            error: CommandError::BidBelowFloor,
+        },
+        ServerMessage::Error {
+            message: "boom".into(),
+        },
+        ServerMessage::Mods {
+            ids: vec!["base".into(), "highroller".into()],
+        },
         ServerMessage::Queued { size: 3 },
-        ServerMessage::MatchFound { code: "ABCDE".into() },
+        ServerMessage::MatchFound {
+            code: "ABCDE".into(),
+        },
         ServerMessage::Rating {
             player_id: "id:u1".into(),
             mu: 25.0,

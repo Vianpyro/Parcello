@@ -44,8 +44,11 @@ fn read_fixtures(name: &str) -> Map<String, Value> {
 }
 
 fn write_fixtures(name: &str, entries: &[(&str, Value)]) {
-    let map: Map<String, Value> =
-        entries.iter().cloned().map(|(k, v)| (k.to_string(), v)).collect();
+    let map: Map<String, Value> = entries
+        .iter()
+        .cloned()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
     let json = serde_json::to_string_pretty(&Value::Object(map)).unwrap();
     fs::write(fixture_path(name), format!("{json}\n")).unwrap();
 }
@@ -97,7 +100,9 @@ fn command_kind_name(k: &CommandKind) -> &'static str {
 fn command_kind_fixtures() -> Vec<CommandKind> {
     vec![
         CommandKind::PlayMovementCard { value: 3 },
-        CommandKind::Build { tile: "ave_a".into() },
+        CommandKind::Build {
+            tile: "ave_a".into(),
+        },
         CommandKind::ProposeTrade {
             to: "guest:bob".into(),
             give_cash: 50,
@@ -109,12 +114,24 @@ fn command_kind_fixtures() -> Vec<CommandKind> {
         CommandKind::DeclineTrade { trade: 4 },
         CommandKind::CancelTrade { trade: 4 },
         CommandKind::SubmitBlindBid { amount: 60 },
-        CommandKind::SellHouse { tile: "ave_a".into() },
-        CommandKind::Expropriate { tile: "ave_a".into() },
-        CommandKind::BoostRent { tile: "ave_a".into() },
-        CommandKind::Mortgage { tile: "ave_a".into() },
-        CommandKind::Unmortgage { tile: "ave_a".into() },
-        CommandKind::ChooseLegalRoute { order: vec![1, 2, 3, 4, 5] },
+        CommandKind::SellHouse {
+            tile: "ave_a".into(),
+        },
+        CommandKind::Expropriate {
+            tile: "ave_a".into(),
+        },
+        CommandKind::BoostRent {
+            tile: "ave_a".into(),
+        },
+        CommandKind::Mortgage {
+            tile: "ave_a".into(),
+        },
+        CommandKind::Unmortgage {
+            tile: "ave_a".into(),
+        },
+        CommandKind::ChooseLegalRoute {
+            order: vec![1, 2, 3, 4, 5],
+        },
         CommandKind::OfferBribe { amount: 90 },
         CommandKind::VoteOnBribe { accept: true },
         CommandKind::UseJailCard,
@@ -176,10 +193,25 @@ fn event_name(e: &Event) -> &'static str {
 fn event_fixtures() -> Vec<Event> {
     vec![
         Event::TurnStarted { player: 0 },
-        Event::MovementCardPlayed { player: 0, value: 4 },
-        Event::Moved { player: 0, from: 0, to: 4, passed_go: false },
-        Event::SalaryPaid { player: 0, amount: 200 },
-        Event::BlindAuctionOpened { tile: 3, discoverer: 0, floor: 60 },
+        Event::MovementCardPlayed {
+            player: 0,
+            value: 4,
+        },
+        Event::Moved {
+            player: 0,
+            from: 0,
+            to: 4,
+            passed_go: false,
+        },
+        Event::SalaryPaid {
+            player: 0,
+            amount: 200,
+        },
+        Event::BlindAuctionOpened {
+            tile: 3,
+            discoverer: 0,
+            floor: 60,
+        },
         Event::BlindBidSubmitted { player: 0 },
         Event::BlindAuctionResolved {
             tile: 3,
@@ -188,22 +220,65 @@ fn event_fixtures() -> Vec<Event> {
             amount: 60,
             bids: vec![0, 60],
         },
-        Event::DiscovererRefunded { player: 0, tile: 3, amount: 6 },
-        Event::TradeProposed { trade: 4, from: 0, to: 1 },
-        Event::TradeAccepted { trade: 4, from: 0, to: 1 },
-        Event::TradeDeclined { trade: 4, from: 0, to: 1 },
-        Event::TradeCancelled { trade: 4, from: 0, to: 1 },
-        Event::RentPaid { from: 1, to: 0, tile: 3, amount: 10 },
-        Event::TaxPaid { player: 0, tile: 8, amount: 100 },
+        Event::DiscovererRefunded {
+            player: 0,
+            tile: 3,
+            amount: 6,
+        },
+        Event::TradeProposed {
+            trade: 4,
+            from: 0,
+            to: 1,
+        },
+        Event::TradeAccepted {
+            trade: 4,
+            from: 0,
+            to: 1,
+        },
+        Event::TradeDeclined {
+            trade: 4,
+            from: 0,
+            to: 1,
+        },
+        Event::TradeCancelled {
+            trade: 4,
+            from: 0,
+            to: 1,
+        },
+        Event::RentPaid {
+            from: 1,
+            to: 0,
+            tile: 3,
+            amount: 10,
+        },
+        Event::TaxPaid {
+            player: 0,
+            tile: 8,
+            amount: 100,
+        },
         Event::CardDrawn {
             player: 0,
             deck: DeckKind::Chance,
             card: "advance_go".into(),
             text: "Advance to Go.".into(),
         },
-        Event::CashAdjusted { player: 0, delta: 50, reason: "advance_go".into() },
-        Event::HouseBuilt { player: 0, tile: 3, houses: 1, cost: 50 },
-        Event::HouseSold { player: 0, tile: 3, houses: 1, refund: 25 },
+        Event::CashAdjusted {
+            player: 0,
+            delta: 50,
+            reason: "advance_go".into(),
+        },
+        Event::HouseBuilt {
+            player: 0,
+            tile: 3,
+            houses: 1,
+            cost: 50,
+        },
+        Event::HouseSold {
+            player: 0,
+            tile: 3,
+            houses: 1,
+            refund: 25,
+        },
         Event::Expropriated {
             player: 0,
             from: 1,
@@ -212,16 +287,38 @@ fn event_fixtures() -> Vec<Event> {
             liquidated: 0,
             liquidation_refund: 0,
         },
-        Event::RentBoosted { player: 0, tile: 3, boosts: 1, cost: 30 },
+        Event::RentBoosted {
+            player: 0,
+            tile: 3,
+            boosts: 1,
+            cost: 30,
+        },
         Event::RentBoostConsumed { tile: 3 },
-        Event::PropertyMortgaged { player: 0, tile: 3, value: 30 },
-        Event::PropertyUnmortgaged { player: 0, tile: 3, cost: 33 },
-        Event::WentToJail { player: 0, from: 12 },
+        Event::PropertyMortgaged {
+            player: 0,
+            tile: 3,
+            value: 30,
+        },
+        Event::PropertyUnmortgaged {
+            player: 0,
+            tile: 3,
+            cost: 33,
+        },
+        Event::WentToJail {
+            player: 0,
+            from: 12,
+        },
         Event::JailCardReceived { player: 0 },
         Event::JailCardUsed { player: 0 },
         Event::LeftJail { player: 0 },
-        Event::LegalRouteChosen { player: 0, order: vec![1, 2, 3, 4, 5] },
-        Event::BribeOffered { player: 0, amount: 90 },
+        Event::LegalRouteChosen {
+            player: 0,
+            order: vec![1, 2, 3, 4, 5],
+        },
+        Event::BribeOffered {
+            player: 0,
+            amount: 90,
+        },
         Event::BribeVoteCast { player: 1 },
         Event::BribeResolved {
             briber: 0,
@@ -230,13 +327,26 @@ fn event_fixtures() -> Vec<Event> {
             accepts: 2,
             total: 3,
         },
-        Event::PropertyTransferred { tile: 3, from: 0, to: Some(1) },
-        Event::PlayerBankrupt { player: 0, creditor: Some(1) },
+        Event::PropertyTransferred {
+            tile: 3,
+            from: 0,
+            to: Some(1),
+        },
+        Event::PlayerBankrupt {
+            player: 0,
+            creditor: Some(1),
+        },
         Event::PlayerResigned { player: 0 },
         Event::GameEnded { winner: 0 },
         Event::TimeUp { winner: 0 },
-        Event::WonByGroups { winner: 0, groups: 3 },
-        Event::WonByPoints { player: 0, points: 20 },
+        Event::WonByGroups {
+            winner: 0,
+            groups: 3,
+        },
+        Event::WonByPoints {
+            player: 0,
+            points: 20,
+        },
         Event::WonByPoolExhaustion { winner: 0 },
         Event::MarketEventActivated {
             event_id: "rent_spike".into(),
@@ -244,9 +354,18 @@ fn event_fixtures() -> Vec<Event> {
             magnitude_pct: 50,
             duration_turns: 4,
         },
-        Event::MarketEventExpired { event_id: "rent_spike".into() },
-        Event::RoundBonusAwarded { player: 0, points: 2 },
-        Event::SpotlightStarted { tile: 5, rent_pct: 100, duration_turns: 0 },
+        Event::MarketEventExpired {
+            event_id: "rent_spike".into(),
+        },
+        Event::RoundBonusAwarded {
+            player: 0,
+            points: 2,
+        },
+        Event::SpotlightStarted {
+            tile: 5,
+            rent_pct: 100,
+            duration_turns: 0,
+        },
         Event::SpotlightEnded { tile: 5 },
     ]
 }
@@ -299,7 +418,9 @@ fn command_error_fixtures() -> Vec<CommandError> {
         CommandError::Bankrupt,
         CommandError::NotYourTurn,
         CommandError::WrongPhase,
-        CommandError::UnknownTile { tile: "ave_a".into() },
+        CommandError::UnknownTile {
+            tile: "ave_a".into(),
+        },
         CommandError::NotAProperty,
         CommandError::NotOwner,
         CommandError::GroupIncomplete,
