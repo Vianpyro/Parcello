@@ -17,6 +17,7 @@ import '../../tokens.dart';
 import '../side/side_panel.dart';
 import 'center_panel.dart';
 import 'flashes.dart';
+import 'market_strip.dart';
 import 'nav_rail.dart';
 import 'player_bar.dart';
 
@@ -54,6 +55,10 @@ class GameScreen extends StatelessWidget {
                 ListenableBuilder(
                     listenable: s.stage,
                     builder: (context, _) => PlayerBar(s: s)),
+                // The public market state (pools / forecast / spotlight) that
+                // used to stack in the board centre, now a thin band under the
+                // bar (DDR-0021 decision); renders nothing when there is none.
+                MarketStrip(s: s),
                 const SizedBox(height: Pc.s4),
                 Expanded(
                   child: Row(

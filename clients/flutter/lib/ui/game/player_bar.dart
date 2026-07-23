@@ -14,6 +14,8 @@ import '../../protocol.dart';
 import '../../session.dart';
 import '../../tokens.dart';
 import '../side/bid_chip.dart';
+import 'countdown.dart';
+import 'toggles.dart';
 
 class PlayerBar extends StatelessWidget {
   final GameSession s;
@@ -103,13 +105,33 @@ class PlayerBar extends StatelessWidget {
       ));
     }
 
+    // Top-right chrome cluster (DDR-0021: the game clock lives in the player
+    // bar). The game clock is shown for the whole game, end included - the
+    // final time left is part of the result (a bankruptcy win keeps time on the
+    // clock). The motion/mute toggles moved here with it out of the emptied
+    // board centre; they are global chrome, not part of the immediate decision.
+    final trailing = <Widget>[
+      if (s.gameEndsAt != null) ...[
+        Countdown(endsAt: s.gameEndsAt!),
+        const SizedBox(width: Pc.s8),
+      ],
+      MotionButton(s: s),
+      const MuteButton(),
+    ];
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: Pc.s8, vertical: Pc.s6),
       decoration: const BoxDecoration(
         color: Pc.surface2,
         border: Border(bottom: BorderSide(color: Pc.border)),
       ),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: cells),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        Expanded(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: cells),
+        ),
+        const SizedBox(width: Pc.s8),
+        Row(mainAxisSize: MainAxisSize.min, children: trailing),
+      ]),
     );
   }
 }

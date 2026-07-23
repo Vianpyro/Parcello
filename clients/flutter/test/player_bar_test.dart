@@ -9,6 +9,7 @@ import 'package:parcello_client/design/components/seat_tile.dart';
 import 'package:parcello_client/l10n/app_localizations.dart';
 import 'package:parcello_client/protocol.dart';
 import 'package:parcello_client/session.dart';
+import 'package:parcello_client/ui/game/countdown.dart';
 import 'package:parcello_client/ui/game/player_bar.dart';
 
 Map<String, dynamic> _content() => {
@@ -85,5 +86,18 @@ void main() {
     expect(find.textContaining('Player 2'), findsWidgets);
     expect(find.text(r'$1000'), findsOneWidget); // seat 0 cash
     expect(find.text(r'$1200'), findsOneWidget); // seat 2 cash
+  });
+
+  testWidgets('the game clock lives in the player bar (DDR-0021)', (tester) async {
+    // The game clock moved out of the emptied board centre into the top bar;
+    // it shows for the whole game, gated only on the game being time-boxed.
+    final s = _room()..gameEndsAt = DateTime.now().add(const Duration(minutes: 30));
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: PlayerBar(s: s)),
+    ));
+    await tester.pump();
+    expect(find.byType(Countdown), findsOneWidget);
   });
 }
