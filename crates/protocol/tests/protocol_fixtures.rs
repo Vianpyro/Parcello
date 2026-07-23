@@ -68,7 +68,7 @@ where
     assert_eq!(&serialized, stored, "fixture drift for {name}");
 }
 
-fn client_message_name(m: &ClientMessage) -> &'static str {
+const fn client_message_name(m: &ClientMessage) -> &'static str {
     match m {
         ClientMessage::Create { .. } => "create",
         ClientMessage::Join { .. } => "join",
@@ -151,14 +151,14 @@ fn client_message_fixtures() -> Vec<ClientMessage> {
 
 /// `None` marks a variant deferred to S2 (see module doc): named, but with
 /// no fixture instance constructed here.
-fn server_message_name(m: &ServerMessage) -> Option<&'static str> {
+const fn server_message_name(m: &ServerMessage) -> Option<&'static str> {
     match m {
         ServerMessage::RoomCreated { .. } => Some("room_created"),
-        ServerMessage::Joined { .. } => None,
-        ServerMessage::Spectating { .. } => None,
+        ServerMessage::Joined { .. }
+        | ServerMessage::Spectating { .. }
+        | ServerMessage::GameStarted { .. }
+        | ServerMessage::Update { .. } => None,
         ServerMessage::Lobby { .. } => Some("lobby"),
-        ServerMessage::GameStarted { .. } => None,
-        ServerMessage::Update { .. } => None,
         ServerMessage::Rejected { .. } => Some("rejected"),
         ServerMessage::Error { .. } => Some("error"),
         ServerMessage::Mods { .. } => Some("mods"),
@@ -241,7 +241,7 @@ fn server_message_wire_format_matches_fixtures() {
 /// adding a new variant + match arm:
 /// `cargo test -p parcello-protocol --test protocol_fixtures -- --ignored regenerate_fixtures`
 #[test]
-#[ignore]
+#[ignore = "run explicitly with --ignored to regenerate the committed fixtures"]
 fn regenerate_fixtures() {
     write_fixtures(
         "client_message",

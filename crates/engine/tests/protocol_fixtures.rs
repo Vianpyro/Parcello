@@ -13,8 +13,8 @@
 //! test suite: `clients/flutter/test/protocol_fixtures_test.dart`): one JSON
 //! object per enum, keyed by variant name, value the canonical wire shape.
 //! Grouping keeps the count at five files total instead of one per variant
-//! - same guarantees (every variant is still individually named, looked up,
-//! and compared), far less repository noise.
+//!   - same guarantees (every variant is still individually named, looked up,
+//!     and compared), far less repository noise.
 //!
 //! To add a new variant: add a match arm below with a representative
 //! instance, then run
@@ -74,7 +74,7 @@ where
 /// Every `CommandKind` variant, named for its fixture entry. No wildcard
 /// arm: a new variant is a compile error here until it gets a name and a
 /// case in `command_kind_fixtures` below.
-fn command_kind_name(k: &CommandKind) -> &'static str {
+const fn command_kind_name(k: &CommandKind) -> &'static str {
     match k {
         CommandKind::PlayMovementCard { .. } => "play_movement_card",
         CommandKind::Build { .. } => "build",
@@ -141,7 +141,7 @@ fn command_kind_fixtures() -> Vec<CommandKind> {
 }
 
 /// Every `Event` variant. Same no-wildcard discipline as `command_kind_name`.
-fn event_name(e: &Event) -> &'static str {
+const fn event_name(e: &Event) -> &'static str {
     match e {
         Event::TurnStarted { .. } => "turn_started",
         Event::MovementCardPlayed { .. } => "movement_card_played",
@@ -191,6 +191,19 @@ fn event_name(e: &Event) -> &'static str {
 }
 
 fn event_fixtures() -> Vec<Event> {
+    let mut events = movement_event_fixtures();
+    events.extend(auction_event_fixtures());
+    events.extend(trade_event_fixtures());
+    events.extend(cash_event_fixtures());
+    events.extend(estate_event_fixtures());
+    events.extend(jail_event_fixtures());
+    events.extend(corruption_event_fixtures());
+    events.extend(transfer_and_win_event_fixtures());
+    events.extend(market_and_world_event_fixtures());
+    events
+}
+
+fn movement_event_fixtures() -> Vec<Event> {
     vec![
         Event::TurnStarted { player: 0 },
         Event::MovementCardPlayed {
@@ -207,6 +220,11 @@ fn event_fixtures() -> Vec<Event> {
             player: 0,
             amount: 200,
         },
+    ]
+}
+
+fn auction_event_fixtures() -> Vec<Event> {
+    vec![
         Event::BlindAuctionOpened {
             tile: 3,
             discoverer: 0,
@@ -225,6 +243,11 @@ fn event_fixtures() -> Vec<Event> {
             tile: 3,
             amount: 6,
         },
+    ]
+}
+
+fn trade_event_fixtures() -> Vec<Event> {
+    vec![
         Event::TradeProposed {
             trade: 4,
             from: 0,
@@ -245,6 +268,11 @@ fn event_fixtures() -> Vec<Event> {
             from: 0,
             to: 1,
         },
+    ]
+}
+
+fn cash_event_fixtures() -> Vec<Event> {
+    vec![
         Event::RentPaid {
             from: 1,
             to: 0,
@@ -267,6 +295,11 @@ fn event_fixtures() -> Vec<Event> {
             delta: 50,
             reason: "advance_go".into(),
         },
+    ]
+}
+
+fn estate_event_fixtures() -> Vec<Event> {
+    vec![
         Event::HouseBuilt {
             player: 0,
             tile: 3,
@@ -304,6 +337,11 @@ fn event_fixtures() -> Vec<Event> {
             tile: 3,
             cost: 33,
         },
+    ]
+}
+
+fn jail_event_fixtures() -> Vec<Event> {
+    vec![
         Event::WentToJail {
             player: 0,
             from: 12,
@@ -315,6 +353,11 @@ fn event_fixtures() -> Vec<Event> {
             player: 0,
             order: vec![1, 2, 3, 4, 5],
         },
+    ]
+}
+
+fn corruption_event_fixtures() -> Vec<Event> {
+    vec![
         Event::BribeOffered {
             player: 0,
             amount: 90,
@@ -327,6 +370,11 @@ fn event_fixtures() -> Vec<Event> {
             accepts: 2,
             total: 3,
         },
+    ]
+}
+
+fn transfer_and_win_event_fixtures() -> Vec<Event> {
+    vec![
         Event::PropertyTransferred {
             tile: 3,
             from: 0,
@@ -348,6 +396,11 @@ fn event_fixtures() -> Vec<Event> {
             points: 20,
         },
         Event::WonByPoolExhaustion { winner: 0 },
+    ]
+}
+
+fn market_and_world_event_fixtures() -> Vec<Event> {
+    vec![
         Event::MarketEventActivated {
             event_id: "rent_spike".into(),
             effect: MarketEffect::RentMultiplier,
@@ -371,7 +424,7 @@ fn event_fixtures() -> Vec<Event> {
 }
 
 /// Every `CommandError` variant. Same no-wildcard discipline.
-fn command_error_name(e: &CommandError) -> &'static str {
+const fn command_error_name(e: &CommandError) -> &'static str {
     match e {
         CommandError::GameFinished => "game_finished",
         CommandError::UnknownPlayer => "unknown_player",
@@ -481,7 +534,7 @@ fn command_error_wire_format_matches_fixtures() {
 /// canonical instances above. Run after adding a new variant + match arm:
 /// `cargo test -p parcello-engine --test protocol_fixtures -- --ignored regenerate_fixtures`
 #[test]
-#[ignore]
+#[ignore = "run explicitly with --ignored to regenerate the committed fixtures"]
 fn regenerate_fixtures() {
     write_fixtures(
         "command_kind",
