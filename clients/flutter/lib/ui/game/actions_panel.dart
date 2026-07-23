@@ -24,7 +24,9 @@ class MaxValueFormatter extends TextInputFormatter {
 
   @override
   TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
     if (newValue.text.isEmpty) return newValue;
     final v = int.tryParse(newValue.text);
     if (v == null) return oldValue; // non-numeric edit (paired with digitsOnly)
@@ -48,6 +50,7 @@ class ActionsPanel extends StatefulWidget {
 class ActionsPanelState extends State<ActionsPanel> {
   final _bid = TextEditingController();
   final _bribe = TextEditingController();
+
   /// Tile the bid field's current text was seeded for - reseeding only on
   /// a *new* tile (not every rebuild) is the fix for a real bug: this
   /// widget rebuilds on every notifyListeners() (animation beats, other
@@ -55,8 +58,10 @@ class ActionsPanelState extends State<ActionsPanel> {
   /// time made it impossible to type a bid before it got wiped out from
   /// under you (2026-07 playtest feedback).
   int? _bidInitTile;
+
   /// Same bug, same fix, for the bribe amount field.
   bool _bribeSeeded = false;
+
   /// Legal Route order built by tapping cards in sequence rather than
   /// typing them (2026-07 playtest feedback: a free-text field either got
   /// mistyped and silently rejected, or - being pre-filled - never edited
@@ -77,23 +82,26 @@ class ActionsPanelState extends State<ActionsPanel> {
     // The wrapper is non-focusable itself (skipTraversal) so it never adds a
     // stop; the button inside stays the focus target.
     Widget previewDest(int dest, Widget child) => Focus(
-          canRequestFocus: false,
-          skipTraversal: true,
-          onFocusChange: (has) => s.setHoverTile(has ? dest : null),
-          child: MouseRegion(
-            onEnter: (_) => s.setHoverTile(dest),
-            onExit: (_) => s.setHoverTile(null),
-            child: child,
-          ),
-        );
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (has) => s.setHoverTile(has ? dest : null),
+      child: MouseRegion(
+        onEnter: (_) => s.setHoverTile(dest),
+        onExit: (_) => s.setHoverTile(null),
+        child: child,
+      ),
+    );
 
     // Clear the jail-decision UI state the moment we're not actually in
     // that decision (route chosen, bribe sent and the turn moved on, or
     // simply not our situation) - preserved for as long as we ARE still
     // deciding, across however many unrelated rebuilds happen meanwhile.
     final mySeatIdx = s.seat;
-    final myPlayer = mySeatIdx != null ? v.players.elementAtOrNull(mySeatIdx) : null;
-    final jailDeciding = t.type == 'await_move' &&
+    final myPlayer = mySeatIdx != null
+        ? v.players.elementAtOrNull(mySeatIdx)
+        : null;
+    final jailDeciding =
+        t.type == 'await_move' &&
         s.myTurn &&
         myPlayer?.inJail == true &&
         myPlayer?.jailRoute == null;
@@ -103,14 +111,25 @@ class ActionsPanelState extends State<ActionsPanel> {
     }
 
     Widget btn(String label, Map<String, dynamic> cmd, {bool primary = true}) {
-      return PcButton(label,
-          onPressed: () => s.sendCmd(cmd),
-          dense: true,
-          variant:
-              primary ? PcButtonVariant.primary : PcButtonVariant.secondary);
+      return PcButton(
+        label,
+        onPressed: () => s.sendCmd(cmd),
+        dense: true,
+        variant: primary ? PcButtonVariant.primary : PcButtonVariant.secondary,
+      );
     }
 
-    final children = <Widget>[];
+    // Five stable zones, always rendered in this order, so the same kind of
+    // thing is always found in the same place whatever the phase
+    // (SCREEN_ARCHITECTURE: one contextual primary action; no reflow on a state
+    // change). A button lands in `primary` or `alternatives` strictly by the
+    // variant it ALREADY carries - the zone follows the button, the button is
+    // never restyled here.
+    final info = <Widget>[]; // what is being decided
+    final input = <Widget>[]; // the surface it is composed on
+    final primary = <Widget>[]; // the action that commits it
+    final alternatives = <Widget>[]; // the other ways out
+    final aide = <Widget>[]; // a hint about something else (the tiles)
     // Reset once the window closes so a later auction - even on the same
     // tile - always reseeds fresh instead of showing a stale leftover bid.
     if (t.type != 'blind_auction') _bidInitTile = null;
@@ -119,9 +138,7 @@ class ActionsPanelState extends State<ActionsPanel> {
     // whose turn it nominally is.
     if (t.type == 'blind_auction') {
       final seat = s.seat;
-      if (seat == null ||
-          t.bids[seat] != null ||
-          v.players[seat].bankrupt) {
+      if (seat == null || t.bids[seat] != null || v.players[seat].bankrupt) {
         return const SizedBox.shrink();
       }
       // The price right now, not the list price: it IS the floor the engine
@@ -144,15 +161,16 @@ class ActionsPanelState extends State<ActionsPanel> {
         final bump = (price * pct / 100).round();
         _bid.text = '${(current + bump).clamp(0, cash)}';
       }
+
       // One submit path shared by the Bid button and Enter/Done in the field,
       // so both clamp the wire amount to cash identically (the field is already
       // capped; this is belt-and-suspenders and the single source of truth).
       void submitBid() => s.sendCmd({
-            'type': 'submit_blind_bid',
-            'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
-          });
+        'type': 'submit_blind_bid',
+        'amount': (int.tryParse(_bid.text) ?? 0).clamp(0, cash),
+      });
 
-      children.addAll([
+      info.addAll([
         Text(
           isDiscoverer
               ? loc.actionSealedBidFloor(s.tileName(t.tile!), price)
@@ -161,20 +179,15 @@ class ActionsPanelState extends State<ActionsPanel> {
         ),
         // The discoverer's edge (ADR-0018 amended): every winner pays in
         // full, then the bank visibly refunds the discoverer 10%.
-        if (isDiscoverer)
-          Text(
-            loc.actionDiscovererHint,
-            style: PcText.whisper,
-          ),
+        if (isDiscoverer) Text(loc.actionDiscovererHint, style: PcText.whisper),
         if (!canBid)
           // Below the universal floor (ADR-0018 amended 2026-07) any
           // non-zero bid is a guaranteed rejection: say so and offer the
           // one legal move instead of a doomed input.
-          Text(
-            loc.actionBidCantAfford(price),
-            style: PcText.whisper,
-          )
-        else ...[
+          Text(loc.actionBidCantAfford(price), style: PcText.whisper),
+      ]);
+      if (canBid) {
+        input.add(
           SizedBox(
             width: 90,
             child: PcTextField(
@@ -193,31 +206,40 @@ class ActionsPanelState extends State<ActionsPanel> {
               onSubmitted: (_) => submitBid(),
             ),
           ),
-          PcButton(
-            loc.actionBid,
-            dense: true,
-            onPressed: submitBid,
-          ),
-        ],
-        btn(loc.actionAbstain, {'type': 'submit_blind_bid', 'amount': 0},
-            primary: !canBid),
-        if (canBid) ...[
+        );
+        primary.add(PcButton(loc.actionBid, dense: true, onPressed: submitBid));
+      }
+      // Abstaining IS the move that commits when the floor is out of reach -
+      // the button already says so through its variant, so it takes the primary
+      // slot exactly then, and the alternatives slot otherwise.
+      (canBid ? alternatives : primary).add(
+        btn(loc.actionAbstain, {
+          'type': 'submit_blind_bid',
+          'amount': 0,
+        }, primary: !canBid),
+      );
+      if (canBid) {
+        alternatives.addAll([
           // Quick raises as a percent of the list price, so escalating a
           // bid doesn't mean typing out full numbers under the clock.
           // Mutating the controller already repaints the TextField bound
           // to it - no setState needed.
           for (final pct in [10, 25, 50, 100])
-            PcButton(loc.actionRaisePct(pct),
-                dense: true,
-                variant: PcButtonVariant.secondary,
-                onPressed: () => bumpBid(pct)),
-          // All-in: the highest bid the sealed-bid invariant will accept.
-          PcButton(loc.actionMaxBid(cash),
+            PcButton(
+              loc.actionRaisePct(pct),
               dense: true,
               variant: PcButtonVariant.secondary,
-              onPressed: () => _bid.text = '$cash'),
-        ],
-      ]);
+              onPressed: () => bumpBid(pct),
+            ),
+          // All-in: the highest bid the sealed-bid invariant will accept.
+          PcButton(
+            loc.actionMaxBid(cash),
+            dense: true,
+            variant: PcButtonVariant.secondary,
+            onPressed: () => _bid.text = '$cash',
+          ),
+        ]);
+      }
     } else if (t.type == 'bribe_vote') {
       // Every living opponent may vote at once (ADR-0024), not a single
       // actor: show the overlay to anyone except the briber who hasn't
@@ -229,15 +251,21 @@ class ActionsPanelState extends State<ActionsPanel> {
           v.players[seat].bankrupt) {
         return const SizedBox.shrink();
       }
-      children.addAll([
+      info.add(
         Text(
           loc.actionBribePrompt(s.playerName(t.briber!), t.amount!),
           style: PcText.label,
         ),
+      );
+      primary.add(
         btn(loc.actionAccept, {'type': 'vote_on_bribe', 'accept': true}),
-        btn(loc.actionReject, {'type': 'vote_on_bribe', 'accept': false},
-            primary: false),
-      ]);
+      );
+      alternatives.add(
+        btn(loc.actionReject, {
+          'type': 'vote_on_bribe',
+          'accept': false,
+        }, primary: false),
+      );
     } else if (s.myTurn) {
       final me = v.players[s.seat!];
       switch (t.type) {
@@ -245,16 +273,23 @@ class ActionsPanelState extends State<ActionsPanel> {
           final route = me.jailRoute;
           if (route != null) {
             // Locked Legal Route (ADR-0024): only the front card is legal.
-            children.add(previewDest(
-              (me.position + route.first) % s.content!.board.length,
-              btn(loc.actionPlayRoute(route.first),
-                  {'type': 'play_movement_card', 'value': route.first}),
-            ));
+            primary.add(
+              previewDest(
+                (me.position + route.first) % s.content!.board.length,
+                btn(loc.actionPlayRoute(route.first), {
+                  'type': 'play_movement_card',
+                  'value': route.first,
+                }),
+              ),
+            );
           } else if (me.inJail) {
             // Three exits: jail card, Corruption bribe, Legal Route.
             if (me.jailCards > 0) {
-              children.add(btn(loc.actionUseJailCard, {'type': 'use_jail_card'},
-                  primary: false));
+              alternatives.add(
+                btn(loc.actionUseJailCard, {
+                  'type': 'use_jail_card',
+                }, primary: false),
+              );
             }
             // A Legal Route is a permutation of the full FRESH hand - every
             // velocity value - not of the cards still in hand: choosing it
@@ -281,42 +316,47 @@ class ActionsPanelState extends State<ActionsPanel> {
             // seeded ceiling), not the one the player just typed. The bid field
             // already reads at press time; the bribe now matches it.
             void submitBribe() => s.sendCmd({
-                  'type': 'offer_bribe',
-                  'amount': int.tryParse(_bribe.text) ?? 0,
-                });
-            children.addAll([
-              Text(loc.actionLegalRouteHint,
-                  style: PcText.label),
+              'type': 'offer_bribe',
+              'amount': int.tryParse(_bribe.text) ?? 0,
+            });
+            info.add(Text(loc.actionLegalRouteHint, style: PcText.label));
+            // The three jail exits are parallel, and each has its own input
+            // right beside the button that commits it - so the composers stay
+            // one sequence rather than being split field-here / button-there.
+            input.addAll([
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: [
-                  for (final value in sorted) _routeChip(value),
-                ],
+                children: [for (final value in sorted) _routeChip(value)],
               ),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                PcButton(
-                  loc.actionChooseRoute,
-                  dense: true,
-                  variant: PcButtonVariant.secondary,
-                  onPressed: routeComplete
-                      ? () {
-                          s.sendCmd({
-                            'type': 'choose_legal_route',
-                            'order': _routeOrder,
-                          });
-                          setState(() => _routeOrder.clear());
-                        }
-                      : null,
-                ),
-                if (_routeOrder.isNotEmpty) ...[
-                  const SizedBox(width: Pc.s6),
-                  PcButton(loc.actionReset,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  PcButton(
+                    loc.actionChooseRoute,
+                    dense: true,
+                    variant: PcButtonVariant.secondary,
+                    onPressed: routeComplete
+                        ? () {
+                            s.sendCmd({
+                              'type': 'choose_legal_route',
+                              'order': _routeOrder,
+                            });
+                            setState(() => _routeOrder.clear());
+                          }
+                        : null,
+                  ),
+                  if (_routeOrder.isNotEmpty) ...[
+                    const SizedBox(width: Pc.s6),
+                    PcButton(
+                      loc.actionReset,
                       dense: true,
                       variant: PcButtonVariant.quiet,
-                      onPressed: () => setState(() => _routeOrder.clear())),
+                      onPressed: () => setState(() => _routeOrder.clear()),
+                    ),
+                  ],
                 ],
-              ]),
+              ),
               SizedBox(
                 width: 90,
                 child: PcTextField(
@@ -340,31 +380,73 @@ class ActionsPanelState extends State<ActionsPanel> {
             // board (2026-07 playtest feedback).
             final n = s.content!.board.length;
             for (final value in me.hand) {
-              children.add(previewDest(
-                (me.position + value) % n,
-                btn('$value', {'type': 'play_movement_card', 'value': value}),
-              ));
+              primary.add(
+                previewDest(
+                  (me.position + value) % n,
+                  btn('$value', {'type': 'play_movement_card', 'value': value}),
+                ),
+              );
             }
           }
         case 'await_end':
-          children.add(btn(loc.actionEndTurn, {'type': 'end_turn'}));
+          primary.add(btn(loc.actionEndTurn, {'type': 'end_turn'}));
       }
-      children.add(Text(loc.actionTapTilesHint,
-          style: PcText.caption.copyWith(color: Pc.textFaint)));
+      aide.add(
+        Text(
+          loc.actionTapTilesHint,
+          style: PcText.caption.copyWith(color: Pc.textFaint),
+        ),
+      );
     }
+    // The zones, in reading order. Peers inside a zone still wrap among
+    // themselves, but a primary never shares a Wrap with a secondary and no
+    // text ever shares one with a button.
+    final zones = <Widget>[
+      if (info.isNotEmpty) _stack(info),
+      if (input.isNotEmpty) _stack(input),
+      if (primary.isNotEmpty) _row(primary),
+      if (alternatives.isNotEmpty) _row(alternatives),
+      if (aide.isNotEmpty) _stack(aide),
+    ];
+
     // Grouped so a controller / Steam Deck traverses the action buttons
     // directionally; the Material buttons are already focus-highlighted and
     // Enter/A-activatable. No autofocus here - this panel rebuilds on every
     // server update, and stealing focus each time would fight the player.
     return FocusTraversalGroup(
       policy: ReadingOrderTraversalPolicy(),
-      child: Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: children),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < zones.length; i++) ...[
+            if (i > 0) const SizedBox(height: Pc.s8),
+            zones[i],
+          ],
+        ],
+      ),
     );
   }
+
+  /// A zone of peers laid out side by side, wrapping when the panel is narrow.
+  static Widget _row(List<Widget> children) => Wrap(
+    spacing: Pc.s6,
+    runSpacing: Pc.s6,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    children: children,
+  );
+
+  /// A zone stacked one item per line (text, and the composition surfaces).
+  static Widget _stack(List<Widget> children) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (var i = 0; i < children.length; i++) ...[
+        if (i > 0) const SizedBox(height: Pc.s4),
+        children[i],
+      ],
+    ],
+  );
 
   /// One tappable movement-card chip for the Legal Route builder: tap to
   /// append it to `_routeOrder`, tap an already-picked one to remove it
