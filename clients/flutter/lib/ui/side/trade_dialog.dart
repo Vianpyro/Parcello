@@ -54,63 +54,75 @@ class _TradeDialogState extends State<TradeDialog> {
       return SizedBox(
         height: 140,
         width: 200,
-        child: ListView(children: [
-          for (final i in tiles)
-            CheckboxListTile(
-              dense: true,
-              value: picked.contains(s.content!.board[i].id),
-              title: Text(
-                s.tileName(i) + (v.tiles[i].mortgaged ? ' (M)' : ''),
-                style: PcText.label,
+        child: ListView(
+          children: [
+            for (final i in tiles)
+              CheckboxListTile(
+                dense: true,
+                value: picked.contains(s.content!.board[i].id),
+                title: Text(
+                  s.tileName(i) +
+                      (v.tiles[i].mortgaged ? t.tileMortgagedSuffix : ''),
+                  style: PcText.label,
+                ),
+                onChanged: (on) => setState(() {
+                  final id = s.content!.board[i].id;
+                  on == true ? picked.add(id) : picked.remove(id);
+                }),
               ),
-              onChanged: (on) => setState(() {
-                final id = s.content!.board[i].id;
-                on == true ? picked.add(id) : picked.remove(id);
-              }),
-            ),
-        ]),
+          ],
+        ),
       );
     }
 
     Widget cashField(TextEditingController c) => SizedBox(
-          width: 200,
-          child: TextField(
-            controller: c,
-            keyboardType: TextInputType.number,
-            decoration:
-                InputDecoration(labelText: t.cashLabel, isDense: true),
-          ),
-        );
+      width: 200,
+      child: TextField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        decoration: InputDecoration(labelText: t.cashLabel, isDense: true),
+      ),
+    );
 
     return AlertDialog(
       title: Text(t.tradeNewOfferTitle),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        DropdownButton<int>(
-          value: _to,
-          isExpanded: true,
-          items: [
-            for (final i in candidates)
-              DropdownMenuItem(value: i, child: Text(s.playerName(i))),
-          ],
-          onChanged: (i) => setState(() {
-            _to = i;
-            _receiveTiles.clear();
-          }),
-        ),
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Column(children: [
-            Text(t.tradeYouGive),
-            cashField(_giveCash),
-            tileList(s.seat, _giveTiles),
-          ]),
-          const SizedBox(width: Pc.s12),
-          Column(children: [
-            Text(t.tradeYouWant),
-            cashField(_receiveCash),
-            tileList(_to, _receiveTiles),
-          ]),
-        ]),
-      ]),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButton<int>(
+            value: _to,
+            isExpanded: true,
+            items: [
+              for (final i in candidates)
+                DropdownMenuItem(value: i, child: Text(s.playerName(i))),
+            ],
+            onChanged: (i) => setState(() {
+              _to = i;
+              _receiveTiles.clear();
+            }),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Column(
+                children: [
+                  Text(t.tradeYouGive),
+                  cashField(_giveCash),
+                  tileList(s.seat, _giveTiles),
+                ],
+              ),
+              const SizedBox(width: Pc.s12),
+              Column(
+                children: [
+                  Text(t.tradeYouWant),
+                  cashField(_receiveCash),
+                  tileList(_to, _receiveTiles),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
       actions: [
         PcButton(
           t.close,

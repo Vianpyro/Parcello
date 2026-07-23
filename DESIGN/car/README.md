@@ -125,5 +125,6 @@ The unit tests that prove the invariants + the showcase states.
 | CAR | Component | Level | Status | Pulled by |
 |---|---|---|---|---|
 | [0001](0001-seat-tile.md) | SeatTile | L3 | RATIFIED (retroactive) | Game HUD / side panel |
+| [0002](0002-trade-offer-card.md) | TradeOfferCard | L3 | RATIFIED | Side panel trade list (sentence -> structured) |
 
 Future domain components append here the PR their CAR is ratified, before code.

@@ -16,6 +16,7 @@ import '../../typography.dart';
 import '../coach_mark.dart';
 import '../common.dart';
 import '../game/property_panel.dart';
+import '../game/trade_offer_card.dart';
 import 'feedback_card.dart';
 import 'settings_panel.dart';
 import 'trade_dialog.dart';
@@ -203,6 +204,7 @@ class SidePanel extends StatelessWidget {
           ),
         ),
         PcCard(child: _trades(context)),
+        ..._tradeCards(context),
         // Post-game survey: an ordinary side card, never a modal - it must
         // not block anything (no frustration by design).
         // The survey asks players about a game they played; a spectator's
@@ -215,15 +217,14 @@ class SidePanel extends StatelessWidget {
     );
   }
 
+  /// The section header card: label, the empty-state message, and the "new
+  /// offer" trigger. Individual offers are no longer rows inside this card -
+  /// each is its own `TradeOfferCard` (CAR-0002), appended after it in
+  /// `build()`, so a structured card never nests inside another flat card.
   Widget _trades(BuildContext context) {
     final v = s.view;
     final t = AppLocalizations.of(context);
     final offers = v?.pendingTrades ?? [];
-    String side(int cash, List<int> tiles) {
-      final parts = [if (cash > 0) '\$$cash', ...tiles.map(s.tileName)];
-      return parts.isEmpty ? t.tradeNothing : parts.join(' + ');
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -233,52 +234,6 @@ class SidePanel extends StatelessWidget {
         ),
         const SizedBox(height: Pc.s6),
         if (offers.isEmpty) Text(t.tradeNoOffers, style: PcText.caption),
-        for (final o in offers)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: Pc.s4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t.tradeOffer(
-                    o.id,
-                    s.playerName(o.from),
-                    side(o.giveCash, o.giveTiles),
-                    side(o.receiveCash, o.receiveTiles),
-                    s.playerName(o.to),
-                  ),
-                ),
-                Row(
-                  children: [
-                    if (o.to == s.seat) ...[
-                      PcButton(
-                        t.actionAccept,
-                        onPressed: () =>
-                            s.sendCmd({'type': 'accept_trade', 'trade': o.id}),
-                        variant: PcButtonVariant.quiet,
-                        wide: false,
-                      ),
-                      PcButton(
-                        t.tradeRefuse,
-                        onPressed: () =>
-                            s.sendCmd({'type': 'decline_trade', 'trade': o.id}),
-                        variant: PcButtonVariant.quiet,
-                        wide: false,
-                      ),
-                    ],
-                    if (o.from == s.seat)
-                      PcButton(
-                        t.cancel,
-                        onPressed: () =>
-                            s.sendCmd({'type': 'cancel_trade', 'trade': o.id}),
-                        variant: PcButtonVariant.quiet,
-                        wide: false,
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
         if (v != null && !v.finished)
           PcButton(
             t.tradeNewOffer,
@@ -291,5 +246,63 @@ class SidePanel extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  /// One `TradeOfferCard` per pending offer (CAR-0002), replacing the old
+  /// sentence-based row. This method keeps exactly the permission logic the
+  /// row used to have: the recipient (`o.to == s.seat`) gets accept+decline,
+  /// the proposer (`o.from == s.seat`) gets cancel, never both for the same
+  /// offer - the component itself decides nothing, it only hides whichever
+  /// callback arrives null.
+  List<Widget> _tradeCards(BuildContext context) {
+    final v = s.view;
+    final t = AppLocalizations.of(context);
+    final offers = v?.pendingTrades ?? [];
+
+    String cashLabel(int cash) => cash > 0 ? '\$$cash' : '';
+    // Mirrors TradeDialog's tile-name convention (name + a mortgaged
+    // suffix); both now share the same localized `t.tileMortgagedSuffix`
+    // key instead of a raw literal.
+    List<({String name, String? group})> tileEntries(List<int> tiles) => [
+      for (final i in tiles)
+        (
+          name:
+              s.tileName(i) +
+              (v!.tiles[i].mortgaged ? t.tileMortgagedSuffix : ''),
+          group: s.content?.board.elementAtOrNull(i)?.group,
+        ),
+    ];
+
+    return [
+      for (final o in offers)
+        Padding(
+          padding: const EdgeInsets.only(bottom: Pc.s6),
+          child: TradeOfferCard(
+            fromSeat: o.from,
+            fromName: s.playerName(o.from),
+            toSeat: o.to,
+            toName: s.playerName(o.to),
+            giveCash: cashLabel(o.giveCash),
+            giveTiles: tileEntries(o.giveTiles),
+            receiveCash: cashLabel(o.receiveCash),
+            receiveTiles: tileEntries(o.receiveTiles),
+            nothingLabel: t.tradeNothing,
+            givesLabel: t.tradeGivesLabel,
+            receivesLabel: t.tradeReceivesLabel,
+            acceptLabel: t.actionAccept,
+            declineLabel: t.tradeRefuse,
+            cancelLabel: t.cancel,
+            onAccept: o.to == s.seat
+                ? () => s.sendCmd({'type': 'accept_trade', 'trade': o.id})
+                : null,
+            onDecline: o.to == s.seat
+                ? () => s.sendCmd({'type': 'decline_trade', 'trade': o.id})
+                : null,
+            onCancel: o.from == s.seat
+                ? () => s.sendCmd({'type': 'cancel_trade', 'trade': o.id})
+                : null,
+          ),
+        ),
+    ];
   }
 }

@@ -164,18 +164,10 @@
   "tradesHeader": "TRADES",
   "tradeNothing": "nothing",
   "tradeNoOffers": "No open offers.",
-  "tradeOffer": "#{id} {from} gives {give} for {receive} (to {to})",
-  "@tradeOffer": {
-    "placeholders": {
-      "id": { "type": "int" },
-      "from": { "type": "String" },
-      "give": { "type": "String" },
-      "receive": { "type": "String" },
-      "to": { "type": "String" }
-    }
-  },
   "tradeRefuse": "Refuse",
   "tradeNewOffer": "New offer",
+  "tradeGivesLabel": "Gives",
+  "tradeReceivesLabel": "Receives",
 
   "vpLegendHeader": "VICTORY POINTS  ·  first to {target} wins",
   "@vpLegendHeader": { "placeholders": { "target": { "type": "int" } } },
@@ -374,6 +366,7 @@
   "propPrice": "Price",
   "propMarketNow": "now {price}",
   "@propMarketNow": { "placeholders": { "price": { "type": "String" } } },
+  "tileMortgagedSuffix": " (M)",
   "leave": "Leave",
   "navMenu": "Menu",
   "navObjectives": "Objectives",
