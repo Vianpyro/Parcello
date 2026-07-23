@@ -18,4 +18,7 @@ extend-exclude = [
     # is excluded by this glob without touching this list again.
     "clients/flutter/lib/l10n/*.arb",
     "!clients/flutter/lib/l10n/app_en.arb",
+    # Working doc explicitly written in French pending translation before
+    # merge (see its own header) - same false-positive class as the ARBs.
+    "docs/protocol-duplication-audit.md",
 ]
