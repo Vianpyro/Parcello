@@ -378,6 +378,7 @@
   "navMenu": "Menu",
   "navObjectives": "Objectives",
   "navHistory": "History",
+  "statusYourTurn": "Your turn",
   "logError": "Error: {message}",
   "@logError": { "placeholders": { "message": { "type": "String" } } },
 

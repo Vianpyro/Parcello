@@ -57,9 +57,7 @@ class CenterPanel extends StatelessWidget {
           ]),
         const SizedBox(height: Pc.s4),
         Row(children: [
-          Expanded(
-              child: Text(_status(t),
-                  style: const TextStyle(fontWeight: FontWeight.w600))),
+          Expanded(child: _turnPrompt(t)),
           if (s.turnEndsAt != null && s.view?.finished == false) ...[
             const SizedBox(width: Pc.s6),
             Countdown(
@@ -304,6 +302,33 @@ class CenterPanel extends StatelessWidget {
         ? t.spotlightUntilReplaced
         : t.spotlightEndsTurn(sp.expiresAtTurn);
     return t.spotlightLine(c.board[sp.tile].name, pct, until);
+  }
+
+  /// The turn prompt (game-screen refonte, DDR-0021): a prominent "your turn"
+  /// headline when the table is waiting on ME, the plain status otherwise. The
+  /// text is still `_status` for auctions/votes (it names who it waits on), only
+  /// promoted to gold when I am one of the seats that must act.
+  Widget _turnPrompt(AppLocalizations t) {
+    final v = s.view;
+    final phase = v?.turn.type;
+    final everyoneActs = phase == 'blind_auction' || phase == 'bribe_vote';
+    final mine = v != null && !v.finished && (s.myTurn || everyoneActs);
+    final text =
+        (mine && s.myTurn && !everyoneActs) ? t.statusYourTurn : _status(t);
+    return Row(children: [
+      if (mine) ...[
+        const Icon(Icons.play_circle_fill, size: 16, color: Pc.gold),
+        const SizedBox(width: Pc.s6),
+      ],
+      Expanded(
+        child: Text(text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: PcText.rowTitle.copyWith(
+                color: mine ? Pc.gold : Pc.text,
+                fontWeight: mine ? FontWeight.w800 : FontWeight.w600)),
+      ),
+    ]);
   }
 
   String _status(AppLocalizations t) {

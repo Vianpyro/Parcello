@@ -7,6 +7,7 @@ import 'package:parcello_client/l10n/app_localizations.dart';
 import 'package:parcello_client/l10n/app_localizations_en.dart';
 import 'package:parcello_client/main.dart';
 import 'package:parcello_client/ui/menu/menu_screen.dart';
+import 'package:parcello_client/ui/menu/private_table_card.dart';
 import 'package:parcello_client/ui/menu/rules_screen.dart';
 import 'package:parcello_client/protocol.dart';
 import 'package:parcello_client/session.dart';
@@ -228,15 +229,16 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    final card =
-        find.ancestor(of: find.text('Private table'), matching: find.byType(Card));
+    // The card migrated from a Material `Card` to a ClipRRect+Material shell
+    // (DS pass); anchor on the widget itself so the finder survives the skin.
+    final card = find.byType(PrivateTableCard);
     // Collapsed it matches a menu tile exactly, so the grid row lines up.
-    expect(tester.getSize(card.first).height, 150);
+    expect(tester.getSize(card).height, 150);
 
     // Opening a sub-action grows the card in place - it is not a modal.
     await tester.tap(find.text('Join'));
     await tester.pumpAndSettle();
-    expect(tester.getSize(card.first).height, greaterThan(150));
+    expect(tester.getSize(card).height, greaterThan(150));
   });
 
   testWidgets('rules screen lists the core sections', (tester) async {

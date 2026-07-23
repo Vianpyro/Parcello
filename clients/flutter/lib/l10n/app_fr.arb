@@ -264,6 +264,7 @@
   "navMenu": "Menu",
   "navObjectives": "Objectifs",
   "navHistory": "Historique",
+  "statusYourTurn": "À vous de jouer",
   "logError": "Erreur : {message}",
 
   "evtTurnStarted": "--- Tour de {player} ---",
