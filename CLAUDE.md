@@ -166,8 +166,14 @@ server+CLI binaries (linux x64/arm64, windows, macos arm64; `mods/`
 bundled), Flutter client bundles (windows/linux/macos), all-in-one
 archives for windows and linux (client + server, Steam-depot-shaped; the
 linux one also fits the Steam Deck), and a GHCR image
-(`ghcr.io/<owner>/parcello-server`, amd64). Keep the pubspec version in
-step. The release goes live only after all binary jobs succeed
+(`ghcr.io/<owner>/parcello-server`, amd64). `Cargo.toml`'s workspace
+`version` is the SINGLE source of truth; the Flutter client stamps it by
+injecting it at build time -
+`--dart-define=PARCELLO_VERSION="$(clients/flutter/tool/cargo_version.sh)"` on
+every `flutter build` (the same transport as the git SHA), read as a const in
+`lib/version.dart`. `pubspec.yaml`'s `version` is a placeholder Flutter
+requires - never hand-edit it, nothing reads it for display. The release goes
+live only after all binary jobs succeed
 (draft-then-publish); the docker job is independent. Binaries use the
 size/perf `[profile.release]` (LTO, codegen-units=1, strip). A `checksums`
 job runs between the binary jobs and publish: it asserts all nine expected

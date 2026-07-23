@@ -21,4 +21,12 @@ void main() {
   test('versionLabel trims whitespace/newlines around the injected sha', () {
     expect(versionLabel('0.22.1', gitSha: ' 619a2f3\n'), 'v0.22.1 (619a2f3)');
   });
+
+  test('appVersionLabel falls back to a dev marker without a build-time define',
+      () {
+    // Unit tests run without --dart-define, so PARCELLO_VERSION is empty and
+    // the label shows the dev marker rather than a bare or blank version.
+    expect(appVersion, isEmpty);
+    expect(appVersionLabel(), 'v0.0.0-dev');
+  });
 }

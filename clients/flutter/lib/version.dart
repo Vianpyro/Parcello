@@ -1,23 +1,28 @@
-/// The build's version token, shown in the main menu footer.
+/// The build's version token, shown in the app's version footer (menu and
+/// connect screens).
 ///
-/// The version string has a single source of truth - `pubspec.yaml` (kept in
-/// step with the Cargo workspace version, the release contract in
-/// `.github/workflows/release.yml`) - read at runtime via `package_info_plus`.
-/// Nothing here hardcodes it, so the label can never drift from the shipped
-/// build.
+/// Single source of truth: the workspace `version` in the root `Cargo.toml`.
+/// It is injected at build time via `--dart-define=PARCELLO_VERSION=...` (by
+/// every build path, from `tool/cargo_version.sh`) and read here as a
+/// compile-time constant - the exact same transport as the git SHA below. This
+/// is NOT a second source: pubspec.yaml carries only the fixed placeholder
+/// Flutter requires, never a real version. There is no runtime platform lookup
+/// and no `package_info`, so the label is identical on every platform (desktop
+/// and web) and can never drift from the shipped build.
 library;
 
-import 'package:package_info_plus/package_info_plus.dart';
-
-/// Length of the abbreviated commit shown to players (git's conventional
-/// short form).
+/// Length of the abbreviated commit shown to players (git's short form).
 const int _shaDisplayLen = 7;
+
+/// The release version, injected from Cargo.toml at build time
+/// (`--dart-define=PARCELLO_VERSION=...`). Empty for a plain `flutter run` that
+/// did not pass it - the label then shows a `0.0.0-dev` marker.
+const String appVersion = String.fromEnvironment('PARCELLO_VERSION');
 
 /// The commit baked in at build time via
 /// `--dart-define=PARCELLO_GIT_SHA=...` (CI passes the release commit; see the
-/// Flutter workflows). Empty for a plain `flutter run`/`flutter build` that did
-/// not provide it - the label then falls back to the bare version, never a
-/// placeholder.
+/// Flutter workflows). Empty for a build that did not provide it - the label
+/// then falls back to the bare version, never a placeholder.
 const String appGitSha = String.fromEnvironment('PARCELLO_GIT_SHA');
 
 /// Pure: the version token to display. `v1.2.3` normally, or
@@ -32,9 +37,7 @@ String versionLabel(String version, {String gitSha = appGitSha}) {
   return '$base ($short)';
 }
 
-/// Reads the app version from the platform bundle (derived from `pubspec.yaml`)
-/// and formats it with the optional baked-in commit.
-Future<String> loadVersionLabel() async {
-  final info = await PackageInfo.fromPlatform();
-  return versionLabel(info.version);
-}
+/// The label to display, from the build-time constants. Falls back to a
+/// `0.0.0-dev` marker when no version was injected (a local `flutter run`).
+String appVersionLabel() =>
+    versionLabel(appVersion.trim().isEmpty ? '0.0.0-dev' : appVersion);

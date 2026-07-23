@@ -1,9 +1,14 @@
 name: Release
 
-# One release stream: the workspace version in Cargo.toml names the release
-# (tag vX.Y.Z). Bumping it on main creates the release and attaches every
-# artifact; keep clients/flutter/pubspec.yaml in step (it stamps the exe).
-# Re-pushing without a bump is a no-op: the tag already exists.
+# One release stream: the workspace version in Cargo.toml is the SINGLE source
+# of truth. Bumping it on main creates the release (tag vX.Y.Z) and attaches
+# every artifact. The Flutter client stamps that same version by injecting it at
+# build time - every `flutter build` below passes
+# --dart-define=PARCELLO_VERSION="$(clients/flutter/tool/cargo_version.sh)"
+# (the same transport as the git SHA), read as a const in lib/version.dart.
+# clients/flutter/pubspec.yaml holds only a placeholder Flutter requires - it is
+# never hand-maintained and nothing reads it for display. Re-pushing without a
+# bump is a no-op: the tag already exists.
 
 on:
   push:
@@ -32,7 +37,8 @@ jobs:
       - uses: actions/checkout@v7
       - id: check
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          # Single extraction point: the same tool every build path uses.
+          version=$(clients/flutter/tool/cargo_version.sh)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if git ls-remote --exit-code origin "refs/tags/v$version" > /dev/null; then
             echo "release=false" >> "$GITHUB_OUTPUT"
@@ -65,7 +71,9 @@ jobs:
         with:
           channel: stable
           cache: true
-      - run: flutter build web --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
+      # Version + SHA are injected together (the version job derived it from
+      # Cargo.toml); lib/version.dart reads them as compile-time constants.
+      - run: flutter build web --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }} --dart-define=PARCELLO_VERSION=${{ needs.version.outputs.version }}
         working-directory: clients/flutter
       - uses: actions/upload-artifact@v7
         with:
@@ -167,15 +175,15 @@ jobs:
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - name: build (windows)
         if: runner.os == 'Windows'
-        run: flutter build windows --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
+        run: flutter build windows --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }} --dart-define=PARCELLO_VERSION=${{ needs.version.outputs.version }}
         working-directory: clients/flutter
       - name: build (linux)
         if: runner.os == 'Linux'
-        run: flutter build linux --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
+        run: flutter build linux --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }} --dart-define=PARCELLO_VERSION=${{ needs.version.outputs.version }}
         working-directory: clients/flutter
       - name: build (macos)
         if: runner.os == 'macOS'
-        run: flutter build macos --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
+        run: flutter build macos --release --dart-define=PARCELLO_GIT_SHA=${{ github.sha }} --dart-define=PARCELLO_VERSION=${{ needs.version.outputs.version }}
         working-directory: clients/flutter
       - name: package (windows)
         if: runner.os == 'Windows'

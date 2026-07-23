@@ -11,8 +11,8 @@ import '../../server_manager.dart';
 import '../../session.dart';
 import '../../tokens.dart';
 import '../../typography.dart';
-import '../../version.dart';
 import '../language_button.dart';
+import '../version_footer.dart';
 import 'geometry.dart';
 import '../showcase/showcase_screen.dart';
 import 'menu_tile.dart';
@@ -125,39 +125,12 @@ class _MenuScreenState extends State<MenuScreen> {
                   wide: false,
                 ),
                 const SizedBox(height: Pc.s8),
-                const _VersionFooter(),
+                const VersionFooter(),
               ],
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-/// The build's version (and short commit when baked in) as a muted footer
-/// line - the app has no settings/about surface, so the menu is its home.
-/// Reads once via package_info; renders nothing until resolved and never
-/// crashes if the platform channel is unavailable (e.g. widget tests).
-class _VersionFooter extends StatefulWidget {
-  const _VersionFooter();
-
-  @override
-  State<_VersionFooter> createState() => _VersionFooterState();
-}
-
-class _VersionFooterState extends State<_VersionFooter> {
-  late final Future<String> _label = loadVersionLabel();
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<String>(
-      future: _label,
-      builder: (context, snap) {
-        if (!snap.hasData) return const SizedBox.shrink();
-        return Text(snap.data!,
-            style: PcText.label.copyWith(color: Pc.textMuted));
-      },
     );
   }
 }

@@ -60,9 +60,10 @@ jobs:
       - run: flutter pub get
 
       # Build with source maps so tool/analyze_size.py can attribute main.dart.js
-      # to Dart libraries. --dart-define mirrors flutter.yml.
+      # to Dart libraries. --dart-define mirrors flutter.yml (version from the
+      # single source, Cargo.toml, via tool/cargo_version.sh).
       - name: Build web (release, source maps)
-        run: flutter build web --release --source-maps --dart-define=PARCELLO_GIT_SHA=${{ github.sha }}
+        run: flutter build web --release --source-maps --dart-define=PARCELLO_GIT_SHA=${{ github.sha }} --dart-define=PARCELLO_VERSION="$(tool/cargo_version.sh)"
 
       # Web equivalent of `flutter build web --analyze-size` (which is AOT-only):
       # per-asset raw/gzip/Brotli, category rollup, first-load, library attribution.

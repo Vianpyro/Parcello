@@ -18,6 +18,7 @@ import '../session.dart';
 import '../tokens.dart';
 import '../typography.dart';
 import 'language_button.dart';
+import 'version_footer.dart';
 
 /// The pre-filled server URL. A community server (ADR-0025) serves its own
 /// Flutter Web build, so on web the WebSocket lives at the page's own origin -
@@ -301,6 +302,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   Text(s.loginMessage,
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: Pc.textMuted)),
+                  // Version visible before sign-in too (same footer as the
+                  // menu, one implementation - see ui/version_footer.dart).
+                  const SizedBox(height: Pc.s16),
+                  const Center(child: VersionFooter()),
                 ],
               ),
             ),

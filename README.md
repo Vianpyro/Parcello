@@ -244,9 +244,13 @@ all-in-one archives (client + server together) for Windows and Linux (the
 Linux one fits the Steam Deck), attaches everything to an auto-generated
 GitHub release, and pushes the server image to GHCR (`vX.Y.Z` + `latest`,
 linux/amd64 - it builds its own Flutter Web client in a self-contained
-Docker stage, ADR-0025). Keep `clients/flutter/pubspec.yaml`'s version in
-step - it stamps the client executable. Re-pushing without a bump is a
-no-op. All dependency licenses are permissive (checked with cargo-license),
+Docker stage, ADR-0025). `Cargo.toml`'s workspace `version` is the single
+source of truth: every `flutter build` injects it with
+`--dart-define=PARCELLO_VERSION="$(clients/flutter/tool/cargo_version.sh)"`
+(the same build-time transport as the git SHA), read as a const in
+`lib/version.dart`, so the client stamps the same number on every platform.
+`clients/flutter/pubspec.yaml`'s `version` is only a placeholder Flutter
+requires - never hand-edit it. Re-pushing without a bump is a no-op. All dependency licenses are permissive (checked with cargo-license),
 so commercial distribution is unencumbered. Release binaries are built with
 the `[profile.release]` in `Cargo.toml` (full LTO, one codegen unit,
 symbols stripped) for the smallest, fastest artifacts.

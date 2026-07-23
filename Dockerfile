@@ -19,10 +19,18 @@ RUN curl -fsSLO "https://storage.googleapis.com/flutter_infra_release/releases/s
 ENV PATH="/opt/flutter/bin:${PATH}"
 WORKDIR /app/clients/flutter
 COPY clients/flutter .
+# The version comes from Cargo.toml (the single source); inject it into the web
+# build exactly as release.yml does, via tool/cargo_version.sh. PARCELLO_CARGO_TOML
+# points at the file copied here, since this stage has no repo root. (Git SHA is
+# left out: this stage has no git context, so the footer shows the bare version -
+# see release.yml/web for the SHA-stamped build that ships in the release tarballs.)
+COPY Cargo.toml /app/Cargo.toml
 # Optional: bake a default OIDC issuer into the web build so hosted players see
 # it pre-filled. Empty leaves the generic 'https://' default (connect_screen.dart).
 ARG PARCELLO_DEFAULT_ISSUER=
-RUN flutter build web --release \
+RUN VERSION="$(PARCELLO_CARGO_TOML=/app/Cargo.toml bash tool/cargo_version.sh)" \
+    && flutter build web --release \
+      --dart-define=PARCELLO_VERSION="$VERSION" \
       ${PARCELLO_DEFAULT_ISSUER:+--dart-define=PARCELLO_DEFAULT_ISSUER="${PARCELLO_DEFAULT_ISSUER}"}
 
 FROM rust:1.96-slim AS build

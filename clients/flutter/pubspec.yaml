@@ -1,7 +1,12 @@
 name: parcello_client
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.22.1+1
+# PLACEHOLDER only - Flutter requires a `version:`, but this is NOT the app's
+# version. The real one is the workspace version in the root Cargo.toml (the
+# single source of truth), injected at build time via
+# --dart-define=PARCELLO_VERSION (tool/cargo_version.sh) and read as a const in
+# lib/version.dart. Do not bump this by hand; nothing reads it for display.
+version: 0.0.0+1
 
 environment:
   sdk: ^3.12.2
@@ -15,7 +20,6 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   intl: any
-  package_info_plus: ^8.0.0
   web: ^1.1.0
   web_socket_channel: ^3.0.3
   # audioplayers: sound-effect playback (assets/sfx/). Present but not wired
@@ -23,9 +27,6 @@ dependencies:
   # http: portable HTTP client (OIDC discovery/token exchange, web+native).
   # web: browser bindings (OIDC popup flow, local storage) - web target only,
   # unused on native builds but harmless to depend on everywhere.
-  # package_info_plus: reads the app version from the platform bundle (derived
-  # from this file's `version`, the single source of truth) for the menu
-  # footer - see lib/version.dart.
 
 dev_dependencies:
   flutter_test:
