@@ -71,9 +71,11 @@ class GameSession extends ChangeNotifier {
   GameContent? content;
   ClientView? view;
   List<SeatInfo> seats = [];
+
   /// Current room settings (timers + rules, ADR-0015); the host edits them
   /// in the lobby. Null before the first Joined/Lobby message.
   RoomSettings? settings;
+
   /// Localizations for the event log, set by the widget tree (which has a
   /// BuildContext) on every frame - see ParcelloApp. Non-null from the first
   /// rendered frame, i.e. before any server message is ever processed.
@@ -147,7 +149,9 @@ class GameSession extends ChangeNotifier {
     final v = view;
     final acting = v?.players.elementAtOrNull(v.current);
     final jailedDeciding = acting?.inJail == true && acting?.jailRoute == null;
-    return jailedDeciding && base < _jailDecisionSecs ? _jailDecisionSecs : base;
+    return jailedDeciding && base < _jailDecisionSecs
+        ? _jailDecisionSecs
+        : base;
   }
 
   /// Personal time bank in seconds (ADR-0023); null when off. `banks` is the
@@ -221,12 +225,22 @@ class GameSession extends ChangeNotifier {
 
   bool get myTurn => view != null && seat != null && view!.current == seat;
 
+  /// Whether resigning is currently a meaningful action: an active game
+  /// exists, it is not over, I hold a seat (a spectator has none, ADR-0035),
+  /// and I am not already bankrupt (nothing left to forfeit).
+  bool get canResign =>
+      view != null &&
+      !view!.finished &&
+      seat != null &&
+      !view!.players[seat!].bankrupt;
+
   String playerName(int i) =>
       view?.players.elementAtOrNull(i)?.name ??
       seats.elementAtOrNull(i)?.name ??
       'seat $i';
 
-  String tileName(int i) => content?.board.elementAtOrNull(i)?.name ?? 'tile $i';
+  String tileName(int i) =>
+      content?.board.elementAtOrNull(i)?.name ?? 'tile $i';
 
   /// Opens the socket to `url` and remembers the identity (guest `name`, or
   /// an OIDC `token`, ADR-0009). Does NOT enter a room - create/join happen
@@ -255,25 +269,27 @@ class GameSession extends ChangeNotifier {
       },
     );
     // Only reveal the menu once the socket is actually up.
-    ws.ready.then((_) {
-      connected = true;
-      loginMessage = '';
-      notifyListeners();
-    }).catchError((Object e) {
-      loginMessage = 'Cannot reach server: $e';
-      _onClosed();
-    });
+    ws.ready
+        .then((_) {
+          connected = true;
+          loginMessage = '';
+          notifyListeners();
+        })
+        .catchError((Object e) {
+          loginMessage = 'Cannot reach server: $e';
+          _onClosed();
+        });
   }
 
   Map<String, dynamic> _auth(String code) => {
-        if (_authToken.isNotEmpty) ...{
-          'token': _authToken,
-          // Chosen in-game handle (ADR-0033); identity stays the token's sub.
-          if (_authName.isNotEmpty) 'display_name': _authName,
-        } else
-          'guest_name': _authName,
-        if (_reconnectTokens[code] != null) 'reconnect': _reconnectTokens[code],
-      };
+    if (_authToken.isNotEmpty) ...{
+      'token': _authToken,
+      // Chosen in-game handle (ADR-0033); identity stays the token's sub.
+      if (_authName.isNotEmpty) 'display_name': _authName,
+    } else
+      'guest_name': _authName,
+    if (_reconnectTokens[code] != null) 'reconnect': _reconnectTokens[code],
+  };
 
   /// Mod ids the connected server can resolve; null until it answers
   /// `list_mods`. Feeds the create-room mod picker so nobody types ids.
@@ -290,11 +306,13 @@ class GameSession extends ChangeNotifier {
 
   /// Host a new private room. `mods` picks its mod set (ADR-0006).
   void createGame({List<String> mods = const []}) {
-    _ws?.sink.add(jsonEncode({
-      'type': 'create',
-      'auth': _auth(''),
-      if (mods.isNotEmpty) 'mods': mods,
-    }));
+    _ws?.sink.add(
+      jsonEncode({
+        'type': 'create',
+        'auth': _auth(''),
+        if (mods.isNotEmpty) 'mods': mods,
+      }),
+    );
   }
 
   /// Join a private room by its 5-letter code.
@@ -373,8 +391,9 @@ class GameSession extends ChangeNotifier {
 
   void sendCmd(Map<String, dynamic> cmd) {
     final id = cmd['tile'] as String?;
-    final i =
-        id == null ? -1 : (content?.board.indexWhere((t) => t.id == id) ?? -1);
+    final i = id == null
+        ? -1
+        : (content?.board.indexWhere((t) => t.id == id) ?? -1);
     _lastCmdTile = i < 0 ? null : i;
     _ws?.sink.add(jsonEncode({'type': 'cmd', 'cmd': cmd}));
   }
@@ -399,11 +418,13 @@ class GameSession extends ChangeNotifier {
 
   /// Post-game survey answer; `rating` 1-5, empty comment omitted.
   void sendFeedback(int rating, String comment) {
-    _ws?.sink.add(jsonEncode({
-      'type': 'feedback',
-      'rating': rating,
-      if (comment.trim().isNotEmpty) 'comment': comment.trim(),
-    }));
+    _ws?.sink.add(
+      jsonEncode({
+        'type': 'feedback',
+        'rating': rating,
+        if (comment.trim().isNotEmpty) 'comment': comment.trim(),
+      }),
+    );
     feedbackDone = true;
     notifyListeners();
   }
@@ -425,7 +446,9 @@ class GameSession extends ChangeNotifier {
         spectating = false;
         content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
         seats = _seatList(msg['players']);
-        settings = RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
+        settings = RoomSettings.fromJson(
+          msg['settings'] as Map<String, dynamic>,
+        );
         if (msg['reconnect'] != null) {
           _saveToken(code!, msg['reconnect'] as String);
         }
@@ -455,8 +478,9 @@ class GameSession extends ChangeNotifier {
         spectating = true;
         content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
         seats = _seatList(msg['players']);
-        settings =
-            RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
+        settings = RoomSettings.fromJson(
+          msg['settings'] as Map<String, dynamic>,
+        );
         if (msg['view'] != null) {
           view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         }
@@ -474,7 +498,9 @@ class GameSession extends ChangeNotifier {
         final incoming = _seatList(msg['players']);
         _announceSeatChanges(incoming);
         seats = incoming;
-        settings = RoomSettings.fromJson(msg['settings'] as Map<String, dynamic>);
+        settings = RoomSettings.fromJson(
+          msg['settings'] as Map<String, dynamic>,
+        );
       case 'game_started':
         view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
         _resetDirector();
@@ -532,18 +558,18 @@ class GameSession extends ChangeNotifier {
   /// from the *stage*, not the view: a beat animates from where the pawn
   /// visually is, which mid-chain is not where the server says it ended up.
   CompileCtx _ctx() => CompileCtx(
-        boardLen: content?.board.length ?? 0,
-        jailTile: content?.board.indexWhere((t) => t.kind == 'jail') ?? -1,
-        mySeat: seat,
-        positions: Map.of(stage.pawnAt),
-        tileName: tileName,
-        playerName: playerName,
-        // The beats that carry text (win / bankruptcy / market / spotlight)
-        // localize through this; `l10n` is set every frame, EN is only the
-        // pre-first-frame fallback (the same language the beats used to bake).
-        loc: l10n ?? AppLocalizationsEn(),
-        profile: stage.profile,
-      );
+    boardLen: content?.board.length ?? 0,
+    jailTile: content?.board.indexWhere((t) => t.kind == 'jail') ?? -1,
+    mySeat: seat,
+    positions: Map.of(stage.pawnAt),
+    tileName: tileName,
+    playerName: playerName,
+    // The beats that carry text (win / bankruptcy / market / spotlight)
+    // localize through this; `l10n` is set every frame, EN is only the
+    // pre-first-frame fallback (the same language the beats used to bake).
+    loc: l10n ?? AppLocalizationsEn(),
+    profile: stage.profile,
+  );
 
   /// Plays one Update: compile the whole burst into a plan, play it, apply the
   /// authoritative view, ack.
@@ -558,8 +584,15 @@ class GameSession extends ChangeNotifier {
     final events = (msg['events'] as List).cast<Map<String, dynamic>>();
     if (l10n case final loc?) {
       for (final e in events) {
-        _log(describeEvent(e, loc, playerName, tileName,
-            content?.marketEventName ?? (id) => id));
+        _log(
+          describeEvent(
+            e,
+            loc,
+            playerName,
+            tileName,
+            content?.marketEventName ?? (id) => id,
+          ),
+        );
       }
     }
 
@@ -569,7 +602,7 @@ class GameSession extends ChangeNotifier {
     }
 
     final oldVp = [
-      for (final p in view?.players ?? const <PlayerView>[]) p.victoryPoints
+      for (final p in view?.players ?? const <PlayerView>[]) p.victoryPoints,
     ];
     view = ClientView.fromJson(msg['view'] as Map<String, dynamic>);
     stage.syncPositions([for (final p in view!.players) p.position]);
@@ -578,11 +611,13 @@ class GameSession extends ChangeNotifier {
     // left behind: an open window keeps its tile lifted and the board receded
     // for as long as the player is still deciding, and everything else clears.
     final turn = view!.turn;
-    stage.settle(decisionTile: switch (turn.type) {
-      'blind_auction' => turn.tile,
-      'bribe_vote' => stage.pawnAt[turn.briber ?? -1],
-      _ => null,
-    });
+    stage.settle(
+      decisionTile: switch (turn.type) {
+        'blind_auction' => turn.tile,
+        'bribe_vote' => stage.pawnAt[turn.briber ?? -1],
+        _ => null,
+      },
+    );
 
     // Victory points settle once the authoritative totals land: the aggregate
     // diff covers every source at once (groups won and lost, conglomerates,
@@ -679,7 +714,9 @@ class GameSession extends ChangeNotifier {
     _updateEpoch++;
     _pendingUpdates.clear();
     _animating = false;
-    stage.reset([for (final p in view?.players ?? const <PlayerView>[]) p.position]);
+    stage.reset([
+      for (final p in view?.players ?? const <PlayerView>[]) p.position,
+    ]);
   }
 
   DateTime? _deadlineFrom(dynamic secs) =>

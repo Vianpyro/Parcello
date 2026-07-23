@@ -1,12 +1,13 @@
-/// The right-hand column: seats, room, trades, and the end-of-game cards.
+/// The right-hand column: room, property, trades, and the end-of-game cards.
 /// It scrolls because it grows with the room (six offers overflow a Deck).
+/// Resign is NOT here - it moved to NavRail's Menu (game-screen refonte),
+/// gated on `GameSession.canResign`.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../design/components/pc_button.dart';
 import '../../design/components/pc_card.dart';
-import '../../design/components/pc_dialog.dart';
 import '../../l10n/app_localizations.dart';
 import '../../session.dart';
 import '../../sfx.dart';
@@ -208,34 +209,8 @@ class SidePanel extends StatelessWidget {
         // submission would only bounce off the server (ADR-0035).
         if (s.view?.finished == true && !s.feedbackDone && !s.spectating)
           FeedbackCard(s: s),
-        // The resign TRIGGER stays a bespoke restrained outlined-oxblood button:
-        // PcButton has no "outlined destructive" variant (destructive is filled
-        // red, too loud for an always-visible control) - a documented gap
-        // (DESIGN_FEEDBACK #3). The CONFIRM step, however, is a PcDialog.
-        PcCard(
-          child: hoverSfx(
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(foregroundColor: Pc.oxblood),
-              onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => PcDialog(
-                    title: t.resignConfirmTitle,
-                    cancelLabel: t.cancel,
-                    primaryLabel: t.resign,
-                    destructive: true,
-                    onPrimary: () {
-                      sfx.buttonYes();
-                      Navigator.pop(ctx, true);
-                    },
-                  ),
-                );
-                if (ok == true) s.sendCmd({'type': 'resign'});
-              },
-              child: Text(t.resign),
-            ),
-          ),
-        ),
+        // Resign lives only in NavRail's Menu now (gated on `s.canResign`) -
+        // this panel no longer duplicates the trigger or the confirm flow.
       ],
     );
   }
@@ -318,7 +293,3 @@ class SidePanel extends StatelessWidget {
     );
   }
 }
-
-/// One seat's sealed bid, revealed (ADR-0018). Flips up on the seat marker, in
-/// the same instant as everyone else's, and holds - the hold is what makes a
-/// simultaneous decision comparable, which is the whole point of showing it.
