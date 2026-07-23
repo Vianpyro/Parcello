@@ -1,57 +1,55 @@
-# Audit — dette H1 : miroir Dart manuel du protocole (drift silencieux)
+# Audit — debt H1: manual Dart mirror of the protocol (silent drift)
 
-Statut : **document de travail, non validé**. Rien n'a été implémenté. Objectif :
-poser un état des lieux complet et argumenter un choix de stratégie avant toute
-modification de code. Rédigé en français pour coller à la demande ; à traduire
-en anglais avant fusion dans `docs/` si une stratégie est retenue (le reste du
-dossier est en anglais).
+Status: **working document, not yet validated**. Nothing has been implemented.
+Goal: lay out a complete state of play and argue for a strategy before any code
+change. Originally drafted in French per the request; translated to English so
+it can live in `docs/` (the rest of the tree is in English).
 
-Périmètre inspecté : `crates/protocol/src/lib.rs`, `crates/engine/src/{command,event,error,content,view,state}.rs`,
+Scope inspected: `crates/protocol/src/lib.rs`, `crates/engine/src/{command,event,error,content,view,state}.rs`,
 `crates/mods/src/{loader,manifest}.rs`, `clients/flutter/lib/{protocol,session,director,motion}.dart`
-et tous les sites d'appel de `sendCmd(...)` dans `clients/flutter/lib/ui/**`,
-`crates/cli/src/*.rs` (comme point de comparaison), `.github/workflows/{ci,flutter}.yml`.
+and every call site of `sendCmd(...)` under `clients/flutter/lib/ui/**`,
+`crates/cli/src/*.rs` (as a comparison point), `.github/workflows/{ci,flutter}.yml`.
 
 ---
 
-## 1. Résumé exécutif
+## 1. Executive summary
 
-Le protocole réseau (`ClientMessage`/`ServerMessage`/`CommandKind`/`Event`/
-`CommandError`/toutes les structures de vue) est défini **une seule fois en
-Rust**, dans `crates/protocol` et `crates/engine`. Le client CLI Rust
-(`crates/cli`) importe ces types directement — zéro duplication, zéro risque de
-drift, le compilateur casse toute divergence.
+The network protocol (`ClientMessage`/`ServerMessage`/`CommandKind`/`Event`/
+`CommandError`/all view structures) is defined **exactly once, in Rust**,
+inside `crates/protocol` and `crates/engine`. The Rust CLI client
+(`crates/cli`) imports these types directly — zero duplication, zero drift
+risk, the compiler breaks on any divergence.
 
-Le client Flutter, lui, ne peut pas importer du Rust : il **réécrit à la main**
-la totalité de ces formes en Dart. Ce n'est pas une seule duplication, mais un
-faisceau d'au moins **six mécanismes de duplication indépendants** (détaillés
-section 2), plus un **trou concret dans la CI** qui transforme cette duplication
-en drift *réellement* silencieux : un changement du protocole côté Rust qui ne
-touche pas `clients/flutter/**` ne déclenche aujourd'hui **aucun job Flutter**
-(`flutter.yml` est filtré sur ce chemin ; `ci.yml` l'ignore explicitement en
-retour). Une variante `Event` renommée, un champ ajouté sur `ClientView`, une
-constante de timing changée : tout cela peut être mergé sur `main`, vert de bout
-en bout, sans qu'aucun test ne l'ait vu passer sous les yeux du client Flutter.
+The Flutter client, on the other hand, cannot import Rust: it **hand-rewrites**
+every one of these shapes in Dart. That is not a single duplication but a
+cluster of at least **six independent duplication mechanisms** (detailed in
+section 2), plus a **concrete CI gap** that turns this duplication into
+*genuinely* silent drift: a Rust-side protocol change that doesn't touch
+`clients/flutter/**` today triggers **no Flutter job at all**
+(`flutter.yml` is filtered on that path; `ci.yml` explicitly ignores it in
+return). A renamed `Event` variant, a field added to `ClientView`, a changed
+timing constant: all of that can merge to `main`, green end to end, without a
+single test ever having run it past the Flutter client's eyes.
 
-La duplication n'est donc pas seulement un problème de confort de
-maintenance : c'est un problème de **détection**. Le cœur du problème n'est pas
-« on retape le même code deux fois », c'est « rien ne dit jamais que les deux
-copies ont divergé ».
+The duplication is therefore not just a maintenance-comfort problem: it is a
+**detection** problem. The core issue isn't "the same code is retyped twice",
+it's "nothing ever says the two copies have diverged".
 
 ---
 
-## 2. Inventaire complet des duplications
+## 2. Full inventory of duplications
 
-### 2.1 Messages client → serveur (`ClientMessage`, 17 variantes)
+### 2.1 Client → server messages (`ClientMessage`, 17 variants)
 
-Rust (`crates/protocol/src/lib.rs:62-150`) définit un enum externally-tagged
-(`#[serde(tag = "type", rename_all = "snake_case")]`) avec 17 variantes :
+Rust (`crates/protocol/src/lib.rs:62-150`) defines an externally-tagged enum
+(`#[serde(tag = "type", rename_all = "snake_case")]`) with 17 variants:
 `Create`, `Join`, `Spectate`, `AddBot`, `RemoveBot`, `Configure`, `Start`,
 `PlayAgain`, `Leave`, `Cmd`, `Feedback`, `AnimationDone`, `ListMods`,
 `QueueRanked`, `CancelQueue`, `GetRating`, `Ping`.
 
-Côté Dart, **il n'existe aucun type miroir**. `GameSession` (session.dart)
-construit chaque message comme un `Map<String, dynamic>` littéral encodé à la
-volée :
+On the Dart side, **no mirror type exists at all**. `GameSession`
+(session.dart) builds every message as a literal `Map<String, dynamic>`
+encoded on the fly:
 
 ```dart
 _ws?.sink.add(jsonEncode({'type': 'create', 'auth': _auth(''), if (mods.isNotEmpty) 'mods': mods}));
@@ -59,47 +57,47 @@ _ws?.sink.add(jsonEncode({'type': 'join', 'code': c, 'auth': _auth(c)}));
 _ws?.sink.add(jsonEncode({'type': 'cmd', 'cmd': cmd}));
 ```
 
-C'est donc un cran *en dessous* d'un miroir : même pas de classe Dart à tenir à
-jour, juste des chaînes littérales (`'type'`, noms de champs) répétées à chaque
-site d'appel. Rien ne garantit que `'type': 'add_bot'` correspond bien au tag
-`snake_case` que serde dérive de `AddBot` — la correspondance n'est vraie que
-par convention et par test (`client_message_wire_format_is_stable`, côté Rust
-seulement).
+So this is a notch *below* a mirror: there isn't even a Dart class to keep in
+sync, just literal strings (`'type'`, field names) repeated at every call
+site. Nothing guarantees that `'type': 'add_bot'` actually matches the
+`snake_case` tag serde derives from `AddBot` — the correspondence holds only
+by convention and by test (`client_message_wire_format_is_stable`, Rust side
+only).
 
-### 2.2 Messages serveur → client (`ServerMessage`, 14 variantes)
+### 2.2 Server → client messages (`ServerMessage`, 14 variants)
 
-Symétrique : Rust définit `RoomCreated`, `Joined`, `Spectating`, `Lobby`,
+Symmetric case: Rust defines `RoomCreated`, `Joined`, `Spectating`, `Lobby`,
 `GameStarted`, `Update`, `Rejected`, `Error`, `Mods`, `Queued`, `MatchFound`,
-`Rating`, `RatingsUpdated`, `Pong`. Dart les décode via un unique `switch
-(msg['type'])` dans `GameSession._handle` (session.dart:416-511), avec accès
-champ par champ non typé (`msg['code'] as String`, `msg['view'] as
+`Rating`, `RatingsUpdated`, `Pong`. Dart decodes them via a single `switch
+(msg['type'])` in `GameSession._handle` (session.dart:416-511), with untyped
+field-by-field access (`msg['code'] as String`, `msg['view'] as
 Map<String, dynamic>?`).
 
-Point notable : **ce switch n'a pas de `default`**. Un type de message inconnu
-ne lève rien, ne logue rien — il tombe silencieusement au sol. C'est exactement
-le mécanisme qui rend une nouvelle variante `ServerMessage` ajoutée côté serveur
-invisible côté client tant que personne n'ajoute le `case` correspondant à la
-main.
+Notable point: **this switch has no `default`**. An unknown message type
+throws nothing, logs nothing — it silently falls on the floor. That is
+exactly the mechanism that makes a new `ServerMessage` variant added
+server-side invisible client-side until someone manually adds the matching
+`case`.
 
-Trois messages (`Queued`, `MatchFound`, `Rating`/`RatingsUpdated`, ADR-0034) ne
-sont **pas du tout consommés côté Flutter** — le roadmap du projet le confirme
-(« ranked menu greyed until a matchmaking service exists »). C'est une surface
-de miroir latente : le jour où le classement est câblé côté client, quatre
-nouvelles formes devront être ajoutées au miroir, avec le même risque.
+Three messages (`Queued`, `MatchFound`, `Rating`/`RatingsUpdated`, ADR-0034)
+are **not consumed by Flutter at all** — the project roadmap confirms this
+("ranked menu greyed until a matchmaking service exists"). That's a latent
+mirror surface: the day ranked is wired client-side, four new shapes will
+need to be added to the mirror, with the same risk.
 
-### 2.3 Commandes de jeu (`CommandKind`, 18 variantes) — la duplication la plus dangereuse
+### 2.3 Game commands (`CommandKind`, 18 variants) — the most dangerous duplication
 
-Rust (`crates/engine/src/command.rs`) : `PlayMovementCard`, `Build`,
+Rust (`crates/engine/src/command.rs`): `PlayMovementCard`, `Build`,
 `ProposeTrade`, `AcceptTrade`, `DeclineTrade`, `CancelTrade`,
 `SubmitBlindBid`, `SellHouse`, `Expropriate`, `BoostRent`, `Mortgage`,
 `Unmortgage`, `ChooseLegalRoute`, `OfferBribe`, `VoteOnBribe`, `Resign`,
 `EndTurn`, `UseJailCard`.
 
-Côté Dart, ces commandes sont construites comme des `Map` littéraux **dispersés
-dans six fichiers d'UI différents** (`ui/side/side_panel.dart`,
+On the Dart side, these commands are built as `Map` literals **scattered
+across six different UI files** (`ui/side/side_panel.dart`,
 `ui/side/trade_dialog.dart`, `ui/game/game_screen.dart`,
-`ui/game/actions_panel.dart`, `ui/game/nav_rail.dart`), chacun retapant le tag
-et les noms de champs :
+`ui/game/actions_panel.dart`, `ui/game/nav_rail.dart`), each one retyping the
+tag and field names:
 
 ```dart
 s.sendCmd({'type': 'build', 'tile': def.id});
@@ -107,387 +105,377 @@ s.sendCmd({'type': 'submit_blind_bid', 'amount': (int.tryParse(_bid.text) ?? 0).
 s.sendCmd({'type': 'choose_legal_route', 'order': _routeOrder});
 ```
 
-C'est la duplication structurellement la plus risquée du lot : il n'y a même
-pas un point de rassemblement (contrairement à 2.1 où tout passe au moins par
-`session.dart`). Un renommage de champ (`tile` → `tile_id`, par exemple) doit
-être retrouvé et corrigé dans cinq fichiers de widgets indépendamment, sans
-qu'aucun compilateur Dart ne s'en aperçoive — l'erreur ne se manifeste qu'au
-runtime, sous forme de `Rejected` silencieusement absorbé ou d'un comportement
-incorrect.
+This is the structurally riskiest duplication of the lot: there isn't even a
+single gathering point (unlike 2.1, where everything at least funnels through
+`session.dart`). A field rename (`tile` → `tile_id`, say) has to be found and
+fixed across five independent widget files, with no Dart compiler ever
+noticing — the error only surfaces at runtime, as a silently absorbed
+`Rejected` or incorrect behavior.
 
-### 2.4 Événements (`Event`, 44 variantes) — miroir dupliqué **deux fois** côté Dart
+### 2.4 Events (`Event`, 44 variants) — mirrored **twice** on the Dart side
 
-C'est le cas le plus intéressant : le même enum Rust est retranscrit **deux
-fois indépendamment** côté Dart, pour deux usages différents, avec deux niveaux
-de couverture différents :
+This is the most interesting case: the same Rust enum is retranscribed
+**twice independently** in Dart, for two different purposes, with two
+different levels of coverage:
 
-- `describeEvent()` (protocol.dart) — 44 `case` correspondant à peu près à
-  toutes les variantes, transforme l'événement en ligne de log localisée.
-- `_beatsFor()` (director.dart) — 29 `case` seulement, transforme l'événement
-  en séquence d'animations (ADR-0030).
+- `describeEvent()` (protocol.dart) — 44 `case`s covering roughly every
+  variant, turns the event into a localized log line.
+- `_beatsFor()` (director.dart) — only 29 `case`s, turns the event into an
+  animation sequence (ADR-0030).
 
-Les deux ont un comportement de repli **silencieux et différent** :
-- `describeEvent` : `default: return e.toString();` → une variante non gérée
-  s'affiche comme un dump Dart brut du `Map` JSON dans le log (moche mais
+Both have **silent and different** fallback behavior:
+- `describeEvent`: `default: return e.toString();` → an unhandled variant
+  shows up as a raw Dart dump of the JSON `Map` in the log (ugly but
   visible).
-- `_beatsFor` : `default: return const [];` (commentaire dans le code : *"P4:
-  never a beat"*) → une variante non gérée ne produit **aucune animation, sans
-  erreur, sans log**. Un nouvel `Event` ajouté côté Rust et jamais câblé côté
-  `director.dart` est un bug purement silencieux : le jeu continue de
-  fonctionner, l'état est correct, mais rien ne se passe visuellement à la
-  table pour cet événement précis.
+- `_beatsFor`: `default: return const [];` (code comment: *"P4: never a
+  beat"*) → an unhandled variant produces **no animation, no error, no
+  log**. A new `Event` added on the Rust side and never wired into
+  `director.dart` is a purely silent bug: the game keeps working, state stays
+  correct, but nothing visually happens at the table for that specific
+  event.
 
-Deux miroirs indépendants du même enum, avec deux taux de couverture
-différents (44 vs 29) : c'est la preuve la plus concrète que « le protocole est
-défini deux fois » comprise dans son énoncé le plus littéral — ici il est même
-défini *trois* fois en comptant le Rust.
+Two independent mirrors of the same enum, with two different coverage rates
+(44 vs 29): this is the most concrete proof of "the protocol is defined
+twice" taken in its most literal sense — here it's actually defined *three*
+times counting Rust.
 
-### 2.5 Erreurs de rejet (`CommandError`, 35 variantes)
+### 2.5 Rejection errors (`CommandError`, 35 variants)
 
-Rust (`crates/engine/src/error.rs`) : 35 variantes typées, sérialisées
+Rust (`crates/engine/src/error.rs`): 35 typed variants, serialized as
 `#[serde(tag = "code", rename_all = "snake_case")]`. Dart (`rejectReason()`,
-protocol.dart) : un switch de 35 `case` qui traduit chaque code en message
-localisé. Repli : `default: return code;` — un code non reconnu s'affiche tel
-quel (`"bid_below_floor"`) à l'utilisateur au lieu du texte localisé. Dégradation
-silencieuse mais moins grave (le joueur voit quelque chose, juste moche et non
-traduit) — comparable à D8 dans `docs/technical-debt.md`, mais jamais formalisé
-comme entrée de dette à ce jour.
+protocol.dart): a 35-case switch translating each code to a localized
+message. Fallback: `default: return code;` — an unrecognized code is shown
+as-is (`"bid_below_floor"`) to the user instead of localized text. Silent
+degradation, but a milder one (the player still sees something, just ugly
+and untranslated) — comparable to D8 in `docs/technical-debt.md`, but never
+formalized as a debt entry to date.
 
-### 2.6 Structures de données partagées (16 types mirrorés à la main)
+### 2.6 Shared data structures (16 types manually mirrored)
 
-Chacune de ces classes Dart porte un constructeur `.fromJson` écrit à la main,
-champ par champ, avec des casts non vérifiés (`j['x'] as int`, `as String?`) :
-`SeatInfo`, `TileDef`, `MarketEventDef`, `GameContent` (miroir de
+Each of these Dart classes carries a hand-written `.fromJson` constructor,
+field by field, with unchecked casts (`j['x'] as int`, `as String?`):
+`SeatInfo`, `TileDef`, `MarketEventDef`, `GameContent` (mirror of
 `ResolvedContent`/`ModInfo`), `RuleParams`, `RoomSettings`, `PlayerView`,
 `TileState`, `TurnPhase`, `TradeOffer`, `ScheduledEvent`, `ActiveMarketEvent`,
-`MarketForecast`, `Spotlight`, `ClientView`, `RatingChange` (non consommé
-aujourd'hui, cf. 2.2).
+`MarketForecast`, `Spotlight`, `ClientView`, `RatingChange` (not consumed
+today, see 2.2).
 
-Chaque champ Rust ajouté, renommé ou retypé sur `RuleParams`, `ClientView`,
-`PlayerView`, etc. doit être répercuté à la main sur son homologue Dart. Le
-cast `j['champ'] as int` ne « rate » pas silencieusement une absence de champ
-grâce aux `??` défensifs déjà présents partout — mais c'est une discipline
-appliquée manuellement à chaque ligne, pas une garantie structurelle.
+Every Rust field added, renamed, or retyped on `RuleParams`, `ClientView`,
+`PlayerView`, etc. has to be manually propagated to its Dart counterpart. The
+`j['field'] as int` cast doesn't silently "miss" an absent field, thanks to
+the defensive `??` fallbacks already present everywhere — but that's a
+discipline applied by hand at every line, not a structural guarantee.
 
-### 2.7 Constantes numériques dupliquées
+### 2.7 Duplicated numeric constants
 
-Recensées par grep croisé entre `crates/server/src/room.rs` et
-`clients/flutter/lib/*.dart` :
+Cross-checked by grepping `crates/server/src/room.rs` against
+`clients/flutter/lib/*.dart`:
 
-| Constante Rust | Valeur | Copie Dart | Fichier |
+| Rust constant | Value | Dart copy | File |
 |---|---|---|---|
 | `BID_WINDOW` (room.rs:62) | 12 s | `Duration(seconds: 12)` | session.dart:171 |
 | `VOTE_WINDOW` (room.rs:67) | 5 s | `Duration(seconds: 5)` | session.dart:174 |
 | `JAIL_DECISION_SECS` (room.rs:54) | 20 s | `_jailDecisionSecs = 20` | session.dart:137 |
-| `ANIM_ACK_CAP` (room.rs:81) | 10 s | budget des tiers d'animation (8s/6s/4s) | motion.dart, ADR-0030 |
+| `ANIM_ACK_CAP` (room.rs:81) | 10 s | animation-tier budget (8s/6s/4s) | motion.dart, ADR-0030 |
 
-Ce ne sont pas des valeurs protocolaires au sens strict (elles ne voyagent pas
-sur le fil), mais ce sont des **contrats temporels implicites** entre serveur
-et client : le commentaire de `session.dart:167` le dit lui-même — *« a local
-approximation of the server's window [...] not a precise mirror »*. Si le
-serveur change `BID_WINDOW`, rien ne casse à la compilation ni aux tests ; le
-client affiche juste un compte à rebours visuellement faux.
+These aren't protocol values in the strict sense (they never travel over the
+wire), but they are **implicit timing contracts** between server and client:
+the comment at `session.dart:167` says it itself — *"a local approximation of
+the server's window [...] not a precise mirror"*. If the server changes
+`BID_WINDOW`, nothing breaks at compile time or in tests; the client just
+shows a visually wrong countdown.
 
-À cela s'ajoutent deux formules déjà connues et documentées comme dette **D8**
-dans `docs/technical-debt.md` (`GameState::net_worth` vs `session.dart::netWorth()`,
-et `Exec::market_price` vs `protocol.dart::marketPrice()`) — ce sont des
-sous-cas du même problème général que H1, pas des dettes séparées à traiter en
-parallèle.
+On top of that, two formulas are already known and documented as debt **D8**
+in `docs/technical-debt.md` (`GameState::net_worth` vs
+`session.dart::netWorth()`, and `Exec::market_price` vs
+`protocol.dart::marketPrice()`) — these are sub-cases of the same general
+problem as H1, not separate debts to address in parallel.
 
-### 2.8 Sérialisation/désérialisation manuelles
+### 2.8 Manual serialization/deserialization
 
-Chaque `.fromJson` listé en 2.6, chaque `Map` construit à la main en 2.1/2.3,
-et l'unique point d'encodage `jsonEncode(...)` (pas de couche de sérialisation
-partagée) constituent la totalité de la couche de (dé)sérialisation Dart :
-entièrement écrite à la main, aucune génération, aucune validation de schéma à
-la réception. Une valeur du mauvais type envoyée par un serveur (bug, ou
-serveur tiers auto-hébergé légèrement en avance/retard de version) provoque un
-`TypeError` Dart non rattrapé au point de cast, pas une erreur de
-désérialisation propre.
+Every `.fromJson` listed in 2.6, every `Map` hand-built in 2.1/2.3, and the
+single encoding point `jsonEncode(...)` (no shared serialization layer)
+together make up the entire Dart (de)serialization layer: entirely
+hand-written, no generation, no schema validation on receipt. A wrong-typed
+value sent by a server (bug, or a self-hosted third-party server slightly
+ahead/behind on version) causes an uncaught Dart `TypeError` at the cast
+site, not a clean deserialization error.
 
-### 2.9 Le trou de CI qui rend tout ça silencieux
+### 2.9 The CI gap that makes all of this silent
 
-C'est la pièce manquante qui transforme une duplication ordinaire en dette
-**« drift silencieux »**, telle que nommée par l'énoncé :
+This is the missing piece that turns ordinary duplication into
+**"silent drift"** debt, exactly as named in the problem statement:
 
 ```yaml
 # .github/workflows/ci.yml (Rust)
 paths-ignore:
-  - "clients/flutter/**"   # ...entre autres
+  - "clients/flutter/**"   # ...among others
 
 # .github/workflows/flutter.yml
 paths:
-  - "clients/flutter/**"   # seul déclencheur
+  - "clients/flutter/**"   # sole trigger
 ```
 
-Une pull request qui modifie uniquement `crates/protocol/src/lib.rs` ou
-`crates/engine/src/{command,event,error}.rs` (ajout d'une variante, renommage
-d'un tag serde, ajout d'un champ) déclenche `ci.yml` et **jamais**
-`flutter.yml`. `flutter analyze`, `flutter test` et `flutter build web` ne
-tournent tout simplement pas. La PR peut être verte et mergée sans qu'aucun
-outil n'ait even *tenté* de compiler le code Dart qui référence potentiellement
-l'ancien tag.
+A pull request that only modifies `crates/protocol/src/lib.rs` or
+`crates/engine/src/{command,event,error}.rs` (adding a variant, renaming a
+serde tag, adding a field) triggers `ci.yml` and **never**
+`flutter.yml`. `flutter analyze`, `flutter test` and `flutter build web`
+simply don't run. The PR can be green and merged without any tool having
+even *attempted* to compile the Dart code that potentially references the
+old tag.
 
-Ce découplage de CI est un choix délibéré et documenté (commentaire dans
-`flutter.yml` : *"Rust-only changes never pay the Flutter SDK setup"*) —
-raisonnable en soi pour la vitesse de CI, mais qui a un angle mort exact sur le
-protocole partagé. **Toute stratégie retenue doit refermer ce trou**,
-indépendamment du mécanisme de duplication choisi par ailleurs.
+This CI decoupling is a deliberate, documented choice (comment in
+`flutter.yml`: *"Rust-only changes never pay the Flutter SDK setup"*) —
+reasonable on its own for CI speed, but it leaves an exact blind spot over
+the shared protocol. **Whichever strategy is chosen must close this gap**,
+independently of whatever duplication mechanism is picked otherwise.
 
-### 2.10 Récapitulatif chiffré
+### 2.10 Numeric summary
 
-| Catégorie | Variantes/champs Rust | Mécanisme Dart | Fichiers Dart concernés |
+| Category | Rust variants/fields | Dart mechanism | Dart files involved |
 |---|---|---|---|
-| `ClientMessage` | 17 | `Map` littéraux ad hoc, aucun type | session.dart + 5 fichiers UI |
-| `ServerMessage` | 14 | 1 switch sans `default` | session.dart |
-| `CommandKind` | 18 | `Map` littéraux ad hoc, aucun type | 5 fichiers UI |
-| `Event` | 44 | 2 switches indépendants (44 et 29 cas) | protocol.dart, director.dart |
-| `CommandError` | 35 | 1 switch, repli sur le code brut | protocol.dart |
-| Structures de vue | 16 classes | 16 `.fromJson` manuels | protocol.dart |
-| Constantes de timing | 4 | valeurs recopiées | session.dart, motion.dart |
-| **CI** | — | trigger disjoint Rust/Flutter | `ci.yml` / `flutter.yml` |
+| `ClientMessage` | 17 | ad hoc `Map` literals, no type | session.dart + 5 UI files |
+| `ServerMessage` | 14 | 1 switch with no `default` | session.dart |
+| `CommandKind` | 18 | ad hoc `Map` literals, no type | 5 UI files |
+| `Event` | 44 | 2 independent switches (44 and 29 cases) | protocol.dart, director.dart |
+| `CommandError` | 35 | 1 switch, falls back to raw code | protocol.dart |
+| View structures | 16 classes | 16 manual `.fromJson` | protocol.dart |
+| Timing constants | 4 | copied-over values | session.dart, motion.dart |
+| **CI** | — | disjoint Rust/Flutter trigger | `ci.yml` / `flutter.yml` |
 
 ---
 
-## 3. Stratégies possibles
+## 3. Possible strategies
 
-Pour chaque stratégie : fonctionnement, avantages, inconvénients, effort,
-risques, impact architecture.
+For each strategy: how it works, pros, cons, effort, risks, architecture
+impact.
 
-### S1 — Discipline outillée : tests de conformité "golden" + fermeture du trou de CI (pas de génération)
+### S1 — Tooled discipline: "golden" conformance tests + closing the CI gap (no generation)
 
-**Fonctionnement.** On ne touche pas au fait que le miroir Dart soit écrit à la
-main. On ajoute un répertoire de fixtures JSON versionnées (`tests/protocol-fixtures/`
-par exemple, une valeur canonique par variante des 5 enums). Un test Rust
-vérifie que `serde_json::to_string`/`from_str` produit exactement ces fixtures
-(extension de ce qui existe déjà dans `crates/protocol/src/lib.rs#tests`,
-généralisé à *toutes* les variantes, pas seulement celles couvertes
-aujourd'hui). Un test Dart (`flutter test`) charge les mêmes fixtures et
-vérifie que chaque `.fromJson`/switch les traite sans tomber dans un `default`
-silencieux (on ajoute des assertions explicites « ce type est géré » plutôt que
-de laisser passer le cas par défaut). On corrige `ci.yml`/`flutter.yml` pour
-qu'un changement dans `crates/protocol/**` ou `crates/engine/src/{command,event,error}.rs`
-déclenche aussi `flutter.yml` (ou qu'un job léger dédié aux fixtures tourne
-dans les deux CI, sans exiger le SDK Flutter complet à chaque fois).
+**How it works.** We don't touch the fact that the Dart mirror is
+hand-written. We add a directory of versioned JSON fixtures
+(`tests/protocol-fixtures/`, say — one canonical value per variant of the 5
+enums). A Rust test verifies that `serde_json::to_string`/`from_str`
+produces exactly these fixtures (extending what already exists in
+`crates/protocol/src/lib.rs#tests`, generalized to *all* variants, not just
+the ones covered today). A Dart test (`flutter test`) loads the same
+fixtures and verifies that every `.fromJson`/switch handles them without
+falling into a silent `default` (adding explicit "this type is handled"
+assertions rather than letting the default case slip through). We fix
+`ci.yml`/`flutter.yml` so that a change in `crates/protocol/**` or
+`crates/engine/src/{command,event,error}.rs` also triggers `flutter.yml`
+(or so that a lightweight job dedicated to the fixtures runs in both CIs,
+without requiring the full Flutter SDK every time).
 
-**Avantages.** Aucune nouvelle dépendance, aucun outil de génération, angle
-mort de CI refermé immédiatement. Rend le drift *bruyant* : toute variante
-oubliée fait échouer un test dans la même PR qui l'introduit, côté Rust comme
-côté Dart. Coût d'entrée très faible, compréhensible par n'importe quel
-contributeur OSS sans apprendre un nouvel outil.
+**Pros.** No new dependency, no generation tool, the CI blind spot closed
+immediately. Makes drift *loud*: any forgotten variant fails a test in the
+same PR that introduces it, on both the Rust and Dart sides. Very low entry
+cost, understandable by any OSS contributor without learning a new tool.
 
-**Inconvénients.** Ne supprime aucune des six duplications recensées — elle les
-rend seulement détectables. La double frappe reste nécessaire à chaque
-évolution (ajouter une variante `Event` exige toujours de mettre à jour
-`describeEvent`, `_beatsFor`, et maintenant *aussi* la fixture — un peu plus de
-travail, pas moins). Les fixtures elles-mêmes doivent être tenues à jour à la
-main ; un contributeur pressé peut être tenté de les dupliquer plutôt que de
-les faire échouer correctement.
+**Cons.** Removes none of the six recorded duplications — it only makes them
+detectable. The double-typing stays necessary on every change (adding an
+`Event` variant still requires updating `describeEvent`, `_beatsFor`, and
+now *also* the fixture — slightly more work, not less). The fixtures
+themselves have to be kept up to date by hand; a rushed contributor might be
+tempted to duplicate them instead of letting them fail properly.
 
-**Effort.** Petit à moyen : un répertoire de fixtures, une extension du test
-Rust existant, un test Dart de couverture par switch, une correction des
-chemins de trigger CI.
+**Effort.** Small to medium: a fixtures directory, an extension of the
+existing Rust test, a Dart coverage test per switch, a fix to the CI trigger
+paths.
 
-**Risques.** Faibles — purement additif, aucun changement de runtime.
+**Risks.** Low — purely additive, no runtime change.
 
-**Impact architecture.** Nul. Couche de test/CI uniquement.
+**Architecture impact.** None. Test/CI layer only.
 
-### S2 — Génération légère du miroir Dart depuis les types Rust (schéma intermédiaire + petit générateur maison)
+### S2 — Lightweight generation of the Dart mirror from Rust types (intermediate schema + small in-house generator)
 
-**Fonctionnement.** On dérive `schemars::JsonSchema` sur les types déjà
-`Serialize`/`Deserialize` du protocole (`ClientMessage`, `ServerMessage`,
-`CommandKind`, `Event`, `CommandError`, `RuleParams`, `ClientView`, etc. —
-aucune réécriture de leur définition, juste un derive de plus). Un petit
-binaire `xtask` (pur Rust, dans le workspace, pas de nouvel outil externe)
-appelle `schema_for!` sur chaque type et émet directement un fichier Dart
-généré (`protocol.g.dart` : classes scellées `sealed class`/`fromJson`, plus un
-constructeur typé par variante de commande — fini les `Map` littéraux
-dispersés). Le fichier généré est commis (même logique que `gen-l10n`, déjà en
-usage dans le projet) et un check CI (`cargo run -p xtask -- gen-dart --check`)
-échoue si le fichier commis diverge de ce que régénèrent les types actuels.
-Comme le générateur est un binaire Rust pur, ce check tourne naturellement
-dans `ci.yml` (le job Rust), sans exiger le SDK Flutter — ce qui referme le
-trou de CI (2.9) *gratuitement*, sans dépendre de la fermeture séparée décrite
-en S1.
+**How it works.** We derive `schemars::JsonSchema` on the protocol types that
+are already `Serialize`/`Deserialize` (`ClientMessage`, `ServerMessage`,
+`CommandKind`, `Event`, `CommandError`, `RuleParams`, `ClientView`, etc. — no
+rewrite of their definitions, just one more derive). A small `xtask` binary
+(pure Rust, in the workspace, no new external tool) calls `schema_for!` on
+each type and emits a generated Dart file directly (`protocol.g.dart`:
+`sealed class`/`fromJson`, plus a typed constructor per command variant — no
+more scattered `Map` literals). The generated file is committed (same logic
+as `gen-l10n`, already used in the project) and a CI check
+(`cargo run -p xtask -- gen-dart --check`) fails if the committed file
+diverges from what the current types regenerate. Since the generator is a
+pure Rust binary, this check naturally runs in `ci.yml` (the Rust job),
+without requiring the Flutter SDK — which closes the CI gap (2.9) *for
+free*, without depending on the separate fix described in S1.
 
-Recherche effectuée : à ma connaissance il n'existe pas d'équivalent mûr et
-largement adopté de `ts-rs`/`specta` ciblant Dart (ces outils existent pour
-TypeScript). Le générateur serait donc forcément un petit outil maison — mais
-un outil maison *au-dessus* d'une introspection de schéma existante et fiable
-(schemars), pas un parseur de code Rust fait main.
+Research done: to my knowledge there is no mature, widely adopted equivalent
+of `ts-rs`/`specta` targeting Dart (those tools exist for TypeScript). The
+generator would therefore necessarily be a small in-house tool — but an
+in-house tool built *on top of* an existing, reliable schema introspection
+layer (schemars), not a hand-rolled Rust source parser.
 
-**Avantages.** Élimine réellement la duplication structurelle (2.1, 2.2, 2.3,
-2.6) : les types Dart cessent d'exister indépendamment, ils *sont* dérivés du
-Rust. Les switches Dart sur `Event`/`CommandError` (2.4, 2.5) peuvent devenir
-des `switch` exhaustifs sur un `sealed class` généré au lieu de `switch` sur
-`String` avec repli silencieux — Dart 3 refuse de compiler un switch non
-exhaustif sur un `sealed class` : le point le plus dangereux de tout l'audit
-(2.4, le `default: return const [];` invisible de `director.dart`) devient une
-**erreur de compilation** au lieu d'un bug de production silencieux. C'est le
-seul scénario qui transforme réellement le "silencieux" de l'intitulé de la
-dette en "impossible à ignorer".
+**Pros.** Actually eliminates the structural duplication (2.1, 2.2, 2.3,
+2.6): the Dart types stop existing independently, they *are* derived from
+Rust. The Dart switches on `Event`/`CommandError` (2.4, 2.5) can become
+exhaustive `switch`es on a generated `sealed class` instead of `switch`es on
+`String` with a silent fallback — Dart 3 refuses to compile a non-exhaustive
+switch on a `sealed class`: the single most dangerous point in this whole
+audit (2.4, the invisible `default: return const [];` in `director.dart`)
+becomes a **compilation error** instead of a silent production bug. This is
+the only scenario that actually turns the "silent" in the debt's name into
+"impossible to ignore".
 
-**Inconvénients.** Reste un vrai projet d'outillage à concevoir et maintenir
-(mapping des enums externally-tagged serde vers des `sealed class` Dart
-idiomatiques, gestion de `#[serde(default)]`/`skip_serializing_if`, etc. — la
-partie non triviale n'est pas l'extraction du schéma mais la qualité de l'émission
-Dart). Ajoute une dépendance `schemars` au workspace (à valider sous
-`cargo deny`/`cargo machete`, licence MIT/Apache donc a priori conforme). La
-première migration est une PR large (protocol.dart, session.dart, et les 6
-fichiers UI qui construisent des commandes en `Map`) — pas dangereuse
-techniquement (le compilateur Dart guide la migration) mais volumineuse à
-relire. Ne supprime **pas** la duplication sémantique restante (le texte
-localisé de `describeEvent`, le mapping événement→animation de `director.dart`
-doivent toujours exister à la main quelque part) — seulement l'exhaustivité en
-devient vérifiée par le compilateur.
+**Cons.** Still a real piece of tooling to design and maintain (mapping
+externally-tagged serde enums to idiomatic Dart `sealed class`es, handling
+`#[serde(default)]`/`skip_serializing_if`, etc. — the non-trivial part isn't
+schema extraction but the quality of the Dart emission). Adds a `schemars`
+dependency to the workspace (to be checked under `cargo deny`/`cargo
+machete`; MIT/Apache license, so a priori fine). The first migration is a
+large PR (protocol.dart, session.dart, and the 6 UI files that build
+commands as `Map`s) — not technically dangerous (the Dart compiler guides
+the migration) but bulky to review. Does **not** remove the remaining
+semantic duplication (the localized text in `describeEvent`, the
+event-to-animation mapping in `director.dart` still have to exist by hand
+somewhere) — only exhaustiveness becomes compiler-checked.
 
-**Effort.** Moyen à grand une fois (concevoir + écrire le générateur, migrer
-l'existant), puis faible en continu (régénération automatique à chaque
-`cargo run -p xtask -- gen-dart`).
+**Effort.** Medium to large once (designing + writing the generator,
+migrating the existing code), then low ongoing (automatic regeneration on
+every `cargo run -p xtask -- gen-dart`).
 
-**Risques.** Moyens : bugs de génération sur les cas serde les plus subtils
-(enums à charge utile mixte, `Option` vs champ absent), régressions possibles
-lors de la migration d'une grosse PR touchant beaucoup de fichiers UI —
-atténuable en migrant type par type plutôt qu'en un seul big-bang.
+**Risks.** Medium: generation bugs on the subtlest serde cases (mixed-payload
+enums, `Option` vs. absent field), possible regressions during the migration
+of a large PR touching many UI files — mitigable by migrating type by type
+rather than in one big bang.
 
-**Impact architecture.** Ajoute une étape de build analogue à `gen-l10n`
-(précédent déjà accepté dans ce projet). Ne touche pas au format du fil
-(toujours du JSON `snake_case` — aucun ADR protocolaire remis en cause). Le
-crate `protocol` gagne une dépendance de dev/build (`schemars`).
+**Architecture impact.** Adds a build step analogous to `gen-l10n` (an
+already-accepted precedent in this project). Doesn't touch the wire format
+(still `snake_case` JSON — no protocol ADR is called into question). The
+`protocol` crate gains a dev/build dependency (`schemars`).
 
-### S3 — IDL binaire partagé (Protobuf / FlatBuffers) avec génération officielle Rust + Dart
+### S3 — Shared binary IDL (Protobuf / FlatBuffers) with official Rust + Dart generation
 
-**Fonctionnement.** Le schéma canonique devient un fichier `.proto` (ou
-équivalent) ; `prost` génère les types Rust, le générateur officiel `protoc`
-génère les types Dart ; le protocole WebSocket passe de JSON à un encodage
-binaire.
+**How it works.** The canonical schema becomes a `.proto` file (or
+equivalent); `prost` generates the Rust types, the official `protoc`
+generator produces the Dart types; the WebSocket protocol moves from JSON to
+a binary encoding.
 
-**Avantages.** Outillage mûr des deux côtés (contrairement à S2 où le côté Dart
-serait maison), enums exhaustifs générés nativement dans les deux langages,
-payloads plus compacts.
+**Pros.** Mature tooling on both sides (unlike S2, where the Dart side would
+be homegrown), natively generated exhaustive enums in both languages, more
+compact payloads.
 
-**Inconvénients — rédhibitoires ici.** Remet en cause un invariant documenté du
-projet : *« Wire-format tests exist; changing serde shapes is a protocol
-break »* et *« the wire format IS the replay format »* (CLAUDE.md, section
-protocole). Le format actuel est aussi ce qui rend le protocole
-inspectable/debuggable directement dans les devtools du navigateur pendant le
-développement d'un projet hobby/OSS — un vrai atout perdu avec du binaire.
-Nécessite un toolchain externe supplémentaire (`protoc`, pas juste
-Cargo/Flutter) à épingler dans le devcontainer et toutes les CI — c'est
-*l'inverse* de la priorité « builds reproductibles » et « architecture
-simple » explicitement demandée : on remplace un problème de duplication de
-code par un problème de duplication *et* de dépendance à un toolchain tiers.
-Réécriture cross-cutting du serveur (`ws.rs`), du CLI, et du client — un
-chantier sans rapport avec la taille réelle du problème (des messages JSON de
-petite taille sur un jeu de plateau, pas un système à hautes performances).
+**Cons — disqualifying here.** Calls into question a documented project
+invariant: *"Wire-format tests exist; changing serde shapes is a protocol
+break"* and *"the wire format IS the replay format"* (CLAUDE.md, protocol
+section). The current format is also what makes the protocol inspectable/
+debuggable directly in browser devtools during development of a hobby/OSS
+project — a real asset lost with a binary format. Requires an extra external
+toolchain (`protoc`, not just Cargo/Flutter) to pin in the devcontainer and
+every CI — this is *the opposite* of the "reproducible builds" and "simple
+architecture" priorities explicitly stated: it swaps a code-duplication
+problem for a duplication problem *and* a third-party toolchain dependency.
+Cross-cutting rewrite of the server (`ws.rs`), the CLI, and the client — an
+undertaking out of all proportion to the actual size of the problem (small
+JSON messages for a board game, not a high-performance system).
 
-**Effort.** Très grand.
+**Effort.** Very large.
 
-**Risques.** Élevés — régressions transverses, breaking change du protocole
-public que des serveurs communautaires pourraient déjà exposer (le modèle
-« Minecraft » de serveurs auto-hébergés indépendants rend un breaking change de
-protocole coûteux socialement, pas seulement techniquement).
+**Risks.** High — cross-cutting regressions, a breaking change to a public
+protocol that community servers may already expose (the "Minecraft" model
+of independent self-hosted servers makes a protocol breaking change costly
+socially, not just technically).
 
-**Impact architecture.** Très grand ; contredit plusieurs priorités énoncées.
-Présentée pour complétude, mais à écarter.
+**Architecture impact.** Very large; contradicts several stated priorities.
+Presented for completeness, but to be ruled out.
 
-### S4 — Compiler `protocol`/`engine` en WebAssembly et lier Flutter dessus (FFI/WASM), au lieu de le miroiter
+### S4 — Compile `protocol`/`engine` to WebAssembly and link Flutter against it (FFI/WASM), instead of mirroring it
 
-**Fonctionnement.** `wasm-bindgen`/`wasm-pack` pour le web (`dart:js_interop`),
-et `flutter_rust_bridge`/`cbindgen` + `dart:ffi` pour le desktop (Windows,
-Linux, macOS) — deux mécanismes de liaison différents car WASM ne couvre que le
-web.
+**How it works.** `wasm-bindgen`/`wasm-pack` for web (`dart:js_interop`), and
+`flutter_rust_bridge`/`cbindgen` + `dart:ffi` for desktop (Windows, Linux,
+macOS) — two different binding mechanisms since WASM only covers the web.
 
-**Avantages.** La duplication disparaît par construction : c'est le vrai code
-Rust qui tourne aussi côté client, plus de deuxième implémentation.
+**Pros.** The duplication disappears by construction: it's the actual Rust
+code that also runs on the client, no second implementation.
 
-**Inconvénients — rédhibitoires ici.** L'ADR-0025 a délibérément choisi *« un
-seul codebase Dart pour desktop et web »* — solution simple et déjà en
-production. Cette stratégie la fracture en deux chemins d'intégration
-(WASM web-only + FFI desktop-only), donc *augmente* la complexité
-architecturale au lieu de la réduire, à l'exact opposé de la priorité
-« architecture simple ». Même en l'adoptant, les widgets Flutter ont toujours
-besoin de types Dart idiomatiques (`ClientView`, etc.) pour se binder — on finit
-très probablement par réécrire une fine couche Dart autour du WASM/FFI de
-toute façon, donc le miroir ne disparaît pas vraiment, il se déplace et se
-complexifie. Nouveau toolchain lourd (deux chaînes de liaison distinctes) pour
-un problème qui ne concerne au fond que la (dé)sérialisation de petits messages
-JSON.
+**Cons — disqualifying here.** ADR-0025 deliberately chose *"a single Dart
+codebase for desktop and web"* — a simple solution already in production.
+This strategy splits it into two integration paths (WASM web-only + FFI
+desktop-only), thus *increasing* architectural complexity instead of
+reducing it, the exact opposite of the "simple architecture" priority. Even
+if adopted, Flutter widgets would still need idiomatic Dart types
+(`ClientView`, etc.) to bind against — we would very likely end up
+rewriting a thin Dart layer around the WASM/FFI anyway, so the mirror
+doesn't really disappear, it just moves and gets more complex. A heavy new
+toolchain (two distinct binding chains) for a problem that fundamentally
+only concerns (de)serializing small JSON messages.
 
-**Effort.** Très grand, deux chantiers d'intégration distincts.
+**Effort.** Very large, two separate integration efforts.
 
-**Risques.** Élevés — nouvelle classe de bugs (marshaling FFI/WASM), surface de
-plantage sur des plateformes déjà notées comme fragiles (le flux OIDC web est
-déjà listé comme "jamais testé en conditions réelles" dans les rough
-surfaces du projet).
+**Risks.** High — a new class of bugs (FFI/WASM marshaling), crash surface
+on platforms already flagged as fragile (the web OIDC flow is already listed
+as "never exercised under real conditions" in the project's rough surfaces).
 
-**Impact architecture.** Très grand ; défait un choix ADR récent et bien
-fonctionnant pour un bénéfice marginal par rapport à S2. Présentée pour
-complétude, mais à écarter.
+**Architecture impact.** Very large; undoes a recent, well-functioning ADR
+decision for marginal benefit over S2. Presented for completeness, but to be
+ruled out.
 
 ---
 
-## 4. Tableau comparatif
+## 4. Comparison table
 
-| | S1 — tests golden + fix CI | S2 — génération légère (schemars + xtask) | S3 — IDL binaire | S4 — WASM/FFI |
+| | S1 — golden tests + CI fix | S2 — lightweight generation (schemars + xtask) | S3 — binary IDL | S4 — WASM/FFI |
 |---|---|---|---|---|
-| Source unique de vérité | Non (duplication détectée, pas supprimée) | Oui (types Dart dérivés du Rust) | Oui | Oui |
-| Génération de code | Aucune | Faible, maison, ciblée | Lourde, outillage externe | Très lourde, deux toolchains |
-| Simplicité architecture | Inchangée | +1 étape de build (type gen-l10n) | Gros changement | Gros changement, fracture desktop/web |
-| Build reproductible | Inchangé | Oui (Cargo seul) | Nouveau binaire externe requis | Deux toolchains natifs supplémentaires |
-| Maintenance OSS | Facile, rien de nouveau à apprendre | Modérée (comprendre le générateur) | Difficile (protoc, breaking wire) | Difficile (FFI/WASM) |
-| Ferme le trou de CI (2.9) | Oui, explicitement | Oui, comme effet de bord | Oui | Oui |
-| Rend le silencieux "compilable" | Non (juste testé) | Oui (`sealed class` exhaustif) | Oui | Oui |
-| Effort | Petit-moyen | Moyen-grand puis faible | Très grand | Très grand |
-| Risque | Faible | Moyen | Élevé | Élevé |
-| Cohérent avec les priorités énoncées | Oui | Oui | Non | Non |
+| Single source of truth | No (duplication detected, not removed) | Yes (Dart types derived from Rust) | Yes | Yes |
+| Code generation | None | Small, in-house, targeted | Heavy, external tooling | Very heavy, two toolchains |
+| Architecture simplicity | Unchanged | +1 build step (like gen-l10n) | Large change | Large change, splits desktop/web |
+| Reproducible build | Unchanged | Yes (Cargo only) | New external binary required | Two extra native toolchains |
+| OSS maintenance | Easy, nothing new to learn | Moderate (understanding the generator) | Hard (protoc, breaking wire) | Hard (FFI/WASM) |
+| Closes the CI gap (2.9) | Yes, explicitly | Yes, as a side effect | Yes | Yes |
+| Makes "silent" compilable | No (just tested) | Yes (exhaustive `sealed class`) | Yes | Yes |
+| Effort | Small-medium | Medium-large then small | Very large | Very large |
+| Risk | Low | Medium | High | High |
+| Consistent with stated priorities | Yes | Yes | No | No |
 
 ---
 
-## 5. Recommandation
+## 5. Recommendation
 
-**Recommandation en deux phases, pas un choix binaire : S1 puis S2.**
+**Two-phase recommendation, not a binary choice: S1 then S2.**
 
-**Phase 1 (immédiate) : S1.** Ajouter les fixtures golden et corriger le
-déclenchement de CI. C'est peu coûteux, ne demande aucune décision
-d'architecture engageante, et referme *tout de suite* le trou le plus grave de
-l'audit (2.9) : le fait qu'un changement de protocole Rust puisse aujourd'hui
-merger sans qu'aucun outil Dart ne l'ait vu. Même si S2 est retenue ensuite,
-ce travail n'est pas perdu : les fixtures deviennent les vecteurs de test du
-générateur.
+**Phase 1 (immediate): S1.** Add the golden fixtures and fix the CI
+trigger. It's cheap, requires no committing architecture decision, and
+*immediately* closes the most severe gap in the audit (2.9): the fact that a
+Rust protocol change can merge today without any Dart tool ever having seen
+it. Even if S2 is adopted afterward, this work isn't wasted: the fixtures
+become the generator's test vectors.
 
-**Phase 2 (à programmer) : S2.** C'est la seule stratégie qui répond
-réellement à l'objectif énoncé — *« une seule source de vérité »* — sans
-sacrifier aucune des priorités listées (architecture simple, très peu de
-génération, builds reproductibles avec Cargo seul, maintenance facile pour un
-projet OSS). Le point décisif en sa faveur, au-delà de la suppression de la
-duplication : elle transforme le pire cas trouvé dans cet audit — le
-`default: return const [];` silencieux de `director.dart` (2.4), où un
-événement serveur non traité ne casse rien et n'affiche rien — en une erreur de
-compilation Dart via l'exhaustivité des `sealed class`. C'est la différence
-entre « le protocole est testé » (S1) et « le protocole ne peut pas diverger
-sans que `flutter analyze` refuse de compiler » (S2), ce qui est la formulation
-la plus proche de « source unique de vérité » qu'on puisse obtenir sans casser
-le format JSON ni fracturer l'architecture client desktop+web actuelle.
+**Phase 2 (to be scheduled): S2.** This is the only strategy that actually
+meets the stated goal — *"a single source of truth"* — without sacrificing
+any of the listed priorities (simple architecture, minimal generation,
+reproducible builds with Cargo alone, easy maintenance for an OSS project).
+The decisive point in its favor, beyond removing the duplication: it turns
+the worst case found in this audit — the silent `default: return const
+[];` in `director.dart` (2.4), where an unhandled server event breaks
+nothing and shows nothing — into a Dart compilation error via `sealed
+class` exhaustiveness. That's the difference between "the protocol is
+tested" (S1) and "the protocol cannot diverge without `flutter analyze`
+refusing to compile" (S2), which is the closest formulation to "single
+source of truth" achievable without breaking the JSON format or splitting
+the current desktop+web client architecture.
 
-S3 et S4 sont écartées : toutes deux résolvent le problème en apparence plus
-« proprement » (un seul vrai code exécuté, ou un IDL mûr des deux côtés), mais
-au prix d'un changement d'architecture largement disproportionné par rapport à
-la taille réelle du problème — quelques dizaines de types JSON pour un jeu de
-plateau — et en contradiction directe avec au moins deux priorités explicitement
-données (« architecture simple », « très peu de génération de code »).
+S3 and S4 are ruled out: both solve the problem in a seemingly "cleaner" way
+(a single real codebase executed, or a mature IDL on both sides), but at the
+cost of an architecture change wildly disproportionate to the actual size of
+the problem — a few dozen JSON types for a board game — and directly
+contradicting at least two explicitly stated priorities ("simple
+architecture", "minimal code generation").
 
-**Pourquoi ne pas faire S2 directement sans S1 ?** Parce que S2 est un projet
-non trivial (concevoir le générateur, migrer six fichiers UI) qui prendra du
-temps avant d'être mergé, pendant lequel le trou de CI (2.9) reste ouvert. S1
-est mergeable en une petite PR et ferme ce trou dès aujourd'hui, indépendamment
-du calendrier de S2.
+**Why not do S2 directly, without S1?** Because S2 is a non-trivial project
+(designing the generator, migrating six UI files) that will take time before
+it can merge, during which the CI gap (2.9) stays open. S1 is mergeable as a
+small PR and closes that gap today, independent of S2's timeline.
 
 ---
 
-## 6. Ce que je n'ai *pas* fait
+## 6. What I did *not* do
 
-Conformément à la demande, aucun code n'a été modifié. Ce document n'a pas non
-plus été ajouté à `docs/AI_ENGINEERING.md` ni référencé depuis
-`docs/technical-debt.md` — à faire une fois la stratégie validée (et le
-document traduit en anglais s'il doit vivre dans `docs/` de façon durable).
+Per the request, no code has been modified. This document has also not been
+added to `docs/AI_ENGINEERING.md` nor referenced from
+`docs/technical-debt.md` — to be done once the strategy is validated (and,
+originally, once the document was translated to English if it were to live
+in `docs/` long-term — now done).
