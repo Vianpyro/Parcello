@@ -44,7 +44,16 @@ Authoritative documents, in order of precedence:
    held across the menu, kept warm by the server's ~25s native Ping/Pong
    heartbeat (`ws.rs` writer task, transport-only, no protocol change); the
    lazy room-scoped socket is the documented fallback, to revisit when ranked
-   is wired client-side or idle-lobby connections become real pressure.
+   is wired client-side or idle-lobby connections become real pressure; 0037
+   the token lifecycle + transparent session recovery: the client requests
+   `offline_access`, keeps the whole grant (`OidcTokens`), and `AuthManager`
+   (`auth_manager.dart`) renews the id_token ~120s before `exp` (timer) AND
+   lazily before every auth payload (timers don't fire while a laptop
+   sleeps), single-flight, honouring refresh-token rotation - the refresh
+   token is MEMORY-ONLY, never persisted; `GameSession` reconnects a dropped
+   socket with backoff and re-sends `join` automatically so the seat is
+   reclaimed with no user action; server-side, `exp` gains a 60s
+   `CLOCK_SKEW_LEEWAY_SECS` via the shared `auth::is_live`.
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -336,7 +345,9 @@ architecture doc section 5; dependencies point downward only):
   test`, `flutter build web --release` for the web target). Four files
   differ per platform via conditional export (`dart.library.js_interop`),
   since `dart:io` doesn't exist on web: `oidc.dart` (system browser +
-  loopback redirect on desktop vs. popup + `postMessage` on web),
+  loopback redirect on desktop vs. popup + `postMessage` on web; both
+  return the full `OidcTokens` grant that `AuthManager` then renews,
+  ADR-0037),
   `lan_discovery.dart` and `server_manager.dart` (native-only, no browser
   equivalent - stubbed out on web, hidden behind `kIsWeb` in the menu),
   `session_storage.dart` (a file on desktop, `localStorage` on web). When
@@ -633,7 +644,11 @@ section, is complete - `mods/classic` was removed at step 6.
    the Flutter client (`oidc.dart`: PKCE + system browser + loopback; web
    and CLI paste the token manually). Remaining: run the deploy on the
    personal server (`compose-deploy.yml` + `docs/deployment.md`; Rauthy
-   client id `parcello`, EdDSA id tokens, loopback-wildcard redirect).
+   client id `parcello`, EdDSA id tokens, loopback-wildcard redirect;
+   Rauthy already grants refresh tokens and reissues an id_token on
+   refresh, verified 2026-07, so renewal needs NO issuer config). Token
+   renewal and transparent socket recovery are DONE client-side
+   (ADR-0037) - that bug was entirely client-side.
    HS256 removal is DEFERRED until LAN/WAN playtests have happened (owner
    decision, 2026-07) - do not delete it before then.
 3. WASM mods: Wasmtime-backed `ModPlugin` implementation (V2 of the mod

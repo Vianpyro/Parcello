@@ -1,14 +1,14 @@
 /// Native OIDC login (ADR-0009; Rauthy is the reference deployment):
 /// system browser + loopback redirect, public client (PKCE instead of a
-/// client secret). Returns the raw EdDSA id_token; the game server is the
-/// one that verifies it. The token is kept in memory only - never written
-/// to disk (privacy over convenience; they expire within a day anyway).
+/// client secret). Returns the whole grant - the EdDSA id_token the game
+/// server verifies, plus the refresh token that renews it (ADR-0037).
+/// Both are kept in memory only, never written to disk (privacy over
+/// convenience, and a refresh token on disk is a standing liability).
 ///
 /// Selected for non-web targets by the conditional export in `oidc.dart`.
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'oidc_common.dart';
@@ -17,7 +17,7 @@ export 'oidc_common.dart';
 
 /// Runs the full login flow. `openUrl` defaults to the system browser and
 /// is injectable for tests. Throws a `String` message on failure.
-Future<String> loginWithOidc(
+Future<OidcTokens> loginWithOidc(
   String issuer,
   String clientId, {
   Future<void> Function(String url)? openUrl,
@@ -34,7 +34,7 @@ Future<String> loginWithOidc(
       'client_id': clientId,
       'redirect_uri': redirect,
       'response_type': 'code',
-      'scope': 'openid profile',
+      'scope': oidcScopes,
       'state': state,
       'code_challenge': pkceChallenge(verifier),
       'code_challenge_method': 'S256',
@@ -64,10 +64,7 @@ Future<String> loginWithOidc(
       'client_id': clientId,
       'code_verifier': verifier,
     });
-    final idToken =
-        (jsonDecode(body) as Map<String, dynamic>)['id_token'] as String?;
-    if (idToken == null) throw 'identity provider returned no id_token';
-    return idToken;
+    return OidcTokens.fromResponse(body);
   } finally {
     await server.close(force: true);
   }

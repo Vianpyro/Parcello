@@ -274,6 +274,30 @@ Weng-Lin update applies once. Replay goes back through the queue.
   both finish paths transition out of `Active` before calling
   `finish_ranked` and `PlayAgain` is rejected.
 
+### S9. A token is verified on every auth-carrying message (ADR-0009/0037)
+`create` / `join` / `spectate` / `queue_ranked` / `get_rating` all go
+through `ws::authenticate`, and `exp` is enforced there via the single
+`auth::is_live` (60s `CLOCK_SKEW_LEEWAY_SECS`, shared by the EdDSA and
+HS256 verifiers - the constant's doc comment carries the RFC 7519 4.1.4
+reasoning and is the only place to change it). Never relax this for a
+"rejoin" - holding a seat is not proof of identity. The corollary lives
+on the client (C6): keeping a session alive is the CLIENT's job, by
+renewing the token.
+
+The credential is an OIDC **ID token**, deliberately (ADR-0009 amendment
+2 - it is the only token guaranteed to be a JWT carrying profile claims,
+which is what keeps verification stateless and offline). That choice
+carries one obligation: its `aud` is the *client* id, so
+`--identity-audience` is the only claim asserting the token was minted
+for Parcello at all. Treat it as required; its absence is warned at boot.
+
+- **Breaks**: an expired or stolen token walking into a room; without the
+  `aud` check, any token the issuer ever signed - including one minted
+  for an unrelated application sharing that issuer.
+- **Enforced**: `auth::tests::expiry_allows_clock_skew_but_not_dead_tokens`,
+  `tampered_or_expired_tokens_are_rejected`, the eddsa expiry test,
+  `eddsa::tests::audience_is_enforced_when_configured`.
+
 ---
 
 ## C. Clients (Flutter, CLI)
@@ -312,6 +336,22 @@ shipped sizes; new persistent UI must participate in layout (live in a
 scrolling panel), not float over the board where it can cover tappable
 tiles and where overflow tests cannot see it. (Coach marks moved into
 the side panel for exactly this reason, 2026-07.)
+
+### C6. The client keeps the credential alive; nothing persists a refresh token
+`AuthManager` is the ONLY holder of the OIDC grant (ADR-0037). It renews
+the id_token before `exp` - a timer ~120s ahead, plus a lazy check on
+every use, because timers do not fire on a suspended machine - and every
+auth payload is built from `freshIdToken()`, never from a value captured
+at startup. The refresh token stays in memory: never in
+`reconnect.json`, never in `localStorage`, never in a log line. A socket
+that drops without being asked to is retried and the room re-entered
+automatically; a deliberate close is not.
+
+- **Breaks**: a session that dies at the issuer's token lifetime -
+  mid-game - and a long-lived credential sitting in plaintext storage.
+- **Enforced**: `test/oidc_test.dart` (renewal policy, single-flight,
+  rotation, `clear()`), `test/session_reconnect_test.dart` (drop ->
+  rejoin, fresh token on the rejoin, deliberate leave not undone).
 
 ---
 

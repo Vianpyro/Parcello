@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'auth_manager.dart';
 import 'director.dart';
 import 'l10n/app_localizations.dart';
 import 'l10n/app_localizations_en.dart';
@@ -87,12 +88,24 @@ class GameSession extends ChangeNotifier {
   /// True once the socket is up (the menu is shown). Identity is remembered
   /// here so create/join over the same connection need no re-entry.
   bool connected = false;
-  String _authName = '';
-  String _authToken = '';
 
-  /// Public accessors for the stored auth identity (guest name or token).
-  String get authName => _authName;
-  String get authToken => _authToken;
+  /// The credential this session plays under, and its whole lifecycle
+  /// (ADR-0037): a guest name, or an OIDC grant that renews itself before
+  /// `exp` so a long game never outlives its token.
+  AuthManager auth = AuthManager.guest('');
+
+  String get authName => auth.displayName;
+
+  /// True while the socket is down and being re-established (ADR-0037).
+  /// The UI stays on the game screen and says so rather than dropping the
+  /// player back to sign-in - the seat is still held server-side and the
+  /// rejoin below reclaims it.
+  bool reconnecting = false;
+
+  /// True once the credential is past renewal (refresh refused, or none
+  /// was ever granted and the token has expired). Only then does the
+  /// player need to sign in again.
+  bool get signInRequired => auth.signInRequired;
 
   /// Post-game survey shown once per game; answering or dismissing hides it.
   bool feedbackDone = false;
@@ -242,15 +255,64 @@ class GameSession extends ChangeNotifier {
   String tileName(int i) =>
       content?.board.elementAtOrNull(i)?.name ?? 'tile $i';
 
-  /// Opens the socket to `url` and remembers the identity (guest `name`, or
-  /// an OIDC `token`, ADR-0009). Does NOT enter a room - create/join happen
-  /// later from the menu over this same connection.
-  void connect(String url, String name, {String token = ''}) {
+  // -- Connection lifecycle (ADR-0036 socket, ADR-0037 recovery) --------
+
+  /// Server this session belongs to, so a dropped socket can be
+  /// re-established without asking the player for anything.
+  String _serverUrl = '';
+
+  /// Set by every deliberate close (leave the server, dispose) so
+  /// `_onClosed` knows not to fight it. Only a close nobody asked for is
+  /// retried.
+  bool _closedOnPurpose = false;
+
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+
+  /// Room to re-enter once the socket is back, and whether we were
+  /// watching rather than seated. Null when the player is in the menu -
+  /// then reconnecting just restores the socket.
+  String? _rejoinCode;
+  bool _rejoinSpectating = false;
+
+  /// True between sending an automatic rejoin and its answer, so a
+  /// `Rejected`/`Error` reply can be recognised as "the room is gone" and
+  /// return the player to the menu instead of leaving a game screen that
+  /// will never update.
+  bool _rejoinPending = false;
+
+  /// Backoff schedule: 0.5s doubling to a 15s ceiling, given up after
+  /// `_maxReconnectAttempts`. Long enough to ride out a proxy restart or a
+  /// Wi-Fi roam, short enough that the first retry is nearly instant.
+  static const _maxReconnectAttempts = 8;
+  static const _reconnectCeiling = Duration(seconds: 15);
+
+  Duration _backoff(int attempt) {
+    final ms = 500 * (1 << attempt);
+    return ms >= _reconnectCeiling.inMilliseconds
+        ? _reconnectCeiling
+        : Duration(milliseconds: ms);
+  }
+
+  /// Opens the socket to `url` under `identity` (a guest name, or an OIDC
+  /// grant that renews itself - ADR-0009/ADR-0037). Does NOT enter a room:
+  /// create/join happen later from the menu over this same connection.
+  void connect(String url, AuthManager identity) {
     disconnect();
-    _authName = name;
-    _authToken = token;
+    auth = identity;
+    auth.onChanged = notifyListeners;
+    _serverUrl = url;
+    _reconnectAttempts = 0;
+    _rejoinCode = null;
     loginMessage = 'Connecting...';
     notifyListeners();
+    _open(url);
+  }
+
+  /// Opens one socket. Shared by the first connect and every reconnect
+  /// attempt, so both paths wire the stream identically.
+  void _open(String url) {
+    _closedOnPurpose = false;
     final WebSocketChannel ws;
     try {
       ws = WebSocketChannel.connect(Uri.parse(url));
@@ -272,8 +334,14 @@ class GameSession extends ChangeNotifier {
     ws.ready
         .then((_) {
           connected = true;
+          reconnecting = false;
+          _reconnectAttempts = 0;
           loginMessage = '';
           notifyListeners();
+          // A socket that came back mid-game reclaims the seat by itself:
+          // the server rejoins by identity and pushes the full snapshot
+          // (ADR-0008), so the player sees the board again with no input.
+          _resumeRoom();
         })
         .catchError((Object e) {
           loginMessage = 'Cannot reach server: $e';
@@ -281,15 +349,88 @@ class GameSession extends ChangeNotifier {
         });
   }
 
-  Map<String, dynamic> _auth(String code) => {
-    if (_authToken.isNotEmpty) ...{
-      'token': _authToken,
-      // Chosen in-game handle (ADR-0033); identity stays the token's sub.
-      if (_authName.isNotEmpty) 'display_name': _authName,
-    } else
-      'guest_name': _authName,
-    if (_reconnectTokens[code] != null) 'reconnect': _reconnectTokens[code],
-  };
+  /// Re-enters the room this session was in before the socket dropped.
+  void _resumeRoom() {
+    final code = _rejoinCode;
+    if (code == null) return;
+    _rejoinPending = true;
+    if (_rejoinSpectating) {
+      spectateGame();
+    } else {
+      joinGame(code);
+    }
+  }
+
+  /// The automatic rejoin was refused (room dissolved while we were away,
+  /// or the credential is no longer good enough). Nothing here is
+  /// recoverable without the player, so land them in the menu with the
+  /// server's reason rather than on a frozen board.
+  void _rejoinFailed(String message) {
+    _rejoinPending = false;
+    _rejoinCode = null;
+    joined = false;
+    spectating = false;
+    seat = null;
+    view = null;
+    code = null;
+    _resetDirector();
+    loginMessage = message;
+  }
+
+  /// Schedules the next reconnect attempt, or gives up and hands the
+  /// player back to the connect screen.
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      _giveUpReconnecting();
+      return;
+    }
+    final delay = _backoff(_reconnectAttempts);
+    _reconnectAttempts++;
+    reconnecting = true;
+    notifyListeners();
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, () {
+      if (_disposed || _closedOnPurpose) return;
+      _open(_serverUrl);
+    });
+  }
+
+  void _giveUpReconnecting() {
+    _cancelReconnect();
+    connected = false;
+    joined = false;
+    spectating = false;
+    view = null;
+    _rejoinCode = null;
+    _resetDirector();
+    loginMessage = 'Disconnected from server.';
+    notifyListeners();
+  }
+
+  void _cancelReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    reconnecting = false;
+    _reconnectAttempts = 0;
+  }
+
+  /// The `auth` payload for a create/join/spectate, with the identity token
+  /// renewed first when it is near expiry (ADR-0037). This await is the
+  /// whole fix for "a long session cannot join another game": the token on
+  /// the wire is minted for the message, not for the app's startup.
+  Future<Map<String, dynamic>> _auth(String code) async {
+    final token = await auth.freshIdToken();
+    final name = auth.displayName;
+    return {
+      if (token != null && token.isNotEmpty) ...{
+        'token': token,
+        // Chosen in-game handle (ADR-0033); identity stays the token's sub.
+        if (name.isNotEmpty) 'display_name': name,
+      } else
+        'guest_name': name,
+      if (_reconnectTokens[code] != null) 'reconnect': _reconnectTokens[code],
+    };
+  }
 
   /// Mod ids the connected server can resolve; null until it answers
   /// `list_mods`. Feeds the create-room mod picker so nobody types ids.
@@ -305,29 +446,39 @@ class GameSession extends ChangeNotifier {
   }
 
   /// Host a new private room. `mods` picks its mod set (ADR-0006).
-  void createGame({List<String> mods = const []}) {
+  ///
+  /// Async because the identity token is renewed first if it is close to
+  /// expiring; callers fire and forget, the send happens when the payload
+  /// is ready.
+  Future<void> createGame({List<String> mods = const []}) async {
+    final payload = await _auth('');
     _ws?.sink.add(
       jsonEncode({
         'type': 'create',
-        'auth': _auth(''),
+        'auth': payload,
         if (mods.isNotEmpty) 'mods': mods,
       }),
     );
   }
 
   /// Join a private room by its 5-letter code.
-  void joinGame(String roomCode) {
+  Future<void> joinGame(String roomCode) async {
     final c = roomCode.trim().toUpperCase();
-    _ws?.sink.add(jsonEncode({'type': 'join', 'code': c, 'auth': _auth(c)}));
+    final payload = await _auth(c);
+    _ws?.sink.add(jsonEncode({'type': 'join', 'code': c, 'auth': payload}));
   }
 
   /// Watch a game without playing (ADR-0035). The server picks the room
   /// with the most humans, falling back to its bots showcase.
-  void spectateGame() {
-    _ws?.sink.add(jsonEncode({'type': 'spectate', 'auth': _auth('')}));
+  Future<void> spectateGame() async {
+    final payload = await _auth('');
+    _ws?.sink.add(jsonEncode({'type': 'spectate', 'auth': payload}));
   }
 
+  /// Closes the socket deliberately: no reconnect follows.
   void disconnect() {
+    _closedOnPurpose = true;
+    _cancelReconnect();
     // Cancel first so a deliberate close does not fire `_onClosed`.
     _sub?.cancel();
     _sub = null;
@@ -340,9 +491,11 @@ class GameSession extends ChangeNotifier {
     _ws?.sink.add(jsonEncode({'type': 'play_again'}));
   }
 
-  /// Leave the room but stay connected, returning to the menu.
+  /// Leave the room but stay connected, returning to the menu. Deliberate,
+  /// so a later socket drop must not resurrect this room.
   void leaveRoom() {
     _ws?.sink.add(jsonEncode({'type': 'leave'}));
+    _rejoinCode = null;
     joined = false;
     spectating = false;
     seat = null;
@@ -357,9 +510,14 @@ class GameSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Close the connection entirely, returning to the connect screen.
+  /// Close the connection entirely, returning to the connect screen. The
+  /// credential goes with it: a refresh token must not outlive the session
+  /// that needed it (ADR-0037).
   void disconnectFromServer() {
     disconnect();
+    auth.onChanged = null;
+    auth.clear();
+    _rejoinCode = null;
     connected = false;
     joined = false;
     spectating = false;
@@ -369,19 +527,36 @@ class GameSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The socket went away. If nobody asked for that, it is a transport
+  /// event - not the end of the session (ADR-0037). The seat is still held
+  /// server-side, so retry the socket and let `_resumeRoom` reclaim it;
+  /// only an exhausted retry budget sends the player back to sign-in.
   void _onClosed() {
     _sub?.cancel();
     _sub = null;
     _ws = null;
-    connected = false;
-    joined = false;
-    spectating = false;
-    view = null;
-    _resetDirector();
-    if (loginMessage.isEmpty || loginMessage == 'Connecting...') {
-      loginMessage = 'Disconnected from server.';
+    // A socket that never came up at all is a wrong address or a server
+    // that is down - the player needs to see that, not a spinner. Only a
+    // connection that was once live is worth retrying.
+    if (_disposed || _closedOnPurpose || !connected) {
+      _cancelReconnect();
+      connected = false;
+      joined = false;
+      spectating = false;
+      view = null;
+      _rejoinCode = null;
+      _resetDirector();
+      if (loginMessage.isEmpty || loginMessage == 'Connecting...') {
+        loginMessage = 'Disconnected from server.';
+      }
+      notifyListeners();
+      return;
     }
-    notifyListeners();
+    // Keep `connected`/`joined` and the last view as they are: the UI
+    // stays where the player was (game screen or menu) and shows that it
+    // is reconnecting, rather than tearing the room down under them.
+    if (loginMessage == 'Connecting...') loginMessage = '';
+    _scheduleReconnect();
   }
 
   /// The tile the last command was about, so a rejection can be shown *on the
@@ -444,6 +619,10 @@ class GameSession extends ChangeNotifier {
         code = msg['code'] as String;
         seat = msg['seat'] as int;
         spectating = false;
+        // Remember the room so a dropped socket comes straight back to it.
+        _rejoinCode = code;
+        _rejoinSpectating = false;
+        _rejoinPending = false;
         content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
         seats = _seatList(msg['players']);
         settings = RoomSettings.fromJson(
@@ -476,6 +655,9 @@ class GameSession extends ChangeNotifier {
         code = msg['code'] as String;
         seat = null;
         spectating = true;
+        _rejoinCode = code;
+        _rejoinSpectating = true;
+        _rejoinPending = false;
         content = GameContent.fromJson(msg['content'] as Map<String, dynamic>);
         seats = _seatList(msg['players']);
         settings = RoomSettings.fromJson(
@@ -532,8 +714,15 @@ class GameSession extends ChangeNotifier {
         if (loc != null) _log(loc.logRejected(reason));
       case 'error':
         sfx.error();
-        if (!joined) loginMessage = msg['message'] as String;
-        if (l10n case final loc?) _log(loc.logError(msg['message'] as String));
+        final message = msg['message'] as String;
+        // An error answering an automatic rejoin is the one case where the
+        // room really is unrecoverable; anything else leaves the room alone.
+        if (_rejoinPending) {
+          _rejoinFailed(message);
+        } else if (!joined) {
+          loginMessage = message;
+        }
+        if (l10n case final loc?) _log(loc.logError(message));
     }
     notifyListeners();
   }
@@ -745,6 +934,8 @@ class GameSession extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     disconnect();
+    auth.onChanged = null;
+    auth.clear();
     super.dispose();
   }
 }

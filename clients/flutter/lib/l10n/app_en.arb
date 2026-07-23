@@ -629,6 +629,9 @@
   "serverUnreachable": "Server not reachable - check the address",
   "serverRequiresAccount": "This server does not accept guests: sign in to play.",
 
+  "reconnecting": "Connection lost - reconnecting. Your seat is being held.",
+  "signInExpired": "Your sign-in has expired. Sign in again to keep playing.",
+
   "menuWatchTitle": "Watch a game",
   "menuWatchSubtitle": "Spectate a live table - a good way to learn",
   "menuReplayTips": "Replay the first-game tips",

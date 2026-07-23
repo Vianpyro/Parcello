@@ -23,7 +23,10 @@ sockets, `recv_until`) | validators/adapters -> unit tests beside them
 | rating math/queue policy -> pure unit tests | Flutter ->
 `clients/flutter/test/` (protocol, director budget, stage render, bid
 input, LAYOUT at 1280x800/1280x720/1024x600 where a pumped overflow is
-a failure, spectate+hints, oidc native).
+a failure, spectate+hints, oidc native + the ADR-0037 token lifecycle,
+and `session_reconnect_test.dart` - a REAL local WebSocket the fake
+server hangs up on, asserting the client rejoins by itself with a
+renewed token).
 
 ## Musts
 

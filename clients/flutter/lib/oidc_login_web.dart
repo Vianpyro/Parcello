@@ -4,6 +4,10 @@
 /// and isn't treated as an unsolicited popup; it starts blank and is
 /// navigated to the real authorization URL once discovery completes.
 ///
+/// Returns the whole grant (id_token + refresh token, ADR-0037), in memory
+/// only - `localStorage` is readable by any script that reaches this
+/// origin, so a refresh token must never land there.
+///
 /// `web/oidc-callback.html` is the registered `redirect_uri` for this
 /// origin - it forwards `code`/`state`/`error` back via `postMessage` and
 /// closes itself. The identity provider's OIDC client must have this
@@ -26,7 +30,7 @@ export 'oidc_common.dart';
 /// Runs the full login flow. `openUrl`, if given, replaces the popup with
 /// a caller-supplied navigation (kept for signature parity with the native
 /// flow; real web callers should leave it null).
-Future<String> loginWithOidc(
+Future<OidcTokens> loginWithOidc(
   String issuer,
   String clientId, {
   Future<void> Function(String url)? openUrl,
@@ -50,7 +54,7 @@ Future<String> loginWithOidc(
       'client_id': clientId,
       'redirect_uri': redirect,
       'response_type': 'code',
-      'scope': 'openid profile',
+      'scope': oidcScopes,
       'state': state,
       'code_challenge': pkceChallenge(verifier),
       'code_challenge_method': 'S256',
@@ -80,10 +84,7 @@ Future<String> loginWithOidc(
       'client_id': clientId,
       'code_verifier': verifier,
     });
-    final idToken =
-        (jsonDecode(body) as Map<String, dynamic>)['id_token'] as String?;
-    if (idToken == null) throw 'identity provider returned no id_token';
-    return idToken;
+    return OidcTokens.fromResponse(body);
   } finally {
     popup?.close();
   }

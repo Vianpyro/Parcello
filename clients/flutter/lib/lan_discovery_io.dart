@@ -128,8 +128,9 @@ class _LanBrowserState extends State<LanBrowser> {
                       final url = bind.isNotEmpty && bind.contains(':')
                           ? 'ws://$bind/ws'
                           : 'ws://$host:7878/ws';
-                        widget.session.connect(url, widget.session.authName,
-                          token: widget.session.authToken);
+                      // Same credential, new server: the AuthManager (and
+                      // its renewal timer) carries over untouched.
+                      widget.session.connect(url, widget.session.auth);
                       Navigator.pop(context);
                     },
                   )),

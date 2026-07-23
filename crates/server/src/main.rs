@@ -202,6 +202,18 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
         None
     } else {
         info!(urls = ?args.identity_urls, "EdDSA identity provider enabled");
+        // Parcello authenticates with the OIDC ID token (ADR-0009
+        // amendment 2), whose `aud` is the CLIENT id - it is the only
+        // claim saying the token was minted for Parcello at all. Without
+        // this check the server accepts any EdDSA token the issuer signed,
+        // including ones minted for a completely different application
+        // that happens to share the issuer.
+        if args.identity_audience.is_none() {
+            warn!(
+                "--identity-url without --identity-audience: any token this issuer signs is \
+                 accepted, including tokens minted for other applications (ADR-0009)"
+            );
+        }
         Some(eddsa::EdDsaVerifier::spawn(
             args.identity_urls.clone(),
             args.identity_audience.clone(),

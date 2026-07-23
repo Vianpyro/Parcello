@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../auth_manager.dart';
 import '../l10n/app_localizations.dart';
 import '../design/components/pc_button.dart';
 import '../design/components/pc_card.dart';
@@ -77,7 +78,15 @@ Uri? configUrlFor(String wsUrl) {
 class _ConnectScreenState extends State<ConnectScreen> {
   final _url = TextEditingController(text: defaultServerUrl());
   final _name = TextEditingController();
-  final _token = TextEditingController();
+
+  /// The grant from the last successful sign-in (ADR-0037). Held here only
+  /// until Connect hands it to the session's `AuthManager`, which owns its
+  /// renewal from then on. Null = guest.
+  OidcTokens? _tokens;
+
+  /// Issuer the grant came from, so renewals know where to redeem the
+  /// refresh token.
+  String? _issuer;
   String? _signedInAs;
 
   /// Issuer default advertised by the target server (ADR-0032,
@@ -192,11 +201,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
     );
     if (ok != true || !mounted) return;
     try {
-      s.saveIssuer(issuer.text.trim());
-      final token = await loginWithOidc(issuer.text.trim(), 'parcello');
+      final url = issuer.text.trim();
+      s.saveIssuer(url);
+      final tokens = await loginWithOidc(url, 'parcello');
       setState(() {
-        _token.text = token;
-        final handle = jwtDisplayName(token);
+        _tokens = tokens;
+        _issuer = url;
+        final handle = jwtDisplayName(tokens.idToken);
         _signedInAs = handle ?? t.account;
         // Seed the display-name field with the account's name as the default
         // in-game handle (ADR-0033); the player can still edit it before
@@ -218,8 +229,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     // Guests-off + not signed in: sign-in is the ONLY way in, so it becomes
     // the primary action and Connect is disabled with a reason.
     final guestsOff = _guestAllowed == false && _signedInAs == null;
-    final connectDisabled =
-        _guestAllowed == false && _token.text.trim().isEmpty;
+    final connectDisabled = _guestAllowed == false && _tokens == null;
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -285,12 +295,22 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     onPressed: connectDisabled
                         ? null
                         : () {
-                            if (_name.text.trim().isEmpty &&
-                                _token.text.trim().isEmpty) {
+                            final tokens = _tokens;
+                            if (_name.text.trim().isEmpty && tokens == null) {
                               return;
                             }
-                            s.connect(_url.text.trim(), _name.text.trim(),
-                                token: _token.text.trim());
+                            // The session takes over the grant from here:
+                            // it renews it before expiry so the game never
+                            // outlives the token (ADR-0037).
+                            s.connect(
+                              _url.text.trim(),
+                              AuthManager(
+                                displayName: _name.text.trim(),
+                                tokens: tokens,
+                                issuer: _issuer,
+                                clientId: tokens == null ? null : 'parcello',
+                              ),
+                            );
                           },
                     // The disabled reason now lives ON the button (the DS
                     // pattern), replacing the former separate caption above -

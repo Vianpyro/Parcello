@@ -21,7 +21,10 @@ filesystem paths). Room settings clamped (`limits` module). All
 broadcast text stripped of control/bidi/zero-width chars; `@` handles
 rejected (no email leakage). Guest mid-game seats protected by
 constant-time reconnect tokens (first-join name squatting is a
-DOCUMENTED residual of `--insecure-guest`). Sealed bids/votes and
+DOCUMENTED residual of `--insecure-guest`). Token `exp` checked on
+EVERY auth-carrying message with a 60s clock-skew leeway
+(`auth::is_live`, ADR-0037); the client's refresh token is memory-only
+and never persisted or logged. Sealed bids/votes and
 trades masked in per-seat views server-side. RNG/deck never
 serialized. Spectators capped at 32, auth-gated, command-refused,
 timer-inert. Probes don't count as room activity (anti-immortal-room).

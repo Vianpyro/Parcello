@@ -44,6 +44,12 @@ struct Args {
     name: Option<String>,
 
     /// Identity token (`EdDSA` JWT from the identity provider, ADR-0009).
+    ///
+    /// Pasted verbatim and never renewed: unlike the Flutter client, this
+    /// harness has no OIDC flow and so no refresh token to renew with
+    /// (ADR-0037). A session outliving the token's `exp` must be restarted
+    /// with a fresh one - acceptable for a test tool, not a pattern to
+    /// copy into anything a player uses.
     #[arg(long)]
     token: Option<String>,
 

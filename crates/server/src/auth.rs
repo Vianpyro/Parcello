@@ -23,6 +23,55 @@ pub struct Identity {
     pub spoofable: bool,
 }
 
+/// Tolerance applied to a token's `exp` (ADR-0037).
+///
+/// The game server and the identity provider are separate machines with
+/// independently drifting clocks; a token the issuer still considers live
+/// must not be refused because the two disagree by seconds.
+///
+/// RFC 7519 section 4.1.4 sanctions this explicitly - "Implementers MAY
+/// provide for some small leeway, usually no more than a few minutes, to
+/// account for clock skew" - and that sentence is the ONLY normative input:
+/// it bounds the value, it does not name one. No RFC, and no Rauthy
+/// guidance, specifies 60 seconds. The number is an engineering judgement
+/// sitting an order of magnitude inside the RFC's ceiling, chosen because:
+///
+/// - Both hosts are internet-connected and effectively always NTP-synced
+///   (in the reference deployment they are containers sharing one host
+///   clock, where the true skew is zero), so realistic drift is
+///   milliseconds to low seconds - 60s covers a badly-synced host with
+///   room to spare.
+/// - The cost is bounded and tiny: an expired token stays usable 60s
+///   longer, ~3% on top of the reference 1800s lifetime, in a model that
+///   has no revocation anyway (bearer tokens, ADR-0009).
+/// - It is not load-bearing. The client renews 120s before `exp`
+///   (ADR-0037), so a token only reaches this check when renewal already
+///   failed or when it was pasted by hand (the CLI).
+///
+/// Tightening it to ~30s would be equally defensible; going to minutes
+/// would not, and zero would reintroduce the lockout this prevents.
+pub const CLOCK_SKEW_LEEWAY_SECS: u64 = 60;
+
+/// Unix seconds now, or an error string for a clock that predates the epoch.
+///
+/// # Errors
+/// When the system clock is set before 1970.
+pub(crate) fn unix_now() -> Result<u64, String> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .map_err(|_| "server clock error".to_string())
+}
+
+/// Whether `exp` is still in the future once [`CLOCK_SKEW_LEEWAY_SECS`] is
+/// allowed for.
+///
+/// The single expiry rule both token verifiers use, so `EdDSA` and the
+/// HS256 stopgap can never drift apart on it.
+pub(crate) const fn is_live(exp: u64, now: u64) -> bool {
+    exp.saturating_add(CLOCK_SKEW_LEEWAY_SECS) > now
+}
+
 pub trait IdentityVerifier: Send + Sync {
     /// # Errors
     /// Returns a human-readable reason when the payload carries no usable
@@ -221,11 +270,7 @@ impl Hs256Verifier {
             .map_err(|_| "invalid token signature")?;
 
         let claims: Claims = decode_json(p)?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| "server clock error")?
-            .as_secs();
-        if claims.exp <= now {
+        if !is_live(claims.exp, unix_now()?) {
             return Err("token expired".into());
         }
 
@@ -353,6 +398,24 @@ mod tests {
                 })
                 .is_err()
         );
+    }
+
+    #[test]
+    fn expiry_allows_clock_skew_but_not_dead_tokens() {
+        let now = 1_000_000;
+        // Comfortably live.
+        assert!(is_live(now + 600, now));
+        // Just past `exp` but inside the leeway: the issuer still considers
+        // this token valid, so a few seconds of clock drift between the two
+        // machines must not lock the player out (ADR-0037).
+        assert!(is_live(now - 1, now));
+        assert!(is_live(now - (CLOCK_SKEW_LEEWAY_SECS - 1), now));
+        // At and beyond the leeway it is expired, full stop.
+        assert!(!is_live(now - CLOCK_SKEW_LEEWAY_SECS, now));
+        assert!(!is_live(now - 3600, now));
+        // A token long dead cannot be resurrected by overflow.
+        assert!(!is_live(0, now));
+        assert!(is_live(u64::MAX, now), "saturating add must not wrap");
     }
 
     #[test]

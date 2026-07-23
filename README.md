@@ -154,6 +154,16 @@ the account name); identity stays the token, only the shown name is chosen,
 and it is re-sanitised server-side so it can never spoof or leak an email
 (ADR-0033).
 
+A signed-in session renews itself: the client asks for `offline_access`,
+keeps the refresh token in memory only, and swaps in a new id_token about
+two minutes before the old one expires, so a game is never interrupted by
+the identity provider's token lifetime (ADR-0037). If the socket drops
+anyway - a proxy idle cut, a Wi-Fi roam, a laptop waking up - the client
+reconnects with exponential backoff and re-enters the room by itself,
+reclaiming the seat the server was still holding. No issuer configuration
+is needed for this on Rauthy, which already grants refresh tokens and
+reissues an ID token on refresh.
+
 ## Development & testing
 
 The same checks CI enforces (`.github/workflows/ci.yml`), runnable locally:
@@ -613,7 +623,11 @@ stands - a global ladder would need signed results and stays deferred);
 that hides all trades and masks pending bids/votes, `spectate` on the
 wire, and a `--showcase` supervisor keeping one all-bot game running as a
 last resort - a deviation from the architecture doc's strict player/seat
-model).
+model); 0037 token lifecycle + transparent session recovery (the client
+requests `offline_access`, renews the id_token before `exp` from a
+memory-only refresh token, and re-establishes a dropped socket with
+backoff and an automatic rejoin; server-side, `exp` gains a 60s
+clock-skew leeway shared by both verifiers).
 
 ## Roadmap
 

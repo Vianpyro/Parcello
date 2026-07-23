@@ -41,7 +41,9 @@ can check they still exist.
 | Room settings | absurd values breaking the engine | `clamp_settings` + `limits` module (room.rs); engine re-validates at start |
 | Names/comments | terminal escapes, bidi/zero-width spoofing, log injection, email leakage | `sanitize_guest_name`, `sanitize_display_name` (rejects `@`), `sanitize_comment` + `is_unsafe_format` (auth.rs/room.rs); parameterized SQL everywhere |
 | Guest identity | first-join squatting; mid-game seat theft | mid-game: per-seat reconnect tokens, constant-time compare (ADR-0008). First-join squatting is a DOCUMENTED residual (below) |
-| Token replay | stolen JWT reuse | 24h `exp` enforced; out of scope beyond that (bearer-token model, ADR-0009) |
+| Token replay | stolen JWT reuse | `exp` enforced on EVERY auth-carrying message, with a 60s clock-skew leeway (`auth::is_live`, ADR-0037); out of scope beyond that (bearer-token model, ADR-0009) |
+| Wrong-audience token | a token minted for another app on the same issuer | `--identity-audience` checks `aud`; REQUIRED in practice because the credential is an OIDC ID token, whose `aud` is the only "meant for Parcello" assertion (ADR-0009 amendment 2). Warned at boot when unset |
+| Refresh token | long-lived credential theft | memory-only on the client - never `reconnect.json`, never `localStorage`, never logged; dropped on disconnect (ADR-0037). Redeemed over TLS with `client_id` only (public client, no secret) |
 | Ranked queue | rating on a forgeable identity | spoofable identities refused at queue AND `get_rating` (ADR-0034) |
 | Ranked queue | orphaned entries ghost-matching | re-queue purges the connection's previous entry; removal is connection-scoped (`same_channel`) |
 | Sealed bids | seeing others' pending bids | masked in `for_seat`/`for_spectator` views; amount-less `BlindBidSubmitted` event (E5) |
@@ -95,6 +97,24 @@ can check they still exist.
    anything user-facing.
 6. **Showcase CPU**: `--showcase` burns one bot game (~1 command/800ms)
    indefinitely on an empty server. Opt-in; trivial load; documented.
+7. **Refresh token in client memory** (ADR-0037): renewing a session
+   means holding a long-lived credential for the run of the app. It is
+   never persisted, so it dies with the process and cannot be stolen
+   from disk - but anything that can read the client's memory (or
+   inject script into the web origin) can read it, exactly as it could
+   already read the id_token. Accepted: the alternative was a session
+   that ends mid-game every token lifetime.
+8. **A malicious community server can replay your token elsewhere**
+   (ADR-0009 amendment 2): every Parcello server shares one issuer and
+   one `aud`, so a server you join receives a bearer credential that is
+   equally valid at any other server, until `exp`. This is inherent to
+   the bearer model and is NOT improved by switching to access tokens -
+   they would carry the same audience. The real fixes are per-server
+   audiences or proof-of-possession (DPoP), both their own ADR. Bounded
+   today by short token lifetimes and by the fact that a token carries
+   no PII and grants nothing outside Parcello (ADR-0009 privacy). This
+   is the strongest argument for keeping the issuer's token lifetime
+   short - which ADR-0037's renewal now makes free.
 
 ## Review rules for security-relevant changes
 

@@ -32,6 +32,16 @@ its entry in the same change.
 - **Trigger**: before announcing any public server that disables guests.
 - **Effort**: one manual QA matrix (3 browsers), or a day for a
   playwright harness against a docker Rauthy.
+- **Not a concern**: ADR-0037's renewal. Rauthy was confirmed (2026-07)
+  to return `refresh_token` for the `parcello` client already, and the
+  browser's CORS posture toward the token endpoint is exercised by web
+  login itself - `oidc_login_web.dart` calls `discover` and
+  `exchangeToken` cross-origin from the page during sign-in, and the
+  refresh is the same endpoint, origin and method. If web login works,
+  renewal's transport works. (An earlier revision of this entry claimed
+  the login flow did not exercise CORS; that was wrong - the popup only
+  carries the *authorize* redirect, while the token exchange is a direct
+  POST from the page.)
 
 ## Important
 

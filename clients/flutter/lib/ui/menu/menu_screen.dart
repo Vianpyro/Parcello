@@ -12,6 +12,7 @@ import '../../session.dart';
 import '../../tokens.dart';
 import '../../typography.dart';
 import '../language_button.dart';
+import '../reconnect_banner.dart';
 import '../version_footer.dart';
 import 'geometry.dart';
 import '../showcase/showcase_screen.dart';
@@ -101,6 +102,9 @@ class _MenuScreenState extends State<MenuScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Socket down / credential spent (ADR-0037). Nothing in the
+                // normal case; the menu keeps working while it reconnects.
+                ReconnectBanner(s: s),
                 // Grouped so D-pad / arrow keys traverse the tiles directionally
                 // (controller + Steam Deck navigation).
                 FocusTraversalGroup(

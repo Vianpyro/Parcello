@@ -14,6 +14,7 @@ import '../../l10n/app_localizations.dart';
 import '../../overlay.dart';
 import '../../session.dart';
 import '../../tokens.dart';
+import '../reconnect_banner.dart';
 import '../side/side_panel.dart';
 import 'center_panel.dart';
 import 'flashes.dart';
@@ -125,6 +126,10 @@ class GameScreen extends StatelessWidget {
             // a seat marker crosses both subtrees - which is exactly why a
             // board-local floater could never express the money rule.
             StageOverlay(stage: s.stage),
+            // Above the overlay: when the socket is being re-established
+            // (ADR-0037) the player must be able to see that the table is
+            // not simply frozen. Renders nothing in the normal case.
+            ReconnectBanner(s: s),
           ]),
         ),
       ),

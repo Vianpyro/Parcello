@@ -77,6 +77,19 @@ already fixes the proxy timeout), it complicates the menu <-> room
 transitions, and ranked will likely need a pre-room socket anyway - which
 would partly undo the lazy model.
 
+## Amendment (2026-07, ADR-0037)
+
+The consequence above - "a dropped menu socket no longer boots the player
+to the connect screen, because it no longer drops" - was doing too much
+work. The heartbeat keeps an *idle* socket alive through a proxy; it does
+nothing for a Wi-Fi roam, a proxy restart, or a laptop resume, and until
+ADR-0037 any such close still ended the session. Recovery is now the
+client's, not the heartbeat's: `GameSession` reopens the socket with
+backoff and re-enters the room automatically. The lifetime decided here is
+unchanged - the socket still opens at connect and is held across the menu -
+but it is no longer the only thing standing between a player and a
+disconnect.
+
 ## Revisit
 
 - When ranked matchmaking is wired into the client: confirm whether the

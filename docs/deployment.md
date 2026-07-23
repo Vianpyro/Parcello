@@ -63,9 +63,11 @@ in `TRUSTED_PROXIES` (default: all private ranges; tighten it in
   passes WebSockets on every plan.
 - SSL/TLS mode: **Full (strict)** (NPM has a real certificate).
 - Idle games can outlive proxy idle timers; if you see silent
-  disconnects mid-lobby, that is the CF/NPM idle timeout, not a crash -
-  reconnection reattaches the seat (rejoin by identity + reconnect
-  token, ADR-0008).
+  disconnects mid-lobby, that is the CF/NPM idle timeout, not a crash.
+  The server's ~25s WebSocket heartbeat (ADR-0036) keeps the tunnel warm,
+  and a socket that drops anyway is re-established by the client, which
+  re-enters the room on its own (rejoin by identity + reconnect token,
+  ADR-0008/ADR-0037) - no player action needed.
 
 ### Create the OIDC client for the game
 
@@ -90,11 +92,40 @@ unset). Then create the client the game clients will log in through:
      which forwards the authorization response back via `postMessage`
      and closes itself; a browser page can't bind a loopback port, so
      it can't reuse the desktop flow.
-4. Token signing: set the ID token algorithm to **EdDSA** (Ed25519) -
-   the server only verifies EdDSA (ADR-0009).
-5. Scopes: the client requests `openid profile`; the defaults cover it.
-   Display names come from `name`/`preferred_username`, falling back
-   to `sub`.
+4. Token signing: set the **ID token** algorithm to **EdDSA** (Ed25519) -
+   the server only verifies EdDSA, and it authenticates players with the
+   ID token rather than the access token (ADR-0009 amendment 2 explains
+   why, and when that should be revisited). The access token's format is
+   irrelevant to Parcello; do not spend time on it.
+   Keep `PARCELLO_IDENTITY_AUDIENCE=parcello` set: with an ID token, the
+   `aud` claim is the only thing asserting the token was minted for
+   Parcello, so without it the server accepts every token this issuer
+   signs - including tokens for an unrelated app sharing it. The server
+   warns at boot when it is unset.
+5. Scopes: the client requests `openid profile offline_access`; the
+   defaults cover them. Display names come from
+   `name`/`preferred_username`, falling back to `sub`.
+
+**Nothing extra is needed for session renewal.** Rauthy's token response
+already carries `access_token`, `id_token`, `refresh_token` and
+`expires_in` out of the box (verified on the reference deployment,
+2026-07), and it reissues an ID token on refresh - which is what Parcello
+renews with. So the client keeps a signed-in session alive across the
+token lifetime with no issuer configuration at all (ADR-0037). The
+`offline_access` scope is requested for portability, not because Rauthy
+needs it: other providers (Keycloak, Zitadel, Authentik) do gate refresh
+tokens on it, and asking costs nothing where it is already granted.
+
+The token lifetime is therefore a policy choice, not a session limit - a
+short one (10-30 min) is fine and is the safer setting, because the client
+renews across it invisibly.
+
+On a **non-Rauthy** issuer, one thing is worth a single check: OIDC Core
+section 12.2 makes `id_token` optional in a *refresh* response, and
+Parcello authenticates with the ID token (ADR-0009 amendment 2). An issuer
+that returns only an access token on refresh cannot renew a session; the
+client detects exactly that and asks for a fresh sign-in rather than
+retrying. Rauthy is unaffected.
 
 Then have players Register (or create their accounts in the admin UI,
 if you keep registration closed). Test: Flutter client (desktop or

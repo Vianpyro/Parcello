@@ -324,6 +324,8 @@
 
   "serverReachable": "Serveur joignable",
   "serverUnreachable": "Serveur injoignable - vérifiez l'adresse",
+  "reconnecting": "Connexion perdue - reconnexion en cours. Votre place est conservée.",
+  "signInExpired": "Votre session a expiré. Reconnectez-vous pour continuer à jouer.",
   "serverRequiresAccount": "Ce serveur n'accepte pas les invités : connectez-vous pour jouer.",
 
   "menuWatchTitle": "Regarder une partie",

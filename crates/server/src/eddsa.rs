@@ -16,7 +16,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Deserialize;
 use tracing::{info, warn};
 
-use crate::auth::{Identity, decode_json};
+use crate::auth::{Identity, decode_json, is_live, unix_now};
 
 /// Key-rotation pickup cadence when no unknown-kid poke arrives sooner.
 const REFRESH_INTERVAL: Duration = Duration::from_mins(15);
@@ -219,11 +219,9 @@ impl EdDsaVerifier {
         }
 
         let claims: Claims = decode_json(p)?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| "server clock error")?
-            .as_secs();
-        if claims.exp <= now {
+        // Same expiry rule as the HS256 stopgap, clock skew included
+        // (ADR-0037): one definition, so the two can never diverge.
+        if !is_live(claims.exp, unix_now()?) {
             return Err("token expired".into());
         }
         if let Some(expected) = &self.audience {
