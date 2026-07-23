@@ -23,101 +23,124 @@ class CenterPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context);
-    // A dark plate on the sage plaza: the HUD is a panel *on* the board, not a
-    // hole in it. (The plaza itself stays sage - `docs/visual-identity.md`.)
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Pc.surface,
-        borderRadius: Pc.radius,
-        border: Border.all(color: Pc.goldDark, width: 1.5),
-      ),
-      child: DefaultTextStyle(
-        style: PcText.body,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // The turn prompt and the clocks tied to the decision in flight share
-          // one line; the game clock is no longer here (it moved to the player
-          // bar), so this is the whole "what am I deciding, and how long do I
-          // have" header.
-          Row(children: [
-          Expanded(child: _turnPrompt(t)),
-          if (s.turnEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: Pc.s6),
-            Countdown(
-                endsAt: s.turnEndsAt!,
-                icon: Icons.hourglass_bottom,
-                warnSecs: 10,
-                // The server's own clock only starts once this seat's
-                // render ack lands (ADR-0028) - the display must not look
-                // like movement/animation is eating thinking time.
-                paused: s.isAnimating),
-          ],
-          // Personal time bank (ADR-0023): a flat reserve for the whole
-          // plain turn window, then counts down to the hard stop. Never
-          // refilled.
-          if (s.bankEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: Pc.s6),
-            Countdown(
-                endsAt: s.bankEndsAt!,
-                holdUntil: s.turnEndsAt,
-                icon: Icons.account_balance,
-                warnSecs: 10,
-                paused: s.isAnimating),
-          ],
-          // Sealed-bid window (ADR-0018): a one-shot ~12s countdown, local
-          // estimate only - the server alone decides when it actually
-          // closes, and its clock waits for the whole table's acks
-          // (ADR-0028).
-          if (s.bidEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: Pc.s6),
-            Countdown(
-                endsAt: s.bidEndsAt!,
-                icon: Icons.gavel,
-                warnSecs: 3,
-                paused: s.isAnimating),
-          ],
-          // Corruption bribe vote window (ADR-0024): same pattern.
-          if (s.voteEndsAt != null && s.view?.finished == false) ...[
-            const SizedBox(width: Pc.s6),
-            Countdown(
-                endsAt: s.voteEndsAt!,
-                icon: Icons.how_to_vote,
-                warnSecs: 2,
-                paused: s.isAnimating),
-          ],
-        ]),
-          const SizedBox(height: Pc.s6),
-          ActionsPanel(s: s),
-        ]),
+    // The clocks tied to the decision in flight - each one is a window the
+    // player is inside right now. The game clock is NOT among them: it is not
+    // part of this decision, and it lives in the player bar.
+    final clocks = <Widget>[
+      if (s.turnEndsAt != null && s.view?.finished == false)
+        Countdown(
+          endsAt: s.turnEndsAt!,
+          icon: Icons.hourglass_bottom,
+          warnSecs: 10,
+          // The server's own clock only starts once this seat's render ack
+          // lands (ADR-0028) - the display must not look like movement/
+          // animation is eating thinking time.
+          paused: s.isAnimating,
+        ),
+      // Personal time bank (ADR-0023): a flat reserve for the whole plain turn
+      // window, then counts down to the hard stop. Never refilled.
+      if (s.bankEndsAt != null && s.view?.finished == false)
+        Countdown(
+          endsAt: s.bankEndsAt!,
+          holdUntil: s.turnEndsAt,
+          icon: Icons.account_balance,
+          warnSecs: 10,
+          paused: s.isAnimating,
+        ),
+      // Sealed-bid window (ADR-0018): a one-shot ~12s countdown, local estimate
+      // only - the server alone decides when it actually closes, and its clock
+      // waits for the whole table's acks (ADR-0028).
+      if (s.bidEndsAt != null && s.view?.finished == false)
+        Countdown(
+          endsAt: s.bidEndsAt!,
+          icon: Icons.gavel,
+          warnSecs: 3,
+          paused: s.isAnimating,
+        ),
+      // Corruption bribe vote window (ADR-0024): same pattern.
+      if (s.voteEndsAt != null && s.view?.finished == false)
+        Countdown(
+          endsAt: s.voteEndsAt!,
+          icon: Icons.how_to_vote,
+          warnSecs: 2,
+          paused: s.isAnimating,
+        ),
+    ];
+
+    // The panel FLOATS on the sage plaza instead of tiling it: it hugs its
+    // content and centres, so the board - the protagonist - stays visible
+    // around it (`pc-sage` is the plaza's mandated colour, COLOR_SYSTEM).
+    // `Pc.hairShadow` is the register's one elevation statement (ART_DIRECTION:
+    // recede / base / lift) and every card in the chrome is flat by
+    // construction, so this is the interface's SINGLE lifted plane: "act here".
+    return Center(
+      child: Container(
+        padding: Pc.cardInset,
+        decoration: BoxDecoration(
+          color: Pc.surface,
+          borderRadius: Pc.radius,
+          border: Border.all(color: Pc.goldDark, width: 1.5),
+          boxShadow: Pc.hairShadow,
+        ),
+        child: DefaultTextStyle(
+          style: PcText.body,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // One reading column, top to bottom: what I am deciding, how long
+              // I have, then the action itself.
+              _turnPrompt(t),
+              if (clocks.isNotEmpty) ...[
+                const SizedBox(height: Pc.s4),
+                Row(
+                  children: [
+                    for (var i = 0; i < clocks.length; i++) ...[
+                      if (i > 0) const SizedBox(width: Pc.s6),
+                      clocks[i],
+                    ],
+                  ],
+                ),
+              ],
+              // Whitespace, not a rule, separates the context from the action.
+              const SizedBox(height: Pc.s12),
+              ActionsPanel(s: s),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  /// The turn prompt (game-screen refonte, DDR-0021): a prominent "your turn"
-  /// headline when the table is waiting on ME, the plain status otherwise. The
-  /// text is still `_status` for auctions/votes (it names who it waits on), only
-  /// promoted to gold when I am one of the seats that must act.
+  /// The turn prompt (game-screen refonte, DDR-0021): it says WHO the table is
+  /// waiting on, gold when that is me. A context label, deliberately not the
+  /// focal point - the primary button is (COLOR_SYSTEM: gold is for primary
+  /// CTAs and the attention hairline, and it only means anything while it stays
+  /// scarce). It carries the ratified role weight rather than a bespoke bump.
   Widget _turnPrompt(AppLocalizations t) {
     final v = s.view;
     final phase = v?.turn.type;
     final everyoneActs = phase == 'blind_auction' || phase == 'bribe_vote';
     final mine = v != null && !v.finished && (s.myTurn || everyoneActs);
-    final text =
-        (mine && s.myTurn && !everyoneActs) ? t.statusYourTurn : _status(t);
-    return Row(children: [
-      if (mine) ...[
-        const Icon(Icons.play_circle_fill, size: 16, color: Pc.gold),
-        const SizedBox(width: Pc.s6),
-      ],
-      Expanded(
-        child: Text(text,
+    final text = (mine && s.myTurn && !everyoneActs)
+        ? t.statusYourTurn
+        : _status(t);
+    return Row(
+      children: [
+        if (mine) ...[
+          const Icon(Icons.play_circle_fill, size: 16, color: Pc.gold),
+          const SizedBox(width: Pc.s6),
+        ],
+        Expanded(
+          child: Text(
+            text,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: PcText.rowTitle.copyWith(
-                color: mine ? Pc.gold : Pc.text,
-                fontWeight: mine ? FontWeight.w800 : FontWeight.w600)),
-      ),
-    ]);
+            style: PcText.rowTitle.copyWith(color: mine ? Pc.gold : Pc.text),
+          ),
+        ),
+      ],
+    );
   }
 
   String _status(AppLocalizations t) {
@@ -133,7 +156,7 @@ class CenterPanel extends StatelessWidget {
       case 'blind_auction':
         final pending = <int>[
           for (var i = 0; i < turn.bids.length; i++)
-            if (turn.bids[i] == null) i
+            if (turn.bids[i] == null) i,
         ];
         final waiting = pending.isEmpty
             ? t.statusNobody
@@ -142,13 +165,16 @@ class CenterPanel extends StatelessWidget {
       case 'bribe_vote':
         final pending = <int>[
           for (var i = 0; i < turn.votes.length; i++)
-            if (i != turn.briber && turn.votes[i] == null) i
+            if (i != turn.briber && turn.votes[i] == null) i,
         ];
         final waiting = pending.isEmpty
             ? t.statusNobody
             : pending.map(s.playerName).join(', ');
         return t.statusBribeVote(
-            s.playerName(turn.briber!), turn.amount!, waiting);
+          s.playerName(turn.briber!),
+          turn.amount!,
+          waiting,
+        );
       default:
         return t.statusPlayerTurn(s.playerName(v.current));
     }
