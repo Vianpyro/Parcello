@@ -398,15 +398,26 @@ class ActionsPanelState extends State<ActionsPanel> {
         ),
       );
     }
-    // The zones, in reading order. Peers inside a zone still wrap among
-    // themselves, but a primary never shares a Wrap with a secondary and no
-    // text ever shares one with a button.
-    final zones = <Widget>[
-      if (info.isNotEmpty) _stack(info),
-      if (input.isNotEmpty) _stack(input),
-      if (primary.isNotEmpty) _row(primary),
-      if (alternatives.isNotEmpty) _row(alternatives),
-      if (aide.isNotEmpty) _stack(aide),
+    // Three reading groups instead of five equal stripes: the decision CONTEXT
+    // (what is asked + the surface that composes it), the ACTIONS (the gold
+    // commit and its subordinate outline ways-out, read as one cluster), and
+    // the tile HINT. Restraint (ART_DIRECTION): whitespace alone groups them -
+    // tight inside a group (Pc.s6), a wider beat between (Pc.s8). No rule, no
+    // divider, and the panel is not made taller to do it. A peer inside a zone
+    // still wraps among its own kind, but a primary never shares a Wrap with a
+    // secondary and no text ever shares one with a button.
+    Widget? zone(List<Widget> items, Widget Function(List<Widget>) lay) =>
+        items.isEmpty ? null : lay(items);
+    final groupContext = <Widget>[?zone(info, _stack), ?zone(input, _stack)];
+    final groupActions = <Widget>[
+      ?zone(primary, _row),
+      ?zone(alternatives, _row),
+    ];
+    final groupHint = <Widget>[?zone(aide, _stack)];
+    final groups = <Widget>[
+      if (groupContext.isNotEmpty) _group(groupContext),
+      if (groupActions.isNotEmpty) _group(groupActions),
+      if (groupHint.isNotEmpty) _group(groupHint),
     ];
 
     // Grouped so a controller / Steam Deck traverses the action buttons
@@ -419,14 +430,27 @@ class ActionsPanelState extends State<ActionsPanel> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < zones.length; i++) ...[
+          for (var i = 0; i < groups.length; i++) ...[
             if (i > 0) const SizedBox(height: Pc.s8),
-            zones[i],
+            groups[i],
           ],
         ],
       ),
     );
   }
+
+  /// A reading group: its zones sit tight together (Pc.s6), set apart from the
+  /// next group by the caller's wider gap. Whitespace groups; nothing is drawn.
+  static Widget _group(List<Widget> zones) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (var i = 0; i < zones.length; i++) ...[
+        if (i > 0) const SizedBox(height: Pc.s6),
+        zones[i],
+      ],
+    ],
+  );
 
   /// A zone of peers laid out side by side, wrapping when the panel is narrow.
   static Widget _row(List<Widget> children) => Wrap(
