@@ -21,6 +21,7 @@ import 'flashes.dart';
 import 'market_strip.dart';
 import 'nav_rail.dart';
 import 'player_bar.dart';
+import 'property_panel.dart';
 
 class GameScreen extends StatelessWidget {
   final GameSession s;
@@ -105,18 +106,13 @@ class GameScreen extends StatelessWidget {
                   ]),
                 ),
                 const SizedBox(width: Pc.s12),
-                // The panel grows with the room - open trade offers (up to
-                // four per proposer), the post-game survey, the settings
-                // expander - so it has to scroll. Not a small-screen nicety:
-                // six offers already overflow a 1280x800 Steam Deck.
-                // The panel grows with the room - open trade offers (up to
-                // four per proposer), the post-game survey, the settings
-                // expander - so it has to scroll. Not a small-screen nicety:
-                // six offers already overflow a 1280x800 Steam Deck.
-                SizedBox(
-                  width: 340,
-                  child: SingleChildScrollView(child: SidePanel(s: s)),
-                ),
+                // Right region (DDR-0021): the property deed pinned at the top,
+                // the room-and-trades stack scrolling below it. The scroll lives
+                // inside _RightColumn now - only the growing remainder moves (up
+                // to four offers per proposer, the survey, the settings expander;
+                // six offers already overflow a 1280x800 Steam Deck), while the
+                // deed keeps its own stable slot.
+                SizedBox(width: 340, child: _RightColumn(s: s)),
                       ]),
                 ),
               ]),
@@ -263,5 +259,38 @@ class GameScreen extends StatelessWidget {
   }
 }
 
-/// Status line, contextual action buttons, and the event log — lives in the
-/// middle of the board, like the reference client.
+/// The right region (DDR-0021): a pure composition widget with no logic of its
+/// own beyond choosing which tile the property deed shows. It pins the deed to
+/// the top and lets the room/trades stack (`SidePanel`) scroll below it - no
+/// separator between the two, the split is purely structural.
+class _RightColumn extends StatelessWidget {
+  final GameSession s;
+  const _RightColumn({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final v = s.view;
+    // The property card shows the tile under the cursor/focus, else the one the
+    // player is standing on (DDR-0021 right region). Moved verbatim from
+    // SidePanel: the deed now owns its own stable slot instead of scrolling
+    // with the trades below it.
+    final focusTile = (v != null && !v.finished)
+        ? (s.hoverTile ??
+              (s.seat != null
+                  ? v.players.elementAtOrNull(s.seat!)?.position
+                  : null))
+        : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (focusTile != null && s.content != null) ...[
+          PropertyPanel(s: s, tile: focusTile),
+          const SizedBox(height: Pc.s6),
+        ],
+        // Only this lower region scrolls - it grows with the room; the deed
+        // above stays put.
+        Expanded(child: SingleChildScrollView(child: SidePanel(s: s))),
+      ],
+    );
+  }
+}

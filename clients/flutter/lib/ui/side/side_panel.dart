@@ -1,5 +1,8 @@
-/// The right-hand column: room, property, trades, and the end-of-game cards.
-/// It scrolls because it grows with the room (six offers overflow a Deck).
+/// The scrolling remainder of the right region (DDR-0021): room, trades, and
+/// the end-of-game cards. It scrolls because it grows with the room (six offers
+/// overflow a Deck). The property deed is no longer here - it moved to its own
+/// stable slot above this stack (`_RightColumn` in game_screen), which is also
+/// where the hover-else-standing tile is now chosen.
 /// Resign is NOT here - it moved to NavRail's Menu (game-screen refonte),
 /// gated on `GameSession.canResign`.
 library;
@@ -15,7 +18,6 @@ import '../../tokens.dart';
 import '../../typography.dart';
 import '../coach_mark.dart';
 import '../common.dart';
-import '../game/property_panel.dart';
 import '../game/trade_offer_card.dart';
 import 'feedback_card.dart';
 import 'settings_panel.dart';
@@ -29,15 +31,6 @@ class SidePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = s.view;
     final t = AppLocalizations.of(context);
-    // The property card shows the tile under the cursor/focus, else the one the
-    // player is standing on (DDR-0021 right region; first slice, still hosted in
-    // the side panel until the full reflow moves it to its own region).
-    final focusTile = (v != null && !v.finished)
-        ? (s.hoverTile ??
-              (s.seat != null
-                  ? v.players.elementAtOrNull(s.seat!)?.position
-                  : null))
-        : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -113,11 +106,6 @@ class SidePanel extends StatelessWidget {
               ],
             ),
           ),
-        if (focusTile != null && s.content != null) ...[
-          const SizedBox(height: Pc.s6),
-          PropertyPanel(s: s, tile: focusTile),
-          const SizedBox(height: Pc.s6),
-        ],
         PcCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
