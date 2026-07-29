@@ -12,11 +12,30 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'iso_projection.dart';
 import 'motion.dart';
 import 'protocol.dart';
 import 'sfx.dart';
 import 'stage.dart';
 import 'tokens.dart';
+
+/// The one isometric projection the board renders through (DDR-0022). All
+/// tile-index-to-screen maths lives in `IsoProjection`; the board only consumes
+/// the points it returns - it never re-derives a projection formula.
+const _iso = IsoProjection();
+
+/// The grid cell of ring tile `i` as an [IsoCell] (the topology is `cellOf`;
+/// this only adapts its record to the projection's value type).
+IsoCell _isoCell(int i, int d) {
+  final c = cellOf(i, d);
+  return IsoCell(c.r, c.c);
+}
+
+/// Key on the box the board is fitted into - the one [BoardGeometry] is built
+/// from. Public so `test/board_geometry_test.dart` can MEASURE that box rather
+/// than re-deriving the surrounding layout: a composition test that recomputes
+/// its own subject proves nothing.
+const boardSurfaceKey = ValueKey<String>('parcello.board.surface');
 
 /// A board of `n` tiles renders as a square ring when `n` is `4*(d-1)`
 /// for a `d`x`d` grid (32 -> 9x9, 40 -> 11x11, ...).
@@ -30,6 +49,197 @@ int ringSide(int n) => n ~/ 4 + 1; // the `d` above
   if (i <= 2 * d - 2) return (r: 2 * d - 1 - i, c: 1); // left column up
   if (i <= 3 * d - 3) return (r: 1, c: i - 2 * d + 3); // top row
   return (r: i - 3 * d + 4, c: d); // right column down
+}
+
+/// The order the `tiles` ring tiles must be PAINTED in: back to front, so a
+/// nearer card lands on top of the one behind it (DDR-0022 step C3).
+///
+/// The ring INDEX is not that order. It walks the ring from the tile nearest the
+/// eye (0, the bottom vertex) away and back again, so painting in index order
+/// draws the farther card over the nearer one on half the board - which the flat
+/// board never noticed, because its cells were disjoint and the paint order
+/// meant nothing. Projected, a card is 1.5 projection units on a side
+/// ([BoardGeometry] footprint) while ring neighbours sit 1 unit apart in x and
+/// 0.5 in y, so every neighbouring pair overlaps and the order became visible.
+/// Go, the nearest tile of all, was the worst case: it was painted first and
+/// both its neighbours covered it.
+///
+/// Depth itself is NOT defined here - it is `IsoProjection.compareDepth`, so
+/// that the renderer, a later hit-test, and anything stacked on a cell all order
+/// by one definition instead of each re-deriving `row + col`. This function only
+/// applies it to the ring's topology.
+///
+/// It depends on `tiles` and on nothing else: not on the box, the viewport, the
+/// HUD, `StageState`, or an animation frame. That is deliberate and worth
+/// keeping - depth is a rank, invariant under the affine viewport transform, so
+/// a resize (and later a zoom/pan camera, or a board with a fixed logical size)
+/// cannot reorder the board, and no animation frame can reshuffle the tiles
+/// under a player mid-move.
+List<int> ringPaintOrder(int tiles) {
+  final d = ringSide(tiles);
+  return List<int>.unmodifiable([for (var i = 0; i < tiles; i++) i]
+    ..sort((a, b) => _iso.compareDepth(_isoCell(a, d), _isoCell(b, d))));
+}
+
+/// Where everything on a ring board is, once projected into a pixel box.
+///
+/// Pure, and the SINGLE place the board's index-to-pixel arithmetic lives: the
+/// tiles, the pawn layer and the stage anchors all read it. That is what makes
+/// `test/board_geometry_test.dart` worth anything - it asserts the composition
+/// that is actually drawn, not a second copy of the same formulas.
+///
+/// Step A/B proved the projection MATHS (`iso_projection.dart`). This proves
+/// the COMPOSITION, which is a different thing and is what broke: the flat
+/// board's numbers survived the projection and stopped meaning what they used
+/// to (DDR-0022 step C).
+@immutable
+class BoardGeometry {
+  /// The box this geometry was fitted into, in board-local pixels.
+  final Size box;
+
+  /// Tile count, and the grid dimension `d` of the `d`x`d` ring it implies.
+  final int tiles;
+  final int side;
+
+  /// Footprint of one tile card, in board-local pixels. Derived from
+  /// [fit.scale] - the projection's own step - and from nothing else
+  /// (DDR-0022 step C1.5).
+  ///
+  /// It used to be the flat board's `min(box.width, box.height) / d`. That was
+  /// only ever correct while an `AspectRatio(1)` forced the board's box square,
+  /// which made "a d-th of the box" and "one grid step" the same number. C1
+  /// removed that square, so the two drifted apart - at the 1024x600 floor the
+  /// cards were sized off the box's HEIGHT while the diamond was scaled by its
+  /// WIDTH, and the cards came out 29% larger than the step they sit on.
+  ///
+  /// The coupling `viewport -> tileSize` is therefore gone: it is
+  /// `projection -> fit.scale -> tileSize`. A card is a fixed multiple of the
+  /// projected cell ([_cardFootprint]), so it means the same thing in any box,
+  /// which is also what a later camera (zoom/pan on a fixed logical board)
+  /// needs.
+  final double tileSize;
+
+  /// The uniform scale + translation from projection space into [box].
+  final IsoFit fit;
+
+  /// Ring tiles in back-to-front paint order ([ringPaintOrder]). Held here
+  /// because this is the one thing the renderer reads the board's layout from,
+  /// but it is a function of [tiles] alone - see [ringPaintOrder].
+  final List<int> paintOrder;
+
+  const BoardGeometry._({
+    required this.box,
+    required this.tiles,
+    required this.side,
+    required this.tileSize,
+    required this.fit,
+    required this.paintOrder,
+  });
+
+  /// A card's side, in PROJECTION units: the one design number of this step,
+  /// and the whole of the card's size. The projected cell is a 2:1 diamond,
+  /// 2 units wide and 1 unit tall, so the two geometric extremes are `1` (a
+  /// card spans exactly one grid step; adjacent cards touch and never overlap)
+  /// and `2` (a card spans the cell's full width, hiding half its neighbour).
+  ///
+  /// `1.5` sits between them - three quarters of the cell's width - for two
+  /// reasons that are not geometry and should be said out loud. It keeps the
+  /// cards at the apparent size they already have (the ratio this replaces
+  /// measured 1.29 to 1.36 across the shipping sizes), so a decoupling step
+  /// does not silently restyle the board; and the tile card's own content has
+  /// a hard floor of about 44px once its type sizes hit their clamps, which
+  /// `1` misses by 10px at 1024x600. Lowering it below ~1.35 therefore needs
+  /// the card's typography floors to come down with it.
+  static const double _cardFootprint = 1.5;
+
+  /// Fit the `tiles`-tile ring into `box`. The diamond is scaled uniformly and
+  /// centred, inset by half a card so the vertex cards (Go included) stay
+  /// fully inside.
+  ///
+  /// The inset is half a card and a card is a multiple of the scale, so the
+  /// scale defines itself. The fixed point is closed-form rather than iterated:
+  /// with `k` = [_cardFootprint], `scale * (bounds + k) = box`, hence the
+  /// `box / (bounds + k)` below. It only chooses the padding - [tileSize] is
+  /// then read back off the fit's own scale, so the two can never disagree.
+  factory BoardGeometry.of({required int tiles, required Size box}) {
+    final d = ringSide(tiles);
+    final cells = [for (var i = 0; i < tiles; i++) _isoCell(i, d)];
+    final b = _iso.bounds(cells);
+    final scale = math.min(
+      b.width == 0 ? double.infinity : box.width / (b.width + _cardFootprint),
+      b.height == 0 ? double.infinity : box.height / (b.height + _cardFootprint),
+    );
+    final fit = _iso.fit(
+      cells,
+      width: box.width,
+      height: box.height,
+      padding: _cardFootprint * scale / 2,
+    );
+    return BoardGeometry._(
+      box: box,
+      tiles: tiles,
+      side: d,
+      tileSize: _cardFootprint * fit.scale,
+      fit: fit,
+      paintOrder: ringPaintOrder(tiles),
+    );
+  }
+
+  /// Centre of ring tile `i`, in board-local pixels.
+  Offset centreOf(int i) {
+    final p = fit.apply(_iso.project(_isoCell(i, side)));
+    return Offset(p.x, p.y);
+  }
+
+  /// Bounding box of the projected ring - the diamond's extent on screen.
+  Rect get diamond {
+    var r = Rect.fromCenter(center: centreOf(0), width: 0, height: 0);
+    for (var i = 1; i < tiles; i++) {
+      r = r.expandToInclude(
+        Rect.fromCenter(center: centreOf(i), width: 0, height: 0),
+      );
+    }
+    return r;
+  }
+
+  /// The plaza: the ring's central hole, as a polygon.
+  ///
+  /// This is the whole of DDR-0022 step C in one member. On the flat board the
+  /// hole WAS an axis-aligned rectangle - the complement of a border on a
+  /// `d`x`d` grid - so the board could hand that rectangle to the contextual
+  /// panel and the two never met. Projected, the hole is a RHOMBUS, and the
+  /// largest aligned rectangle inside it is 3/8 x 3/8 of the diamond's box:
+  /// far too small for a panel. Keeping the flat rectangle is what buried 26
+  /// of 32 tiles at the 1024x600 floor.
+  ///
+  /// So the plaza is defined here as what it geometrically IS, and
+  /// `board_geometry_test` holds it to the one rule it always had and silently
+  /// lost: it contains no ring tile. Nothing paints it yet.
+  List<Offset> get plaza {
+    Offset corner(int r, int c) {
+      final p = fit.apply(_iso.project(IsoCell(r, c)));
+      return Offset(p.x, p.y);
+    }
+
+    // The four corner cells of the interior block (rows/cols 2..d-1).
+    return [
+      corner(2, 2),
+      corner(2, side - 1),
+      corner(side - 1, side - 1),
+      corner(side - 1, 2),
+    ];
+  }
+
+  /// The box the composition reserves in the board's MIDDLE for a widget, or
+  /// null when it reserves none. It is null, and the point is that it stays
+  /// null: the contextual panel lives under the ring now.
+  ///
+  /// It used to be the flat board's centred `(d-2)/d` rectangle. That
+  /// rectangle was the ring's hole on a grid and is a slab across the ring in
+  /// projection - it buried 26 of 32 tiles at the 1024x600 floor. Anything put
+  /// back here has to fit inside [plaza], and `board_geometry_test` checks it,
+  /// because a decision with no enforcement point is a comment.
+  Rect? get centreSlot => null;
 }
 
 class BoardWidget extends StatefulWidget {
@@ -99,13 +309,14 @@ class _BoardWidgetState extends State<BoardWidget> {
 
   /// Hands the stage a way to turn a tile index into a screen point, so a chit
   /// can fly from a board tile to a seat marker in the side panel. Only this
-  /// widget knows the ring geometry.
-  void _installAnchors(int d, double w, double h) {
+  /// widget knows how the ring is laid out; the projection itself lives in
+  /// `IsoProjection`, so re-anchoring for the isometric board was swapping the
+  /// point this returns, nothing else (DDR-0022).
+  void _installAnchors(BoardGeometry g) {
     widget.stage.anchors.tiles = (tile) {
       final box = _ringKey.currentContext?.findRenderObject() as RenderBox?;
       if (box == null || !box.hasSize || tile < 0) return null;
-      final c = cellOf(tile, d);
-      return box.localToGlobal(Offset((c.c - 0.5) * w, (c.r - 0.5) * h));
+      return box.localToGlobal(g.centreOf(tile));
     };
   }
 
@@ -127,40 +338,63 @@ class _BoardWidgetState extends State<BoardWidget> {
   Widget _build(BuildContext context) {
     final n = widget.content.board.length;
     if (!isSquareRing(n)) return _wrapLayout();
-    final d = ringSide(n); // grid is d x d
-    return AspectRatio(
-      aspectRatio: 1,
-      child: LayoutBuilder(builder: (context, box) {
-        final w = box.maxWidth / d, h = box.maxHeight / d;
-        _installAnchors(d, w, h);
-        return Stack(key: _ringKey, children: [
-          Positioned(
-            left: w,
-            top: h,
-            width: w * (d - 2),
-            height: h * (d - 2),
-            child: Container(
-              margin: const EdgeInsets.all(Pc.s2),
-              padding: const EdgeInsets.all(Pc.s8),
-              // The centre plaza (visual-identity.md), not a white sheet.
-              color: Pc.sage,
-              child: widget.center,
-            ),
-          ),
-          for (var i = 0; i < n; i++)
-            Positioned(
-              left: (cellOf(i, d).c - 1) * w,
-              top: (cellOf(i, d).r - 1) * h,
-              width: w,
-              height: h,
-              child: _tile(i, cellW: w),
-            ),
-          Positioned.fill(
-            child: _PawnLayer(
-                side: d, cellW: w, cellH: h, pawns: _pawns(), stage: widget.stage),
-          ),
-        ]);
-      }),
+    // The contextual panel sits UNDER the ring, not in it (DDR-0022 step C).
+    //
+    // The flat board could put it in the middle because the ring's hole was an
+    // axis-aligned rectangle of `(d-2)/d`. Projected, that hole is a rhombus
+    // whose largest aligned rectangle is 3/8 x 3/8 of the diamond's box - no
+    // screen size makes the panel fit in it, so the middle is not a slot at
+    // all. What the projection gives back instead is vertical room: a 2:1
+    // diamond in a near-square region leaves a surplus, and the panel takes
+    // exactly that. `Expanded` + a panel that hugs its content means no
+    // arithmetic and no reserved band: whatever the panel needs, the ring fits
+    // in the rest, and `IsoProjection.fit` handles the rest of the story.
+    //
+    // `stretch` is load-bearing: a Column hands its children LOOSE cross-axis
+    // constraints, and the ring Stack has none but positioned children - it
+    // would collapse to zero width.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: LayoutBuilder(
+              key: boardSurfaceKey,
+              builder: (context, box) {
+                final g = BoardGeometry.of(
+                    tiles: n, box: Size(box.maxWidth, box.maxHeight));
+                _installAnchors(g);
+                return Stack(key: _ringKey, children: [
+                  // Back to front, not ring order: a projected card overlaps its
+                  // neighbours, so the nearer one has to be drawn last
+                  // ([ringPaintOrder]). The pawn layer stays above all of them.
+                  for (final i in g.paintOrder) _positionedTile(i, g),
+                  Positioned.fill(
+                    child: _PawnLayer(
+                        geometry: g, pawns: _pawns(), stage: widget.stage),
+                  ),
+                ]);
+              }),
+        ),
+        widget.center,
+      ],
+    );
+  }
+
+  /// One ring tile, its upright card unchanged, placed at its projected centre.
+  ///
+  /// Keyed on the tile index because the children are no longer in index order:
+  /// without a key Flutter matches them by POSITION in the list, so a tile's
+  /// element - and the animation state inside it, `_Refusable`'s controller
+  /// included - would belong to a slot rather than to a tile.
+  Widget _positionedTile(int i, BoardGeometry g) {
+    final c = g.centreOf(i);
+    return Positioned(
+      key: ValueKey(i),
+      left: c.dx - g.tileSize / 2,
+      top: c.dy - g.tileSize / 2,
+      width: g.tileSize,
+      height: g.tileSize,
+      child: _tile(i, cellW: g.tileSize),
     );
   }
 
@@ -572,14 +806,13 @@ class PawnData {
 /// given move gets is decided by the director (the truth rule: motion may not
 /// imply a path the engine did not take), and handed over on the stage.
 class _PawnLayer extends StatefulWidget {
-  final int side; // ring grid dimension (d)
-  final double cellW, cellH;
+  /// The board's geometry, so a pawn's position comes from the same single
+  /// mapping the tiles and the anchors use - it used to be re-derived here.
+  final BoardGeometry geometry;
   final List<PawnData> pawns;
   final StageState stage;
   const _PawnLayer({
-    required this.side,
-    required this.cellW,
-    required this.cellH,
+    required this.geometry,
     required this.pawns,
     required this.stage,
   });
@@ -597,7 +830,7 @@ class _PawnAnim {
 }
 
 class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
-  int get _boardLen => 4 * (widget.side - 1);
+  int get _boardLen => widget.geometry.tiles;
   final Map<int, _PawnAnim> _anims = {};
 
   _PawnAnim _makeAnim(int pos) {
@@ -685,10 +918,7 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
     });
   }
 
-  Offset _center(int i) {
-    final c = cellOf(i, widget.side);
-    return Offset((c.c - 0.5) * widget.cellW, (c.r - 0.5) * widget.cellH);
-  }
+  Offset _center(int i) => widget.geometry.centreOf(i);
 
   Offset _offsetOf(_PawnAnim a) {
     final pts = [for (final i in a.waypoints) _center(i)];
@@ -704,8 +934,8 @@ class _PawnLayerState extends State<_PawnLayer> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final size = (widget.cellW * 0.42).clamp(18.0, 34.0);
-    final fanR = widget.cellW * 0.16;
+    final size = (widget.geometry.tileSize * 0.42).clamp(18.0, 34.0);
+    final fanR = widget.geometry.tileSize * 0.16;
     final controllers = [for (final a in _anims.values) a.ctrl];
     return IgnorePointer(
       child: AnimatedBuilder(
