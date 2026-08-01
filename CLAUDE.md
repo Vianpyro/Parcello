@@ -53,7 +53,13 @@ Authoritative documents, in order of precedence:
    token is MEMORY-ONLY, never persisted; `GameSession` reconnects a dropped
    socket with backoff and re-sends `join` automatically so the seat is
    reclaimed with no user action; server-side, `exp` gains a 60s
-   `CLOCK_SKEW_LEEWAY_SECS` via the shared `auth::is_live`.
+   `CLOCK_SKEW_LEEWAY_SECS` via the shared `auth::is_live`; 0038 the
+   admin-only feedback console at `/admin` (`--admin` allowlist of player
+   ids, per server and NEVER an issuer role - shared identity providers
+   would leak admin across community servers; a `FeedbackQuery` read port
+   beside `GameHistory`; a public votable feedback wall was considered and
+   REJECTED there - per-server tables, tiny samples, and publishing a
+   survey changes what people write).
 3. `README.md` - user-facing behavior reference (rules implemented, flags,
    protocol summary, known limitations).
 
@@ -324,6 +330,22 @@ architecture doc section 5; dependencies point downward only):
   multicast to `239.255.0.1:55888` with optional broadcast fallback so LAN
   clients find the server without a URL; best-effort, detached, no admin
   control plane - local process management is the client's job, ADR-0016),
+  `feedback.rs` + `admin.rs` (ADR-0038, the read-only feedback console:
+  `FeedbackQuery` is a SEPARATE port from `GameHistory` - same reasoning
+  that split `RatingStore` out - whose `SqliteFeedback` adapter opens the
+  `--history` file `SQLITE_OPEN_READ_ONLY` and joins `feedback` to `game`
+  so every answer carries its game's length, seats and win/loss;
+  `admin.rs` holds the guard and the two routes, and `assets/admin.html`
+  is the whole page, compiled in with `include_str!` - deliberately NOT
+  the Flutter bundle's disk-served treatment, since it is one file and
+  admin code must not ship to players or spend their size budget.
+  Authorisation is `AppState.admins`, an operator-set allowlist of player
+  ids from `--admin`/`PARCELLO_ADMIN_SUBS`, NOT an issuer-side role claim:
+  community servers share an identity provider, so a role in the token
+  would grant admin on every server on it. Empty allowlist = the whole
+  surface 404s, the default. Guests are refused before the allowlist is
+  read. There is no public feedback page and no voting - ADR-0038 records
+  why the idea was rejected),
   the Flutter Web client (served from disk at runtime via `tower-http`'s
   `ServeDir`, `--web-dir`/`PARCELLO_WEB_DIR`, default `web` - mirrors
   `--mods-dir`'s pattern, not compiled into the binary; fails loudly at

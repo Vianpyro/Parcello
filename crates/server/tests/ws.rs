@@ -41,6 +41,8 @@ async fn spawn_server() -> String {
         ranked: None,
         guest_allowed: true,
         showcase: false,
+        admins: Arc::new(std::collections::HashSet::new()),
+        feedback: None,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -132,6 +134,8 @@ async fn spawn_ranked_server_with_grace(secret: &str, start_grace: std::time::Du
         ranked: Some(ranked),
         guest_allowed: true,
         showcase: false,
+        admins: Arc::new(std::collections::HashSet::new()),
+        feedback: None,
     };
     spawn_matchmaker(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -368,6 +372,8 @@ async fn config_json_advertises_default_issuer() {
         // state, so clients can trust it to hide the guest path.
         guest_allowed: false,
         showcase: false,
+        admins: Arc::new(std::collections::HashSet::new()),
+        feedback: None,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -734,6 +740,8 @@ async fn showcase_supervisor_provides_a_bots_game_to_watch() {
         ranked: None,
         guest_allowed: true,
         showcase: true,
+        admins: Arc::new(std::collections::HashSet::new()),
+        feedback: None,
     };
     parcello_server::showcase::spawn_showcase(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

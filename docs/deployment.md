@@ -92,6 +92,10 @@ unset). Then create the client the game clients will log in through:
      which forwards the authorization response back via `postMessage`
      and closes itself; a browser page can't bind a loopback port, so
      it can't reuse the desktop flow.
+   - `https://game.example.com/admin` - only if you run the admin
+     feedback console (`--admin`, ADR-0038). It signs in with a plain
+     full-page redirect back to itself, so the console's own URL is the
+     redirect URI. Skip this if you do not enable the console.
 4. Token signing: set the **ID token** algorithm to **EdDSA** (Ed25519) -
    the server only verifies EdDSA, and it authenticates players with the
    ID token rather than the access token (ADR-0009 amendment 2 explains

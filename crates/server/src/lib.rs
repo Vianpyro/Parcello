@@ -4,6 +4,7 @@
 //! split exists so integration tests (and future tooling) can build the
 //! same router against an in-memory `AppState`.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -23,8 +24,10 @@ use tokio::sync::Semaphore;
 /// (docs/deployment.md).
 pub const MAX_CONNECTIONS: usize = 1024;
 
+pub mod admin;
 pub mod auth;
 pub mod eddsa;
+pub mod feedback;
 pub mod history;
 pub mod lan;
 pub mod ranked;
@@ -33,6 +36,7 @@ pub mod showcase;
 pub mod ws;
 
 use auth::IdentityVerifier;
+use feedback::FeedbackQuery;
 use history::GameHistory;
 use ranked::RankedService;
 use room::Rooms;
@@ -73,6 +77,14 @@ pub struct AppState {
     /// Keep a bots showcase game running when no humans are playing
     /// (`--showcase`, ADR-0035), so `spectate` always finds something.
     pub showcase: bool,
+    /// Token subjects allowed into the admin feedback console (`--admin`,
+    /// ADR-0038). Empty = the console does not exist on this server: every
+    /// `/admin` route answers 404, which is the default.
+    pub admins: Arc<HashSet<String>>,
+    /// Read side of the post-game survey (ADR-0038). `None` without
+    /// `--history` - there is no database to read, and the console says so
+    /// rather than showing an empty list.
+    pub feedback: Option<Arc<dyn FeedbackQuery>>,
 }
 
 impl AppState {
@@ -106,12 +118,18 @@ async fn client_config(State(state): State<AppState>) -> Json<ClientConfig> {
     })
 }
 
-/// The game-facing routes (`/healthz`, `/ws`, `/config.json`). The binary
-/// layers the Flutter Web static service on top; tests use this bare router.
+/// The game-facing routes plus the admin console (ADR-0038).
+///
+/// `/healthz`, `/config.json`, `/ws`, and `/admin` - the last 404s unless
+/// `--admin` names at least one subject. The binary layers the Flutter Web
+/// static service on top as a *fallback*, so these routes always win over
+/// it; tests use this bare router.
 pub fn game_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/config.json", get(client_config))
         .route("/ws", get(ws::ws_handler))
+        .route("/admin", get(admin::console))
+        .route("/admin/api/feedback", get(admin::feedback))
         .with_state(state)
 }

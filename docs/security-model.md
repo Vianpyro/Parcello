@@ -49,7 +49,10 @@ can check they still exist.
 | Sealed bids | seeing others' pending bids | masked in `for_seat`/`for_spectator` views; amount-less `BlindBidSubmitted` event (E5) |
 | RNG | predicting draws | seed/deck never serialized into any view (E4) |
 | Idle resources | rooms living forever | 30-min idle dissolution; `Probe` explicitly does not count as activity (S6) |
-| History DB | SQL injection via comments | parameterized statements only (history.rs, store.rs) |
+| History DB | SQL injection via comments | parameterized statements only (history.rs, store.rs, feedback.rs) |
+| Admin console | reading other players' words | `/admin` 404s unless `--admin` lists subjects; Bearer id token through the same `IdentityVerifier`; spoofable identities refused before the allowlist (admin.rs `refusal`, ADR-0038) |
+| Admin console | privilege leaking across community servers | the allowlist is per server, never an issuer-side role claim - servers share an identity provider (ADR-0038) |
+| Admin console | a console write path | none exists: the query adapter opens the database `SQLITE_OPEN_READ_ONLY` (feedback.rs) |
 
 ## Cheating analysis
 

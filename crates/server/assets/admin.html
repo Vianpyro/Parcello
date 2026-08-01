@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Tally &middot; Parcello</title>
+<style>
+/* Palette: docs/visual-identity.md. Parchment is specified there for
+   "receipts, paper elements" - a survey answer is one, so the console
+   inverts the game's dark board into the paper the answers belong on.
+   The three derived values (--field, --ink-muted, --rule) are tones of
+   the specified parchment/ink, not new hues. */
+:root {
+  --field:      #E4D8BB;
+  --slip:       #ECE0C2;
+  --ink:        #2A2420;
+  --ink-muted:  #5F5443;
+  --rule:       #C9B98F;
+  --gold:       #D8B45A;
+  --gold-dark:  #A9812F;
+  --dark:       #14171C;
+
+  /* Rating ramp: diverging through the brand's own hues, neutral at 3. */
+  --r1: #9C433A;  /* pc-oxblood */
+  --r2: #9E6136;
+  --r3: #A9812F;  /* pc-gold-dark */
+  --r4: #6A7440;
+  --r5: #3F5240;  /* pc-sage */
+
+  /* No webfonts: the server makes no external requests, and neither does
+     its console. Serif for prose because this page's job is reading what
+     players wrote; mono for every number, so columns align for free. */
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.5;
+}
+.wrap { max-width: 60rem; margin: 0 auto; padding: 0 1.5rem; }
+
+:focus-visible { outline: 2px solid var(--gold-dark); outline-offset: 2px; }
+
+/* ---- masthead: the one dark band, the console's only tie to the board ---- */
+.masthead { background: var(--dark); border-bottom: 2px solid var(--gold-dark); }
+.masthead .wrap {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: .5rem 1.5rem; padding-top: 1.1rem; padding-bottom: 1.1rem;
+}
+.wordmark {
+  font-size: 1.05rem; font-weight: 700; letter-spacing: .34em;
+  text-transform: uppercase; color: var(--gold); margin: 0;
+}
+.wordmark span { color: var(--slip); letter-spacing: .18em; }
+.stats {
+  margin-left: auto; font-family: var(--mono); font-size: .8rem;
+  color: var(--rule); font-variant-numeric: tabular-nums;
+}
+.stats b { color: var(--slip); font-weight: 500; }
+
+main { padding: 2.5rem 0 4rem; }
+
+/* ---- the length plot: the one question the design goal asks ---- */
+.span { margin-bottom: 2rem; }
+.span-head {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: .5rem 1rem; margin-bottom: 1rem;
+}
+h2 {
+  font-size: .72rem; font-weight: 700; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--ink-muted);
+  margin: 0; font-family: var(--mono);
+}
+.plot { position: relative; height: 96px; transition: height .2s; }
+.mark {
+  position: absolute; width: 3px; height: 12px;
+  background: var(--mark, var(--ink));
+  transform: translateX(-50%); transform-origin: 50% 100%;
+}
+.axis { position: relative; height: 1.6rem; border-top: 1px solid var(--rule); }
+.tick { position: absolute; top: 0; transform: translateX(-50%); }
+/* The last label would hang half outside the container. */
+.tick.last { transform: translateX(-100%); }
+.tick.last::before { left: 100%; }
+.tick::before {
+  content: ""; position: absolute; left: 50%; top: -1px;
+  width: 1px; height: 5px; background: var(--rule);
+}
+.tick span {
+  display: block; padding-top: .5rem;
+  font-family: var(--mono); font-size: .7rem; color: var(--ink-muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.verdict {
+  max-width: 46rem; margin: 1.1rem 0 0;
+  font-size: 1.02rem; color: var(--ink);
+}
+.verdict.thin { color: var(--ink-muted); font-style: italic; }
+
+.legend {
+  display: flex; align-items: center; gap: .35rem; margin: 0;
+  font-family: var(--mono); font-size: .7rem; color: var(--ink-muted);
+}
+.legend i { width: 9px; height: 9px; display: block; }
+
+/* ---- filters ---- */
+.filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem;
+  padding: .9rem 0; border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule); margin-bottom: 2rem;
+}
+.filters .lab {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--ink-muted); margin-right: .4rem;
+}
+.chip {
+  font: inherit; font-family: var(--mono); font-size: .8rem;
+  padding: .25rem .7rem; background: var(--slip); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 0; cursor: pointer;
+}
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--slip); border-color: var(--ink); }
+.chip.quiet { border-color: transparent; background: none; color: var(--ink-muted); text-decoration: underline; }
+
+/* ---- the slip: signature element ----
+   The punched column IS the rating: as many filled cells as stars we are
+   not drawing. One hairline frame around the whole strip, so it reads as
+   a punch-card edge rather than five checkboxes. */
+.slips { list-style: none; margin: 0; padding: 0; }
+.slip {
+  display: grid; grid-template-columns: auto 1fr; gap: 0 1.15rem;
+  background: var(--slip); border: 1px solid var(--rule);
+  padding: 1.05rem 1.3rem; margin-bottom: .85rem;
+}
+.punch {
+  display: flex; flex-direction: column; gap: 1px; margin-top: .3rem;
+  border: 1px solid var(--rule); background: var(--rule);
+  align-self: start;
+}
+.punch i { display: block; width: 11px; height: 10px; background: var(--slip); }
+.punch i.on { background: var(--mark); }
+
+.head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem .9rem;
+  font-family: var(--mono); font-size: .78rem; color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+.score { color: var(--ink); font-weight: 600; }
+.outcome { letter-spacing: .14em; text-transform: uppercase; font-size: .68rem; }
+.outcome.won { color: var(--r5); }
+.outcome.lost { color: var(--r1); }
+.when { margin-left: auto; }
+.author { color: var(--rule); }
+
+.said {
+  margin: .7rem 0 0; max-width: 58ch;
+  font-size: 1.05rem; line-height: 1.55; hanging-punctuation: first;
+}
+.said.none { color: var(--ink-muted); font-style: italic; font-size: .95rem; }
+
+/* ---- gate and messages ---- */
+.card {
+  background: var(--slip); border: 1px solid var(--rule);
+  padding: 2.25rem 2rem; max-width: 32rem; margin: 3rem auto; text-align: center;
+}
+.card h1 { font-size: 1.35rem; margin: 0 0 .6rem; font-weight: 700; }
+.card p { margin: 0 0 1.4rem; color: var(--ink-muted); }
+.card p:last-child { margin-bottom: 0; }
+.btn {
+  font: inherit; font-weight: 600; padding: .6rem 1.6rem;
+  background: var(--gold); color: var(--ink);
+  border: 1px solid var(--gold-dark); border-radius: 0; cursor: pointer;
+}
+.btn:hover { background: var(--gold-dark); }
+code {
+  font-family: var(--mono); font-size: .85em;
+  background: var(--field); padding: .1rem .35rem; border: 1px solid var(--rule);
+}
+.empty { color: var(--ink-muted); font-style: italic; padding: 2rem 0; }
+
+[hidden] { display: none !important; }
+
+/* ---- motion: one entrance, nothing else ---- */
+@media (prefers-reduced-motion: no-preference) {
+  .slip { animation: rise .34s ease-out both; animation-delay: calc(var(--i, 0) * 22ms); }
+  .mark { animation: grow .3s ease-out both; animation-delay: calc(var(--i, 0) * 6ms); }
+}
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes grow { from { opacity: 0; transform: translateX(-50%) scaleY(0); } }
+
+@media (max-width: 40rem) {
+  body { font-size: 16px; }
+  .wrap { padding: 0 1rem; }
+  .stats { margin-left: 0; width: 100%; }
+  .when { margin-left: 0; }
+  .slip { padding: .9rem 1rem; gap: 0 .8rem; }
+  .plot { height: 76px; }
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="wordmark">Parcello <span>Tally</span></p>
+    <p class="stats" id="stats" hidden></p>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- Sign-in, refusals and "no database" all land here. -->
+  <section class="card" id="gate" hidden>
+    <h1 id="gate-title"></h1>
+    <p id="gate-body"></p>
+    <p id="gate-action"><button class="btn" id="signin" type="button">Sign in</button></p>
+  </section>
+
+  <section id="console" hidden>
+    <section class="span">
+      <div class="span-head">
+        <h2>Rated games by length</h2>
+        <p class="legend" id="legend"></p>
+      </div>
+      <div class="plot" id="plot"></div>
+      <div class="axis" id="axis"></div>
+      <p class="verdict" id="verdict"></p>
+    </section>
+
+    <div class="filters">
+      <span class="lab">Show</span>
+      <button class="chip" type="button" data-rating="1" aria-pressed="false">1</button>
+      <button class="chip" type="button" data-rating="2" aria-pressed="false">2</button>
+      <button class="chip" type="button" data-rating="3" aria-pressed="false">3</button>
+      <button class="chip" type="button" data-rating="4" aria-pressed="false">4</button>
+      <button class="chip" type="button" data-rating="5" aria-pressed="false">5</button>
+      <button class="chip" type="button" id="only-comments" aria-pressed="false">With a comment</button>
+      <button class="chip quiet" type="button" id="clear">Clear</button>
+    </div>
+
+    <ol class="slips" id="slips"></ol>
+    <p class="empty" id="empty" hidden></p>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* Every user-facing string is either in the markup above or in S below. */
+const S = {
+  signInTitle:  "Sign in to read this server's answers",
+  signInBody:   "Only accounts this server's operator has listed can open it.",
+  signInButton: "Sign in",
+  expiredTitle: "Your session ended",
+  expiredBody:  "Sign in again to keep reading.",
+  refusedTitle: "Not an administrator here",
+  refusedBody:  "This account is signed in, but this server's operator has not listed it as an administrator.",
+  noIssuerTitle: "No sign-in issuer configured",
+  noIssuerBody:  "This server serves no default_issuer at /config.json, so the console cannot start a sign-in. Set --default-issuer and restart.",
+  insecureTitle: "Sign-in needs a secure page",
+  insecureBody:  "Browsers only allow the cryptography this sign-in uses over https, or on localhost. Reach the console over https and try again.",
+  failedTitle:  "Sign-in did not complete",
+  noDbTitle:    "No history database",
+  noDbBody:     "The console reads answers from the file given to --history. Restart the server with --history game.db and the answers players leave will show up here.",
+  readFailed:   "Could not read the history database.",
+  noAnswers:    "No answers yet. They arrive when a player rates a finished game.",
+  noMatches:    "No answers match these filters.",
+  noComment:    "Rated, no comment.",
+  won: "won", lost: "lost", unknown: "no result",
+  guest: "guest",
+  minutes: (m) => `${m} min`,
+  underAMinute: "<1 min",
+  noLength: "length not recorded",
+  seats: (n) => (n === 1 ? "1 seat" : `${n} seats`),
+  countLine: (n, avg) => `<b>${n}</b> ${n === 1 ? "answer" : "answers"} &middot; <b>${avg}</b> average`,
+  verdictSplit: (cut, fast, slow) =>
+    `Games up to ${cut} average ${fast}. Longer ones average ${slow}.`,
+  verdictFlat: (avg) =>
+    `Length is not separating the ratings yet — both halves average ${avg}.`,
+  /* Name the real constraint. When every game recorded a length, the
+     reason is the sample size, not the missing lengths. */
+  verdictThin: (have, total, needed) => have === total
+    ? `Not enough answers to compare lengths yet — ${have} so far, and this needs ${needed}.`
+    : `Not enough answers to compare lengths yet — ${have} of ${total} recorded a length, and this needs ${needed}.`,
+};
+
+const CLIENT_ID = "parcello";              /* same OIDC client as the game client */
+const REDIRECT = location.origin + "/admin";
+const K_VERIFIER = "parcello_admin_pkce";
+const K_STATE = "parcello_admin_state";
+/* Below this many rated games with a recorded length, the comparison is
+   noise and the page says so instead of drawing a conclusion. */
+const MIN_SAMPLE = 12, MIN_PER_SIDE = 4, MIN_GAP = 0.3;
+
+const $ = (id) => document.getElementById(id);
+let ISSUER = null;
+let TOKEN = null;          /* memory only, never stored (ADR-0038) */
+let ENTRIES = [];
+const filters = { ratings: new Set(), commentsOnly: false };
+
+/* ---------- sign-in (PKCE authorization code, full-page redirect) ---------- */
+
+function randomUrlSafe(bytes) {
+  const raw = crypto.getRandomValues(new Uint8Array(bytes));
+  return btoa(String.fromCharCode(...raw)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function pkceChallenge(verifier) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function discover(issuer) {
+  const base = issuer.replace(/\/+$/, "");
+  const resp = await fetch(base + "/.well-known/openid-configuration");
+  if (!resp.ok) throw new Error("discovery failed: " + resp.status);
+  return resp.json();
+}
+
+async function signIn() {
+  if (!ISSUER) return gate(S.noIssuerTitle, S.noIssuerBody, false);
+  /* crypto.subtle only exists in a secure context. Never fall back to a
+     plain challenge - that would silently weaken PKCE. */
+  if (!window.isSecureContext || !crypto.subtle) {
+    return gate(S.insecureTitle, S.insecureBody, false);
+  }
+  try {
+    const doc = await discover(ISSUER);
+    const verifier = randomUrlSafe(32);
+    const state = randomUrlSafe(16);
+    sessionStorage.setItem(K_VERIFIER, verifier);
+    sessionStorage.setItem(K_STATE, state);
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT,
+      scope: "openid profile",
+      state,
+      code_challenge: await pkceChallenge(verifier),
+      code_challenge_method: "S256",
+    });
+    location.assign(doc.authorization_endpoint + "?" + query);
+  } catch (e) {
+    gate(S.failedTitle, String(e && e.message ? e.message : e), true);
+  }
+}
+
+/** Redeems the code the issuer redirected back with. Returns the id_token. */
+async function exchange(params) {
+  const verifier = sessionStorage.getItem(K_VERIFIER);
+  const expected = sessionStorage.getItem(K_STATE);
+  sessionStorage.removeItem(K_VERIFIER);
+  sessionStorage.removeItem(K_STATE);
+  /* Drop code and state from the address bar before anything else runs. */
+  history.replaceState({}, "", REDIRECT);
+  if (!verifier || !expected || params.get("state") !== expected) {
+    throw new Error("the sign-in reply did not match this browser's request");
+  }
+  const doc = await discover(ISSUER);
+  const resp = await fetch(doc.token_endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: params.get("code"),
+      redirect_uri: REDIRECT,
+      client_id: CLIENT_ID,
+      code_verifier: verifier,
+    }),
+  });
+  if (!resp.ok) throw new Error("token exchange failed: " + resp.status);
+  const grant = await resp.json();
+  if (!grant.id_token) throw new Error("the identity provider returned no id_token");
+  return grant.id_token;
+}
+
+/* ---------- screens ---------- */
+
+function gate(title, body, showButton) {
+  $("console").hidden = true;
+  $("stats").hidden = true;
+  $("gate").hidden = false;
+  $("gate-title").textContent = title;
+  $("gate-body").textContent = body;
+  $("gate-action").hidden = !showButton;
+}
+
+/* ---------- formatting ---------- */
+
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+const UNITS = [["year", 31536000], ["month", 2592000], ["day", 86400], ["hour", 3600], ["minute", 60]];
+
+function ago(unixSeconds) {
+  const delta = unixSeconds - Date.now() / 1000;
+  for (const [unit, secs] of UNITS) {
+    if (Math.abs(delta) >= secs) return rtf.format(Math.round(delta / secs), unit);
+  }
+  return rtf.format(0, "minute");
+}
+
+function lengthLabel(secs) {
+  if (secs == null) return S.noLength;
+  const minutes = Math.round(secs / 60);
+  return minutes < 1 ? S.underAMinute : S.minutes(minutes);
+}
+
+/** Opaque subjects are long, and the scheme prefix is the same on every
+    row. What matters here is only "the same person again", so show a
+    recognisable head of the subject; the full id stays in the title. */
+function shortAuthor(id) {
+  const subject = id.replace(/^(id|hs256|guest):/, "");
+  return subject.length > 12 ? subject.slice(0, 11) + "…" : subject;
+}
+
+const mean = (nums) => nums.reduce((a, b) => a + b, 0) / nums.length;
+const oneDecimal = (n) => n.toFixed(1);
+
+/* ---------- render ---------- */
+
+function visible() {
+  return ENTRIES.filter((e) =>
+    (filters.ratings.size === 0 || filters.ratings.has(e.rating)) &&
+    (!filters.commentsOnly || (e.comment && e.comment.trim() !== "")));
+}
+
+function renderStats() {
+  const stats = $("stats");
+  if (ENTRIES.length === 0) { stats.hidden = true; return; }
+  stats.hidden = false;
+  stats.innerHTML = S.countLine(ENTRIES.length, oneDecimal(mean(ENTRIES.map((e) => e.rating))));
+}
+
+/** Strip plot: one tick per answer at its game's length, stacked into the
+    lowest free row so near-equal lengths stay countable. */
+function renderPlot(entries) {
+  const plot = $("plot"), axis = $("axis");
+  plot.textContent = ""; axis.textContent = "";
+
+  const timed = entries.filter((e) => e.duration_secs != null)
+    .sort((a, b) => a.duration_secs - b.duration_secs);
+  const maxMinutes = timed.length ? Math.max(...timed.map((e) => e.duration_secs / 60)) : 0;
+  const span = Math.max(30, Math.ceil(maxMinutes / 15) * 15);
+
+  for (let m = 0; m <= span; m += 15) {
+    const tick = document.createElement("div");
+    tick.className = m === span ? "tick last" : "tick";
+    tick.style.left = (m / span) * 100 + "%";
+    const label = document.createElement("span");
+    label.textContent = m === span ? S.minutes(m) : String(m);
+    tick.append(label);
+    axis.append(tick);
+  }
+
+  const ROW_H = 15, MAX_ROWS = 6, GAP = 1.2;
+  const lastX = [];
+  let deepest = 0;
+  timed.forEach((entry, i) => {
+    const x = (entry.duration_secs / 60 / span) * 100;
+    let row = 0;
+    while (row < MAX_ROWS && lastX[row] !== undefined && x - lastX[row] < GAP) row++;
+    row = Math.min(row, MAX_ROWS - 1);
+    lastX[row] = x;
+    deepest = Math.max(deepest, row);
+
+    const mark = document.createElement("i");
+    mark.className = "mark";
+    mark.style.left = x + "%";
+    mark.style.bottom = row * ROW_H + "px";
+    mark.style.setProperty("--mark", `var(--r${entry.rating})`);
+    mark.style.setProperty("--i", String(i));
+    plot.append(mark);
+  });
+  plot.style.height = Math.max(40, (deepest + 1) * ROW_H + 14) + "px";
+
+  renderVerdict(timed, entries.length);
+}
+
+function renderVerdict(timed, total) {
+  const verdict = $("verdict");
+  const half = Math.floor(timed.length / 2);
+  if (timed.length < MIN_SAMPLE || half < MIN_PER_SIDE) {
+    verdict.className = "verdict thin";
+    verdict.textContent = S.verdictThin(timed.length, total, MIN_SAMPLE);
+    return;
+  }
+  const fast = mean(timed.slice(0, half).map((e) => e.rating));
+  const slow = mean(timed.slice(timed.length - half).map((e) => e.rating));
+  verdict.className = "verdict";
+  verdict.textContent = Math.abs(fast - slow) < MIN_GAP
+    ? S.verdictFlat(oneDecimal(mean(timed.map((e) => e.rating))))
+    : S.verdictSplit(lengthLabel(timed[half - 1].duration_secs), oneDecimal(fast), oneDecimal(slow));
+}
+
+function renderLegend() {
+  const legend = $("legend");
+  legend.textContent = "";
+  for (let rating = 1; rating <= 5; rating++) {
+    const swatch = document.createElement("i");
+    swatch.style.background = `var(--r${rating})`;
+    legend.append(swatch, document.createTextNode(String(rating)));
+  }
+}
+
+function slipFor(entry, index) {
+  const li = document.createElement("li");
+  li.className = "slip";
+  li.style.setProperty("--i", String(Math.min(index, 16)));
+  li.style.setProperty("--mark", `var(--r${entry.rating})`);
+
+  const punch = document.createElement("div");
+  punch.className = "punch";
+  punch.setAttribute("aria-hidden", "true");
+  for (let n = 1; n <= 5; n++) {
+    const hole = document.createElement("i");
+    if (n <= entry.rating) hole.className = "on";
+    punch.append(hole);
+  }
+
+  const body = document.createElement("div");
+  const head = document.createElement("p");
+  head.className = "head";
+
+  const score = document.createElement("span");
+  score.className = "score";
+  score.textContent = `${entry.rating}/5`;
+
+  const context = document.createElement("span");
+  context.textContent = `${entry.room} · ${lengthLabel(entry.duration_secs)} · ${S.seats(entry.seats)}`;
+
+  const outcome = document.createElement("span");
+  outcome.className = "outcome " + entry.outcome;
+  outcome.textContent = S[entry.outcome];
+
+  const author = document.createElement("span");
+  author.className = "author";
+  author.textContent = shortAuthor(entry.author);
+  author.title = entry.author;
+
+  const when = document.createElement("span");
+  when.className = "when";
+  when.textContent = ago(entry.at);
+  when.title = new Date(entry.at * 1000).toLocaleString();
+
+  head.append(score, context, outcome, author, when);
+
+  const said = document.createElement("p");
+  const comment = (entry.comment || "").trim();
+  if (comment === "") {
+    said.className = "said none";
+    said.textContent = S.noComment;
+  } else {
+    said.className = "said";
+    said.textContent = `“${comment}”`;
+  }
+
+  body.append(head, said);
+  li.append(punch, body);
+  return li;
+}
+
+function render() {
+  const shown = visible();
+  const list = $("slips");
+  list.textContent = "";
+  shown.forEach((entry, i) => list.append(slipFor(entry, i)));
+
+  const empty = $("empty");
+  empty.hidden = shown.length > 0;
+  empty.textContent = ENTRIES.length === 0 ? S.noAnswers : S.noMatches;
+
+  renderPlot(shown);
+}
+
+/* ---------- filters ---------- */
+
+function wireFilters() {
+  document.querySelectorAll("[data-rating]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const rating = Number(chip.dataset.rating);
+      const on = !filters.ratings.has(rating);
+      if (on) filters.ratings.add(rating); else filters.ratings.delete(rating);
+      chip.setAttribute("aria-pressed", String(on));
+      render();
+    });
+  });
+  $("only-comments").addEventListener("click", (e) => {
+    filters.commentsOnly = !filters.commentsOnly;
+    e.currentTarget.setAttribute("aria-pressed", String(filters.commentsOnly));
+    render();
+  });
+  $("clear").addEventListener("click", () => {
+    filters.ratings.clear();
+    filters.commentsOnly = false;
+    document.querySelectorAll(".chip[aria-pressed]").forEach((c) => c.setAttribute("aria-pressed", "false"));
+    render();
+  });
+}
+
+/* ---------- boot ---------- */
+
+async function load() {
+  const resp = await fetch("/admin/api/feedback", { headers: { authorization: "Bearer " + TOKEN } });
+  if (resp.status === 401) return gate(S.expiredTitle, S.expiredBody, true);
+  if (resp.status === 403) return gate(S.refusedTitle, S.refusedBody, false);
+  if (!resp.ok) {
+    const detail = await resp.json().catch(() => ({}));
+    return gate(S.readFailed, detail.error || "", false);
+  }
+  const payload = await resp.json();
+  if (!payload.configured) return gate(S.noDbTitle, S.noDbBody, false);
+
+  ENTRIES = payload.entries;
+  $("gate").hidden = true;
+  $("console").hidden = false;
+  renderStats();
+  renderLegend();
+  render();
+}
+
+async function boot() {
+  $("signin").textContent = S.signInButton;
+  $("signin").addEventListener("click", signIn);
+  wireFilters();
+
+  const config = await fetch("/config.json").then((r) => r.json()).catch(() => ({}));
+  ISSUER = config.default_issuer || null;
+
+  const params = new URLSearchParams(location.search);
+  if (params.get("code")) {
+    try {
+      TOKEN = await exchange(params);
+    } catch (e) {
+      return gate(S.failedTitle, String(e && e.message ? e.message : e), true);
+    }
+    return load();
+  }
+  if (params.get("error")) {
+    history.replaceState({}, "", REDIRECT);
+    return gate(S.failedTitle, params.get("error_description") || params.get("error"), true);
+  }
+  gate(S.signInTitle, S.signInBody, true);
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -133,6 +133,20 @@ every game command from a spectator is refused.
 the guest sign-in path on servers that would only reject it (the Flutter
 connect screen also uses the fetch as a liveness probe for the typed
 server address).
+`--admin <subject>` (repeatable; `PARCELLO_ADMIN_SUBS` takes a comma or
+whitespace separated list) opens the read-only feedback console at
+`/admin` for those accounts (ADR-0038): every post-game survey answer,
+each shown beside the game that produced it - length, seats, and whether
+the author won. Values are OIDC subjects; a bare one is read as the
+token scheme (`id:<subject>`), which is also what the console displays,
+so an entry can be copied straight off a row. **Omit the flag and the
+console does not exist** - `/admin` answers 404, which is the default.
+Guests can never be administrators, and the answers come from the
+`--history` database, so pair the two (`--admin` alone boots with a
+warning and the console says it has nothing to read). Sign-in is the same
+OIDC client as the game, so register `<origin>/admin` as a redirect URI.
+There is deliberately no public feedback page and no voting: see ADR-0038
+for why, and `docs/security-model.md` for the rule it follows.
 `--lan` announces the server on the LAN so clients can find it without a
 URL (multicast `239.255.0.1:55888` by default, override with `--lan-maddr`
 / `--lan-port`; add `--lan-broadcast-fallback` for networks that block
@@ -627,7 +641,13 @@ model); 0037 token lifecycle + transparent session recovery (the client
 requests `offline_access`, renews the id_token before `exp` from a
 memory-only refresh token, and re-establishes a dropped socket with
 backoff and an automatic rejoin; server-side, `exp` gains a 60s
-clock-skew leeway shared by both verifiers).
+clock-skew leeway shared by both verifiers);
+0038 the admin feedback console (a read-only `/admin` page and a
+`FeedbackQuery` port beside `GameHistory`, authorised by a per-server
+allowlist of subjects rather than an issuer-side role - community servers
+share an identity provider, so a role in the token would grant admin
+everywhere on it; a public, votable feedback wall was considered and
+rejected in the same ADR).
 
 ## Roadmap
 

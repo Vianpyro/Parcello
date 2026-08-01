@@ -56,6 +56,11 @@ services:
       PARCELLO_DEFAULT_ISSUER: ${PARCELLO_DEFAULT_ISSUER:-}
       # SQLite history (ADR-0005) on the named volume below.
       PARCELLO_HISTORY: data/parcello.db
+      # Read-only feedback console at /admin (ADR-0038): a comma-separated
+      # list of the OIDC subjects allowed in. Leave empty and /admin 404s.
+      # Register <your origin>/admin as a redirect URI first
+      # (docs/deployment.md, step 3).
+      PARCELLO_ADMIN_SUBS: ${PARCELLO_ADMIN_SUBS:-}
       # Room defaults; hosts can change them per room (ADR-0015). 0 = off.
       PARCELLO_TURN_TIMEOUT: ${PARCELLO_TURN_TIMEOUT:-25}
       PARCELLO_GAME_TIMEOUT: ${PARCELLO_GAME_TIMEOUT:-3600}

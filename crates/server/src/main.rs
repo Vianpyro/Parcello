@@ -3,6 +3,7 @@
 //! Boot sequence: parse args -> resolve the server-wide mod set (ADR-0004)
 //! -> bind -> serve `/ws`. Rooms are created on demand by client connections.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,7 +12,9 @@ use tower_http::services::{ServeDir, ServeFile};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+use parcello_server::admin::parse_admin_subs;
 use parcello_server::auth::CompositeVerifier;
+use parcello_server::feedback::{FeedbackQuery, SqliteFeedback};
 use parcello_server::history::{GameHistory, MemoryHistory, SqliteHistory};
 use parcello_server::ranked::{
     MemoryRatings, RankedConfig, RankedService, RatingStore, SqliteRatings,
@@ -115,6 +118,16 @@ struct Args {
     #[arg(long, env = "PARCELLO_SHOWCASE")]
     showcase: bool,
 
+    /// Token subject (`sub`) allowed into the admin feedback console at
+    /// `/admin` (ADR-0038). Repeat for several administrators. Omit
+    /// entirely and the console does not exist: every `/admin` route
+    /// answers 404. Deliberately a per-server list rather than a role in
+    /// the token, because community servers share an identity provider -
+    /// an issuer-side role would grant admin on every server on it.
+    /// The env form takes a comma or whitespace separated list.
+    #[arg(long = "admin", env = "PARCELLO_ADMIN_SUBS")]
+    admins: Vec<String>,
+
     /// Enable LAN discovery announcements (multicast) for local network
     /// game browsing.
     #[arg(long, env = "PARCELLO_LAN")]
@@ -182,6 +195,51 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     Ok(())
+}
+
+/// What `--admin` produced at boot: who may read, and what there is to read.
+struct AdminConsole {
+    admins: HashSet<String>,
+    feedback: Option<Arc<dyn FeedbackQuery>>,
+}
+
+/// Admin console wiring (ADR-0038).
+///
+/// Each `--admin` value is itself split, so a repeated flag and a
+/// comma-separated env list both work. No subjects = no console, which is
+/// the default; the read side additionally needs `--history` to have
+/// anything to show, and says so at boot rather than silently.
+///
+/// # Errors
+/// When the history database cannot be opened for reading.
+fn admin_console(args: &Args) -> anyhow::Result<AdminConsole> {
+    let admins: HashSet<String> = args
+        .admins
+        .iter()
+        .flat_map(|raw| parse_admin_subs(raw))
+        .collect();
+    if admins.is_empty() {
+        return Ok(AdminConsole {
+            admins,
+            feedback: None,
+        });
+    }
+    info!(
+        administrators = admins.len(),
+        "admin console enabled at /admin"
+    );
+    let Some(path) = &args.history else {
+        warn!("--admin without --history: the console has no answers to read");
+        return Ok(AdminConsole {
+            admins,
+            feedback: None,
+        });
+    };
+    let query: Arc<dyn FeedbackQuery> = Arc::new(SqliteFeedback::open(path)?);
+    Ok(AdminConsole {
+        admins,
+        feedback: Some(query),
+    })
 }
 
 /// Boot-time wiring: resolve the default mod set, choose the identity
@@ -263,6 +321,8 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
         None
     };
 
+    let console = admin_console(args)?;
+
     // `0` = feature off, anything else enables it with that many seconds.
     let timeout = |secs: u64, label: &str| {
         (secs != 0).then(|| {
@@ -284,5 +344,7 @@ fn build_state(args: &Args) -> anyhow::Result<AppState> {
         ranked,
         guest_allowed: args.insecure_guest,
         showcase: args.showcase,
+        admins: Arc::new(console.admins),
+        feedback: console.feedback,
     })
 }
