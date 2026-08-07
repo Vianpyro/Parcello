@@ -148,5 +148,15 @@
     "canvaskit_brotli_kb": 1594.5,
     "total_brotli_kb": 3321.2,
     "performance_score": 99.0
+  },
+  {
+    "date": "2026-08-07T13:57:27+00:00",
+    "sha": "c6fa22672b809b846447e50931156988b65a0739",
+    "run_url": "https://github.com/Vianpyro/Parcello/actions/runs/31184770053",
+    "js_brotli_kb": 705.3,
+    "fonts_brotli_kb": 978.2,
+    "canvaskit_brotli_kb": 1594.5,
+    "total_brotli_kb": 3321.3,
+    "performance_score": 100
   }
 ]
